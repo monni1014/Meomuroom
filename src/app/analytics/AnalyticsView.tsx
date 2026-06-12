@@ -51,33 +51,46 @@ export default function AnalyticsPage() {
     fetchReservations();
   }, []);
 
+  const now = new Date();
+  const thisMonthReservations = reservations.filter(res => {
+    const d = new Date(res.startTime);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  });
+
   // 1. Calculate PIE_DATA based on actual purposes (취소 건은 실제 이용이 아니므로 제외)
-  const purposeCounts: Record<string, number> = {};
-  reservations
+  const purposeRevenue: Record<string, number> = {};
+  let totalPurposeRevenue = 0;
+  thisMonthReservations
     .filter((res) => res.status !== "CANCELLED")
     .forEach((res) => {
       const purpose = res.usageLog?.purpose || UNCATEGORIZED_LABEL;
-      const headCount = res.usageLog?.headCount || 1;
-      purposeCounts[purpose] = (purposeCounts[purpose] || 0) + headCount;
+      const price = (res.price || 0) + (res.usageLog?.extraPrice || 0);
+      purposeRevenue[purpose] = (purposeRevenue[purpose] || 0) + price;
+      totalPurposeRevenue += price;
     });
 
-  const pieData = Object.keys(purposeCounts).length > 0
-    ? Object.entries(purposeCounts).map(([name, value]) => ({ name, value }))
+  const pieData = Object.keys(purposeRevenue).length > 0
+    ? Object.entries(purposeRevenue)
+        .sort((a, b) => b[1] - a[1]) // 매출 높은 순 정렬
+        .map(([name, value]) => ({ 
+          name, 
+          value, 
+          percentage: totalPurposeRevenue > 0 ? Math.round((value / totalPurposeRevenue) * 100) : 0 
+        }))
     : [
-        { name: "스터디", value: 1 },
-        { name: "회의", value: 1 },
-        { name: "기타", value: 1 }
+        { name: "데이터 없음", value: 1, percentage: 100 }
       ];
 
-  // 2. Calculate BAR_DATA (Weekly sales for June 2026/current booking months)
+  // 2. Calculate BAR_DATA (Weekly sales for current booking months)
   const weekRevenue = [0, 0, 0, 0]; // 1, 2, 3, 4th weeks
-  reservations.forEach((res) => {
+  thisMonthReservations.forEach((res) => {
     const date = new Date(res.startTime);
     const day = date.getDate();
-    if (day <= 7) weekRevenue[0] += res.price;
-    else if (day <= 14) weekRevenue[1] += res.price;
-    else if (day <= 21) weekRevenue[2] += res.price;
-    else weekRevenue[3] += res.price;
+    const price = (res.price || 0) + (res.usageLog?.extraPrice || 0);
+    if (day <= 7) weekRevenue[0] += price;
+    else if (day <= 14) weekRevenue[1] += price;
+    else if (day <= 21) weekRevenue[2] += price;
+    else weekRevenue[3] += price;
   });
 
   const barData = [
@@ -88,7 +101,7 @@ export default function AnalyticsPage() {
   ];
 
   // 3. Dynamic scenario percentages based on accumulated sales
-  const totalRevenue = reservations.reduce((sum, res) => sum + res.price, 0);
+  const totalRevenue = thisMonthReservations.reduce((sum, res) => sum + (res.price || 0) + (res.usageLog?.extraPrice || 0), 0);
 
   // Targets: Scenario 1 (Conservative: 15만 원), Scenario 2 (Standard: 35만 원), Scenario 3 (Aggressive: 60만 원)
   const t1 = 150000;
@@ -116,16 +129,18 @@ export default function AnalyticsPage() {
       </header>
 
       {/* Revenue Summary Banner */}
-      <div className="p-4 bg-gradient-to-br from-indigo-900 to-indigo-950 text-white rounded-2xl shadow-md space-y-1">
-        <p className="text-[11px] font-bold tracking-wider text-indigo-200 uppercase">이달의 총 매출액</p>
-        <p className="text-3xl font-extrabold">{totalRevenue.toLocaleString()}원</p>
-        <p className="text-[10px] text-indigo-300 mt-2 font-medium">네이버 및 스페이스클라우드 webhook 실시간 종합 집계액</p>
+      <div className="p-5 bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500 text-white rounded-2xl shadow-lg shadow-indigo-200/50 space-y-1 relative overflow-hidden">
+        {/* 장식용 빛 반사 효과 */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
+        <p className="text-[11px] font-bold tracking-wider text-white/80 uppercase relative z-10">이달의 총 매출액</p>
+        <p className="text-3xl font-extrabold relative z-10">{totalRevenue.toLocaleString()}원</p>
+        <p className="text-[10px] text-white/70 mt-2 font-medium relative z-10">네이버 및 스페이스클라우드 webhook 실시간 종합 집계액</p>
       </div>
 
       {/* Purpose Ratio Section */}
       <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
         <h2 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-1.5">
-          <span>이번 달 이용 목적별 비중 (인원 기준)</span>
+          <span>이번 달 이용 목적별 비중 (매출 기준)</span>
         </h2>
         <div className="h-48 w-full flex items-center justify-center">
           {isMounted ? (
@@ -144,19 +159,24 @@ export default function AnalyticsPage() {
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value) => `${value}명`} />
+                <Tooltip 
+                  formatter={(value) => `${Number(value).toLocaleString()}원`} 
+                  contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)" }}
+                />
               </PieChart>
             </ResponsiveContainer>
           ) : (
             <span className="text-xs text-slate-400 font-semibold animate-pulse">차트를 로딩하는 중...</span>
           )}
         </div>
-        <div className="grid grid-cols-3 gap-y-2 gap-x-4 justify-center mt-3 pt-3 border-t border-slate-50">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-y-3 gap-x-4 justify-center mt-3 pt-4 border-t border-slate-50">
           {pieData.map((entry, index) => (
             <div key={entry.name} className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-              <span className="truncate max-w-[60px]">{entry.name}</span>
-              <span className="text-slate-400 font-normal">({entry.value}명)</span>
+              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+              <span className="truncate">{entry.name}</span>
+              <span className="text-slate-500 font-medium whitespace-nowrap">
+                {entry.value.toLocaleString()}원 <span className="text-slate-400 font-normal">({entry.percentage}%)</span>
+              </span>
             </div>
           ))}
         </div>

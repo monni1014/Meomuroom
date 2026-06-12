@@ -8,7 +8,7 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const { customerName, phone, startTime, endTime, price, paymentMethod, isPaid, headCount, reservedHeadCount, coffeeCount, purpose, detail } = body;
+    const { customerName, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime } = body;
 
     // First check if reservation exists
     const existing = await prisma.reservation.findUnique({
@@ -28,11 +28,16 @@ export async function PATCH(
     if (startTime !== undefined) updateData.startTime = new Date(startTime);
     if (endTime !== undefined) updateData.endTime = new Date(endTime);
     if (price !== undefined) updateData.price = Number(price);
+    if (discount !== undefined) updateData.discount = Number(discount);
     if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod;
     if (isPaid !== undefined) updateData.isPaid = Boolean(isPaid);
+    if (memo !== undefined) updateData.memo = memo;
+    if (complaints !== undefined) updateData.complaints = complaints;
+    if (roomName !== undefined) updateData.roomName = roomName;
+    if (isCleanUpBad !== undefined) updateData.isCleanUpBad = Boolean(isCleanUpBad);
 
     // Prepare usage data update
-    if (headCount !== undefined || reservedHeadCount !== undefined || coffeeCount !== undefined || purpose !== undefined || detail !== undefined) {
+    if (headCount !== undefined || reservedHeadCount !== undefined || coffeeCount !== undefined || purpose !== undefined || detail !== undefined || extraPrice !== undefined || isExtraPaid !== undefined || extraPaymentMethod !== undefined || extraTime !== undefined) {
       if (existing.usageLog) {
         updateData.usageLog = {
           update: {
@@ -41,6 +46,10 @@ export async function PATCH(
             coffeeCount: coffeeCount !== undefined ? Number(coffeeCount) : undefined,
             purpose: purpose !== undefined ? purpose : undefined,
             detail: detail !== undefined ? detail : undefined,
+            extraPrice: extraPrice !== undefined ? Number(extraPrice) : undefined,
+            isExtraPaid: isExtraPaid !== undefined ? Boolean(isExtraPaid) : undefined,
+            extraPaymentMethod: extraPaymentMethod !== undefined ? extraPaymentMethod : undefined,
+            extraTime: extraTime !== undefined ? Number(extraTime) : undefined,
           },
         };
       } else {
@@ -51,6 +60,10 @@ export async function PATCH(
             coffeeCount: coffeeCount !== undefined ? Number(coffeeCount) : 0,
             purpose: purpose !== undefined ? purpose : null,
             detail: detail !== undefined ? detail : null,
+            extraPrice: extraPrice !== undefined ? Number(extraPrice) : null,
+            isExtraPaid: isExtraPaid !== undefined ? Boolean(isExtraPaid) : false,
+            extraPaymentMethod: extraPaymentMethod !== undefined ? extraPaymentMethod : null,
+            extraTime: extraTime !== undefined ? Number(extraTime) : 0,
           },
         };
       }
@@ -63,6 +76,14 @@ export async function PATCH(
         usageLog: true,
       },
     });
+
+    // Sync isCleanUpBad across all reservations for this customer (if name is valid)
+    if (isCleanUpBad !== undefined && updated.customerName && updated.customerName !== "미지정") {
+      await prisma.reservation.updateMany({
+        where: { customerName: updated.customerName },
+        data: { isCleanUpBad: Boolean(isCleanUpBad) },
+      });
+    }
 
     return NextResponse.json(updated);
   } catch (error) {

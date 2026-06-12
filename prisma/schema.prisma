@@ -23,6 +23,9 @@ model Reservation {
   paymentMethod String?  @default("온라인")     // "현장카드" | "계좌이체" | "온라인"
   isPaid        Boolean  @default(true)         // 결제 완료 여부 (이체 등 미결제는 false)
   emailId      String?   @unique
+  memo         String?   // 자유 기입 비고란
+  complaints   String?   // 고객 불만사항 (CS 관리용 별도 항목)
+  isCleanUpBad Boolean  @default(false)   // 정리 상태 불량 여부 (블랙리스트 기능)
 
   usageLog     UsageLog?
 }
@@ -36,6 +39,10 @@ model UsageLog {
   coffeeCount   Int         @default(0)
   purpose       String?     // 대분류(고정): 교육/보드게임/사적모임/촬영/회사회의/기타 (null=미입력)
   detail        String?     // 세부내용(자유입력): "보험교육", "유튜브 촬영" 등
+  extraTime     Int         @default(0)   // 추가된 시간 (시간 단위)
+  extraPrice    Int?        // 확정된 추가 결제 금액
+  isExtraPaid   Boolean     @default(false) // 추가 금액 결제 여부
+  extraPaymentMethod String? // 추가 금액 결제 수단 (예: 계좌이체, 카드결제)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 }

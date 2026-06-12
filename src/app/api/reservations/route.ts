@@ -23,7 +23,24 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { source, roomName, customerName, phone, startTime, endTime, price, headCount, coffeeCount, purpose, detail, paymentMethod, isPaid } = body;
+    const { source, roomName, customerName, phone, startTime, endTime, price, headCount, coffeeCount, purpose, detail, paymentMethod, isPaid, memo, discount } = body;
+
+    // Check if the same person (by name or phone) has a previous 'isCleanUpBad' record
+    let autoCleanUpBad = false;
+    if (customerName || phone) {
+      const badRecord = await prisma.reservation.findFirst({
+        where: {
+          isCleanUpBad: true,
+          OR: [
+            ...(customerName ? [{ customerName: customerName }] : []),
+            ...(phone ? [{ phone: phone }] : []),
+          ]
+        }
+      });
+      if (badRecord) {
+        autoCleanUpBad = true;
+      }
+    }
 
     const reservation = await prisma.reservation.create({
       data: {
@@ -34,8 +51,11 @@ export async function POST(request: NextRequest) {
         startTime: new Date(startTime),
         endTime: new Date(endTime),
         price: Number(price) || 0,
+        discount: Number(discount) || 0,
         paymentMethod: paymentMethod || "온라인",
         isPaid: isPaid !== undefined ? Boolean(isPaid) : true,
+        isCleanUpBad: autoCleanUpBad,
+        memo: memo || null,
         usageLog: {
           create: {
             headCount: Number(headCount) || 1,

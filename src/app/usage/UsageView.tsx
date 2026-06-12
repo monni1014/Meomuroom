@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Check, Search, Users, Coffee, Tag, AlertCircle, Pencil, ChevronDown } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, Search, Users, Coffee, Tag, AlertCircle, Pencil, ChevronDown, Wallet, Clock } from "lucide-react";
 import { MAJOR_CATEGORIES, SUB_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
 import TimeSelect from "@/components/TimeSelect";
 
@@ -17,15 +18,22 @@ interface UsageLog {
 interface Reservation {
   id: string;
   source: string;
+  roomName: string;
   customerName: string | null;
   startTime: string;
   endTime: string;
   price: number;
+  paymentMethod: string | null;
+  memo: string | null;
+  complaints: string | null;
   emailId: string | null; // null = 수기 입력
+  isPaid: boolean;
+  isCleanUpBad: boolean;
   usageLog: UsageLog | null;
 }
 
 export default function UsagePage() {
+  const router = useRouter();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [selectedResId, setSelectedResId] = useState<string>("");
   const [isSelectOpen, setIsSelectOpen] = useState(false); // 대상선택 커스텀 드롭다운 열림
@@ -37,16 +45,32 @@ export default function UsagePage() {
   const [editDate, setEditDate] = useState("");   // 이용 날짜 (수정)
   const [editStart, setEditStart] = useState(""); // 시작 시간 (수정)
   const [editEnd, setEditEnd] = useState("");     // 종료 시간 (수정)
+  const [editRoomName, setEditRoomName] = useState(""); // 공간명 (수정)
+  const [currentPrice, setCurrentPrice] = useState(0); // 현재 표시/수정될 결제 금액
+  const [memo, setMemo] = useState(""); // 관리자 비고란
+  const [complaints, setComplaints] = useState(""); // 고객 불만사항
+  const [isPaid, setIsPaid] = useState(true); // 결제여부
+  const [isCleanUpBad, setIsCleanUpBad] = useState(false); // 정리불량
+  const [isExtraPaid, setIsExtraPaid] = useState(false); // 추가 금액 결제 여부
+  const [extraPaymentMethod, setExtraPaymentMethod] = useState<string>("계좌이체"); // 추가 금액 결제 수단
+  const [extraTime, setExtraTime] = useState(0); // 추가된 시간 (시간 단위)
+  const [originalPrice, setOriginalPrice] = useState(0); // 수동 수정 가능한 원래 금액
+  const [extraPrice, setExtraPrice] = useState(0); // 수동 수정 가능한 추가 발생 금액
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
 
-  const fetchReservations = async () => {
+  const fetchReservations = async (preserveId?: string) => {
     try {
       const res = await fetch("/api/reservations");
       if (res.ok) {
         const data: Reservation[] = await res.json();
         setReservations(data);
+
+        // 저장 후에는 현재 선택을 유지하고 싶을 때
+        if (preserveId && data.some(r => r.id === preserveId)) {
+          return;
+        }
 
         // Find a reservation in progress or closest upcoming, set as initial choice
         if (data.length > 0) {
@@ -73,6 +97,43 @@ export default function UsagePage() {
           setEditDate(toDateInput(defaultRes.startTime));
           setEditStart(toTimeInput(defaultRes.startTime));
           setEditEnd(toTimeInput(defaultRes.endTime));
+          setEditRoomName(defaultRes.roomName || "머무룸1");
+          setCurrentPrice(defaultRes.price || 0);
+          setMemo(defaultRes.memo || "");
+          setComplaints(defaultRes.complaints || "");
+          setIsPaid(defaultRes.isPaid ?? true);
+          setIsCleanUpBad(defaultRes.isCleanUpBad ?? false);
+          setIsExtraPaid(defaultRes.usageLog?.isExtraPaid ?? false);
+          setExtraPaymentMethod(defaultRes.usageLog?.extraPaymentMethod || "계좌이체");
+          setExtraTime(defaultRes.usageLog?.extraTime || 0);
+
+          // 초기 추가 금액 계산 로직
+          const savedExtra = defaultRes.usageLog?.extraPrice;
+          
+          let initialRate = 0;
+          const sDate = new Date(defaultRes.startTime);
+          if (defaultRes.source === "naver") {
+            const isWeekend = sDate.getDay() === 0 || sDate.getDay() === 6;
+            initialRate = isWeekend ? 2500 : 2000;
+          } else if (defaultRes.source === "spacecloud") {
+            const isWeekend = sDate.getDay() === 0 || sDate.getDay() === 6;
+            const holidays = ["01-01", "02-16", "02-17", "02-18", "03-01", "03-02", "05-05", "05-24", "05-25", "06-06", "08-15", "09-24", "09-25", "09-26", "10-03", "10-09", "12-25"];
+            const isHoliday = holidays.includes(defaultRes.startTime.substring(5, 10));
+            initialRate = (isWeekend || isHoliday) ? 3000 : 2500;
+          }
+          const eDate = new Date(defaultRes.endTime);
+          let durationHours = (eDate.getTime() - sDate.getTime()) / (1000 * 60 * 60);
+          if (durationHours <= 0) durationHours = 1;
+          const extraPeople = Math.max(0, (defaultRes.usageLog?.headCount || 2) - (defaultRes.usageLog?.reservedHeadCount ?? defaultRes.usageLog?.headCount ?? 0));
+          
+          let calculatedExtra = 0;
+          if (savedExtra != null) {
+            calculatedExtra = savedExtra;
+          } else {
+            calculatedExtra = extraPeople * initialRate * durationHours;
+          }
+          setExtraPrice(calculatedExtra);
+          setOriginalPrice((defaultRes.price || 0) - calculatedExtra);
         }
       }
     } catch (err) {
@@ -91,15 +152,162 @@ export default function UsagePage() {
     setSelectedResId(resId);
     const found = reservations.find((r) => r.id === resId);
     if (found) {
-      setHeadCount(found.usageLog?.headCount || 2);
-      setReserved(found.usageLog?.reservedHeadCount ?? found.usageLog?.headCount ?? 0);
+      let initialRate = 0;
+      const sDate = new Date(found.startTime);
+      if (found.source === "naver") {
+        const isWeekend = sDate.getDay() === 0 || sDate.getDay() === 6;
+        initialRate = isWeekend ? 2500 : 2000;
+      } else if (found.source === "spacecloud") {
+        const isWeekend = sDate.getDay() === 0 || sDate.getDay() === 6;
+        const holidays = ["01-01", "02-16", "02-17", "02-18", "03-01", "03-02", "05-05", "05-24", "05-25", "06-06", "08-15", "09-24", "09-25", "09-26", "10-03", "10-09", "12-25"];
+        const isHoliday = holidays.includes(found.startTime.substring(5, 10));
+        initialRate = (isWeekend || isHoliday) ? 3000 : 2500;
+      } else {
+        initialRate = 2000;
+      }
+
+      const eDate = new Date(found.endTime);
+      let durationHours = (eDate.getTime() - sDate.getTime()) / (1000 * 60 * 60);
+      if (durationHours <= 0) durationHours = 1;
+
+      // 예약 인원 역산 (UsageLog가 없을 때)
+      let calculatedReservedHeadCount = 0;
+      if (found.usageLog?.reservedHeadCount) {
+        calculatedReservedHeadCount = found.usageLog.reservedHeadCount;
+      } else {
+        if (initialRate > 0) {
+          calculatedReservedHeadCount = Math.round(((found.price || 0) + (found.discount || 0)) / (initialRate * durationHours));
+        }
+        if (calculatedReservedHeadCount <= 0 || !isFinite(calculatedReservedHeadCount)) calculatedReservedHeadCount = 2; // fallback
+      }
+
+      setReserved(calculatedReservedHeadCount);
+      setHeadCount(found.usageLog?.headCount ?? calculatedReservedHeadCount);
       setCoffeeCount(found.usageLog?.coffeeCount || 0);
       setSelectedPurpose(found.usageLog?.purpose || "");
       setDetail(found.usageLog?.detail || "");
       setEditDate(toDateInput(found.startTime));
       setEditStart(toTimeInput(found.startTime));
       setEditEnd(toTimeInput(found.endTime));
+      setEditRoomName(found.roomName || "머무룸1");
+      setMemo(found.memo || "");
+      setComplaints(found.complaints || "");
+      setIsPaid(found.isPaid ?? true);
+      setIsCleanUpBad(found.isCleanUpBad ?? false);
+      setIsExtraPaid(found.usageLog?.isExtraPaid ?? false);
+      setExtraPaymentMethod(found.usageLog?.extraPaymentMethod || "계좌이체");
+      setExtraTime(found.usageLog?.extraTime || 0);
+
+      // 초기 추가 금액 계산
+      const savedExtra = found.usageLog?.extraPrice;
+      let calculatedExtra = 0;
+      if (savedExtra != null) {
+        calculatedExtra = savedExtra;
+      } else {
+        // UsageLog가 없으면 확정된 추가금이 없으므로 0
+        calculatedExtra = 0;
+      }
+      setExtraPrice(calculatedExtra);
+      setOriginalPrice((found.price || 0) - calculatedExtra);
+      setCurrentPrice(found.price || 0);
     }
+  };
+
+  const recalculateExtraPrice = (newHeadCount: number, newStart: string, newEnd: string) => {
+    if (!selectedResId) return;
+    const found = reservations.find((r) => r.id === selectedResId);
+    if (!found) return;
+
+    const startD = new Date(found.startTime);
+    let rate = 0;
+    
+    if (found.source === "naver") {
+      const isWeekend = startD.getDay() === 0 || startD.getDay() === 6;
+      rate = isWeekend ? 2500 : 2000;
+    } else if (found.source === "spacecloud") {
+      const isWeekend = startD.getDay() === 0 || startD.getDay() === 6;
+      const holidays = [
+        "01-01", "02-16", "02-17", "02-18", "03-01", "03-02", "05-05", "05-24", "05-25",
+        "06-06", "08-15", "09-24", "09-25", "09-26", "10-03", "10-09", "12-25"
+      ];
+      const isHoliday = holidays.includes(found.startTime.substring(5, 10)); // MM-DD
+      rate = (isWeekend || isHoliday) ? 3000 : 2500;
+    } else {
+      rate = 2000;
+    }
+
+    // 예약 기준 시간 (DB 원본)
+    const origStart = new Date(found.startTime);
+    const origEnd = new Date(found.endTime);
+    let currentDbDuration = (origEnd.getTime() - origStart.getTime()) / (1000 * 60 * 60);
+    let reservedHours = currentDbDuration - (found.usageLog?.extraTime || 0);
+    if (reservedHours <= 0) reservedHours = 1;
+
+    // 변경된 실제 사용 시간
+    const sDate = new Date(`1970-01-01T${newStart}:00`);
+    let eDate = new Date(`1970-01-01T${newEnd}:00`);
+    if (eDate <= sDate) {
+      eDate = new Date(`1970-01-02T${newEnd}:00`);
+    }
+    let newDurationHours = (eDate.getTime() - sDate.getTime()) / (1000 * 60 * 60);
+    if (newDurationHours <= 0) newDurationHours = 1;
+
+    const calculatedExtraTime = newDurationHours - reservedHours;
+    setExtraTime(calculatedExtraTime);
+
+    // 예약 인원
+    let reservedHeadCount = 0;
+    if (found.usageLog?.reservedHeadCount) {
+      reservedHeadCount = found.usageLog.reservedHeadCount;
+    } else {
+      if (rate > 0) {
+        reservedHeadCount = Math.round(((found.price || 0) + (found.discount || 0)) / (rate * reservedHours));
+      }
+      if (reservedHeadCount <= 0 || !isFinite(reservedHeadCount)) reservedHeadCount = 2; // fallback
+    }
+
+    // 최소 과금 인원 적용
+    let minHeadCount = 4;
+    if (found.source === "spacecloud") {
+      minHeadCount = 5;
+    }
+    const billableNewHeadCount = Math.max(minHeadCount, newHeadCount);
+    const billableReservedHeadCount = Math.max(minHeadCount, reservedHeadCount);
+
+    // 계산식: (실제인원 * 사용시간 * 요율) - (예약인원 * 예약시간 * 요율)
+    const actualValue = billableNewHeadCount * rate * newDurationHours;
+    const reservedValue = billableReservedHeadCount * rate * reservedHours;
+
+    let calculatedExtra = actualValue - reservedValue;
+    if (calculatedExtra < 0) calculatedExtra = 0; // 줄어들어도 환불 로직은 보통 없으므로 0으로 하한 설정
+
+    setExtraPrice(calculatedExtra);
+    setCurrentPrice(originalPrice + calculatedExtra);
+  };
+
+  const handleHeadCountChange = (newCount: number) => {
+    if (newCount < 0) return;
+    setHeadCount(newCount);
+    recalculateExtraPrice(newCount, editStart, editEnd);
+  };
+
+  const handleStartTimeChange = (newStart: string) => {
+    setEditStart(newStart);
+    recalculateExtraPrice(headCount, newStart, editEnd);
+  };
+
+  const handleEndTimeChange = (newEnd: string) => {
+    setEditEnd(newEnd);
+    recalculateExtraPrice(headCount, editStart, newEnd);
+  };
+
+  const addExtraTime = (hours: number) => {
+    if (!editEnd) return;
+    const pad2 = (n: number) => String(n).padStart(2, "0");
+    const eDate = new Date(`1970-01-01T${editEnd}:00`);
+    eDate.setHours(eDate.getHours() + hours);
+    const newEnd = `${pad2(eDate.getHours())}:${pad2(eDate.getMinutes())}`;
+    handleEndTimeChange(newEnd);
   };
 
   const handleSave = async () => {
@@ -122,6 +330,16 @@ export default function UsagePage() {
           coffeeCount,
           purpose: selectedPurpose || null, // 미선택이면 null(미입력)
           detail: detail.trim() || null,
+          price: currentPrice, // 추가 요금이 반영되거나 수정한 결제 금액
+          extraPrice: extraPrice,
+          isExtraPaid: isExtraPaid,
+          extraPaymentMethod: extraPaymentMethod,
+          extraTime: extraTime,
+          roomName: editRoomName, // 수정된 공간명
+          memo: memo.trim() || null, // 비고란
+          complaints: complaints.trim() || null, // 고객 불만사항
+          isPaid,
+          isCleanUpBad,
           // 시간 수정
           ...(editDate && editStart ? { startTime: `${editDate}T${editStart}:00` } : {}),
           ...(editDate && editEnd ? { endTime: `${editDate}T${editEnd}:00` } : {}),
@@ -131,8 +349,13 @@ export default function UsagePage() {
       if (response.ok) {
         setSuccessMsg("이용 기록이 안전하게 저장되었습니다.");
         setTimeout(() => setSuccessMsg(""), 3000);
-        // Refresh
-        fetchReservations();
+        alert("저장되었습니다.");
+        // Refresh (선택 유지)
+        fetchReservations(selectedResId);
+        
+        if (editDate) {
+          router.push(`/calendar?date=${editDate}`);
+        }
       } else {
         alert("이용 기록 저장에 실패했습니다.");
       }
@@ -165,10 +388,16 @@ export default function UsagePage() {
 
   // 한 줄 라벨: 날짜 · 이름 (루트색) (수기)
   const renderResLabel = (res: Reservation) => (
-    <span className="flex items-center gap-1 truncate">
-      <span className="text-slate-700">{formatDateLabel(res.startTime)} · {res.customerName}</span>
+    <span className={`flex items-center gap-1 truncate ${res.status === "CANCELLED" ? "opacity-60" : ""}`}>
+      {res.status === "CANCELLED" && <span className="text-slate-500 font-bold bg-slate-100 px-1 rounded text-xs">[취소됨]</span>}
+      {res.isCleanUpBad && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-600 border border-red-500 shadow-sm shadow-red-100" title="정리상태 불량">🧹불량!</span>}
+      <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${res.roomName === "머무룸1" ? "bg-sky-50 text-sky-700" : res.roomName === "머무룸2" ? "bg-purple-50 text-purple-700" : "bg-slate-100 text-slate-700"}`}>{res.roomName}</span>
+      <span className={res.status === "CANCELLED" ? "text-slate-500 line-through" : "text-slate-700"}>
+        {formatDateLabel(res.startTime)} · {res.customerName}
+      </span>
       <span className={`font-bold ${sourceTextColor(res.source)}`}>({getSourceDisplay(res.source)})</span>
-      {!res.emailId && <span className="font-bold text-amber-600">✍️ 수기</span>}
+      {!res.emailId && res.paymentMethod !== '온라인' && <span className="font-bold text-amber-600">✍️ 수기</span>}
+      {!res.isPaid && res.paymentMethod && <span className="text-rose-600 font-bold text-[10px]">{res.paymentMethod}(미수)</span>}
     </span>
   );
 
@@ -257,8 +486,29 @@ export default function UsagePage() {
           )}
 
           {/* 이용 시간 수정 (분은 00/30만) */}
+          {/* 공간명 수정 */}
           {selectedRes && (
             <div className="mt-3 space-y-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-500">이용 공간</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditRoomName("머무룸1")}
+                    className={`flex-1 py-2 text-sm font-bold rounded-xl border transition ${editRoomName === "머무룸1" ? "bg-sky-50 text-sky-600 border-sky-500" : "bg-white text-slate-500 border-slate-200"}`}
+                  >
+                    머무룸 1
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditRoomName("머무룸2")}
+                    className={`flex-1 py-2 text-sm font-bold rounded-xl border transition ${editRoomName === "머무룸2" ? "bg-purple-50 text-purple-600 border-purple-500" : "bg-white text-slate-500 border-slate-200"}`}
+                  >
+                    머무룸 2
+                  </button>
+                </div>
+              </div>
+
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-500">이용 날짜</label>
                 <input
@@ -268,22 +518,22 @@ export default function UsagePage() {
                   className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium text-slate-800"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="flex gap-6 items-end">
                 <div className="space-y-1">
                   <label className="text-[11px] font-bold text-slate-500">시작</label>
-                  <TimeSelect value={editStart} onChange={setEditStart} />
+                  <TimeSelect value={editStart} onChange={handleStartTimeChange} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-500">종료</label>
-                  <TimeSelect value={editEnd} onChange={setEditEnd} />
+                  <label className="text-[11px] font-bold text-slate-500">종료 (수정 시 추가금 자동계산)</label>
+                  <TimeSelect value={editEnd} onChange={handleEndTimeChange} />
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* 인원 컨트롤러: 예약(읽기전용) / 실제(스테퍼) / 추가(스테퍼) + 커피 */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* 인원/시간 컨트롤러: 예약(읽기전용) / 실제(스테퍼) / 추가(스테퍼) / 추가시간(스테퍼) */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           {/* 예약 이용인원 - 메일 자동, 읽기전용 */}
           <div className="space-y-3">
             <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
@@ -303,14 +553,14 @@ export default function UsagePage() {
             </label>
             <div className="flex items-center justify-between bg-indigo-50/60 p-2 rounded-xl border border-indigo-100">
               <button
-                onClick={() => setHeadCount(Math.max(0, headCount - 1))}
+                onClick={() => handleHeadCountChange(Math.max(0, headCount - 1))}
                 className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
               >
                 -
               </button>
               <span className="text-xl font-bold text-indigo-700">{headCount}명</span>
               <button
-                onClick={() => setHeadCount(headCount + 1)}
+                onClick={() => handleHeadCountChange(headCount + 1)}
                 className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
               >
                 +
@@ -326,14 +576,37 @@ export default function UsagePage() {
             </label>
             <div className="flex items-center justify-between bg-emerald-50/60 p-2 rounded-xl border border-emerald-100">
               <button
-                onClick={() => setHeadCount(headCount > reserved ? headCount - 1 : headCount)}
+                onClick={() => handleHeadCountChange(Math.max(reserved, headCount - 1))}
                 className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
               >
                 -
               </button>
-              <span className="text-xl font-bold text-emerald-700">+{Math.max(0, headCount - reserved)}명</span>
+              <span className="text-xl font-bold text-emerald-600">{headCount - reserved > 0 ? `+${headCount - reserved}` : 0}명</span>
               <button
-                onClick={() => setHeadCount(headCount + 1)}
+                onClick={() => handleHeadCountChange(headCount + 1)}
+                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          {/* 추가 시간 - 스테퍼 */}
+          <div className="space-y-3">
+            <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
+              <Clock className="w-4 h-4 text-emerald-500" />
+              추가 시간
+            </label>
+            <div className="flex items-center justify-between bg-emerald-50/60 p-2 rounded-xl border border-emerald-100">
+              <button
+                onClick={() => addExtraTime(-1)}
+                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+              >
+                -
+              </button>
+              <span className="text-xl font-bold text-emerald-600">{extraTime > 0 ? `+${extraTime}` : extraTime}시간</span>
+              <button
+                onClick={() => addExtraTime(1)}
                 className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
               >
                 +
@@ -435,6 +708,173 @@ export default function UsagePage() {
           />
         </div>
 
+        {/* 결제 금액 수정 폼 */}
+        {selectedRes && (
+          <div className="space-y-3 pt-2 border-t border-slate-100">
+            <label className="text-sm font-semibold text-slate-700 flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <Wallet className="w-4 h-4 text-emerald-600" />
+                최종 결제 금액
+              </span>
+              <span className="text-xs font-medium text-slate-400">인원 추가 시 요금이 자동 계산됩니다. 직접 수정도 가능.</span>
+            </label>
+            
+            {/* 금액 상세 내역 (원래 금액 / 추가 금액) */}
+            <div className="mb-2 p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-3 text-sm shadow-inner">
+              <div className="flex justify-between items-center">
+                <div className="space-y-0.5 flex flex-col">
+                  <p className="text-slate-500 font-medium text-sm">원래 결제된 금액 (예약시)</p>
+                  <div className="relative mt-1">
+                    <input 
+                      type="text"
+                      value={originalPrice === 0 ? '' : originalPrice.toLocaleString()}
+                      placeholder="0"
+                      onChange={(e) => {
+                        const valStr = e.target.value.replace(/,/g, '');
+                        if (!/^\d*$/.test(valStr)) return;
+                        const val = Number(valStr);
+                        setOriginalPrice(val);
+                        setCurrentPrice(val + extraPrice);
+                      }}
+                      className="w-32 text-left bg-white border border-slate-200 text-slate-700 font-bold text-lg p-1.5 pl-2 pr-6 rounded-lg outline-hidden focus:border-slate-400 shadow-xs transition-all"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm pointer-events-none">원</span>
+                  </div>
+                </div>
+                <div className="text-slate-300 font-bold px-2">+</div>
+                <div className="space-y-0.5 text-right flex flex-col items-end">
+                  <p className="text-rose-500 font-medium text-sm">추가 발생 금액</p>
+                  <div className="relative mt-1">
+                    <input 
+                      type="text"
+                      value={extraPrice === 0 ? '' : extraPrice.toLocaleString()}
+                      placeholder="0"
+                      onChange={(e) => {
+                        const valStr = e.target.value.replace(/,/g, '');
+                        if (!/^\d*$/.test(valStr)) return;
+                        const val = Number(valStr);
+                        setExtraPrice(val);
+                        setCurrentPrice(originalPrice + val);
+                      }}
+                      className="w-32 text-right bg-white border-2 border-rose-200 text-rose-600 font-bold text-lg p-1.5 pr-6 rounded-lg outline-hidden focus:border-rose-400 shadow-xs transition-all"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-rose-400 font-bold text-sm pointer-events-none">원</span>
+                  </div>
+                </div>
+              </div>
+
+              {extraPrice > 0 && (
+                <div className="pt-3 border-t border-slate-200 flex justify-between items-center">
+                  <p className="text-sm font-semibold text-slate-600">추가금 결제 정보</p>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={extraPaymentMethod}
+                      onChange={(e) => setExtraPaymentMethod(e.target.value)}
+                      className="w-24 text-xs p-1.5 rounded-md border border-slate-200 bg-white text-slate-600 outline-hidden focus:border-indigo-500"
+                    >
+                      <option value="계좌이체">계좌이체</option>
+                      <option value="카드결제">카드결제</option>
+                    </select>
+                    <label className={`flex items-center gap-1.5 cursor-pointer px-2 py-1.5 rounded-md border transition-colors ${
+                      isExtraPaid ? 'bg-emerald-50/50 border-emerald-200' : 'bg-red-50 border-red-300'
+                    }`}>
+                      <input 
+                        type="checkbox" 
+                        checked={isExtraPaid}
+                        onChange={(e) => setIsExtraPaid(e.target.checked)}
+                        className={`w-3.5 h-3.5 rounded focus:ring-2 cursor-pointer ${
+                          isExtraPaid ? 'text-emerald-500 focus:ring-emerald-500 accent-emerald-500' : 'text-red-500 focus:ring-red-500 accent-red-500'
+                        }`} 
+                      />
+                      <span className={`text-xs font-bold ${
+                        isExtraPaid ? 'text-emerald-600' : 'text-red-600'
+                      }`}>
+                        {isExtraPaid ? '결제 완료' : '미결제 ★'}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-4 items-center">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={currentPrice === 0 ? '' : currentPrice.toLocaleString()}
+                  onChange={(e) => {
+                    const valStr = e.target.value.replace(/,/g, '');
+                    if (!/^\d*$/.test(valStr)) return;
+                    const val = Number(valStr);
+                    setCurrentPrice(val);
+                    setExtraPrice(val - originalPrice);
+                  }}
+                  className="w-full text-lg p-3.5 pl-10 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-bold text-slate-800 bg-emerald-50/30"
+                />
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₩</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPaid(!isPaid)}
+                className={`py-3.5 px-4 rounded-xl font-bold border transition whitespace-nowrap ${isPaid ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-700 border-red-200"}`}
+              >
+                {isPaid ? "결제 완료" : "미수금"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 비고란 (관리자용 자유 메모) */}
+        <div className="space-y-3 pt-2 border-t border-slate-100">
+          <label className="text-sm font-semibold text-slate-700 flex items-center justify-between">
+            <span className="flex items-center gap-1">
+              <Pencil className="w-4 h-4 text-slate-400" />
+              비고 및 관리자 메모
+            </span>
+          </label>
+          <textarea
+            value={memo}
+            onChange={(e) => setMemo(e.target.value)}
+            placeholder="특이사항, 분실물 등을 자유롭게 적어주세요."
+            rows={2}
+            className="w-full text-sm p-3.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium text-slate-800 resize-none bg-slate-50"
+          />
+        </div>
+
+        {/* 고객 불만사항 전용 */}
+        <div className="space-y-3 pt-2 border-t border-slate-100">
+          <label className="text-sm font-semibold text-rose-700 flex items-center justify-between">
+            <span className="flex items-center gap-1">
+              <AlertCircle className="w-4 h-4 text-rose-500" />
+              고객 불만사항 (CS 기록)
+            </span>
+          </label>
+          <textarea
+            value={complaints}
+            onChange={(e) => setComplaints(e.target.value)}
+            placeholder="고객 불만사항이 발생한 경우, 나중에 모아보기 위해 여기에 상세히 기록해 주세요."
+            rows={3}
+            className="w-full text-sm p-3.5 rounded-xl border border-rose-200 outline-hidden focus:border-rose-500 font-medium text-rose-900 resize-none bg-rose-50"
+          />
+        </div>
+
+        {/* 고객 상태 플래그 */}
+        <div className="space-y-3 pt-2 border-t border-slate-100">
+          <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
+            <AlertCircle className="w-4 h-4 text-orange-500" />
+            고객 상태 플래그
+          </label>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setIsCleanUpBad(!isCleanUpBad)}
+              className={`py-2 px-4 rounded-xl border font-bold text-sm transition ${isCleanUpBad ? "bg-orange-50 text-orange-700 border-orange-200" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}
+            >
+              {isCleanUpBad ? "🧹 정리불량 (체크됨)" : "🧹 정리상태 불량 표시"}
+            </button>
+          </div>
+        </div>
+
         {/* Submit action */}
         <div className="pt-2">
           {successMsg && (
@@ -471,8 +911,13 @@ export default function UsagePage() {
               return (
                 <div key={log.id} className="p-4 flex justify-between items-center bg-white hover:bg-slate-50/50 transition">
                   <div className="space-y-1">
-                    <p className="text-sm font-bold text-slate-900">
+                    <p className="text-sm font-bold text-slate-900 flex items-center gap-1">
+                      {log.isCleanUpBad && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-600 border border-red-500 shadow-sm shadow-red-100" title="정리상태 불량">🧹불량!</span>}
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${log.roomName === "머무룸1" ? "bg-sky-50 text-sky-700" : log.roomName === "머무룸2" ? "bg-purple-50 text-purple-700" : "bg-slate-100 text-slate-700"}`}>
+                        {log.roomName}
+                      </span>
                       {parsedDateStr} ({log.customerName || "미지정"})
+                      {!log.isPaid && log.paymentMethod && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">{log.paymentMethod}(미수)</span>}
                     </p>
                     <p className="text-xs text-slate-500 font-semibold">
                       실제 <span className="text-slate-800">{log.usageLog?.headCount || 1}명</span>
@@ -487,6 +932,16 @@ export default function UsagePage() {
                         <span className="text-slate-400 font-medium"> · {log.usageLog.detail}</span>
                       )}
                     </p>
+                    {log.memo && (
+                      <p className="text-[11px] font-medium text-slate-600 bg-slate-100 p-1.5 rounded mt-1">
+                        비고: {log.memo}
+                      </p>
+                    )}
+                    {log.complaints && (
+                      <p className="text-[11px] font-medium text-rose-700 bg-rose-100 p-1.5 rounded mt-1 border border-rose-200">
+                        ⚠️ 불만사항: {log.complaints}
+                      </p>
+                    )}
                   </div>
                   <span className="text-[10px] font-bold text-slate-400">
                     {getSourceDisplay(log.source)}

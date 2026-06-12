@@ -44,8 +44,10 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
 
     const lock = await client.getMailboxLock('INBOX');
     try {
-      console.log('[EmailSync] 안 읽은 메일 검색 중...');
-      const messages = client.fetch({ seen: false }, { source: true, uid: true, envelope: true });
+      console.log('[EmailSync] 최근 3일치 메일 검색 중...');
+      const sinceDate = new Date();
+      sinceDate.setDate(sinceDate.getDate() - 3);
+      const messages = client.fetch({ since: sinceDate }, { source: true, uid: true, envelope: true });
 
       // ⚠️ 중요: fetch 스트림을 도는 동안에는 다른 IMAP 명령(messageFlagsAdd 등)을
       // 절대 호출하지 않는다. imapflow는 명령을 직렬 처리하므로 스트림 도중 다른
@@ -121,6 +123,21 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
 
       if (reservationData) {
         console.log(`[EmailSync] 예약 발견! DB 등록 중... (${reservationData.roomName}, ${reservationData.source})`);
+        
+        // 블랙리스트(정리불량) 체크
+        let autoCleanUpBad = false;
+        if (reservationData.customerName) {
+          const badRecord = await prisma.reservation.findFirst({
+            where: {
+              customerName: reservationData.customerName,
+              isCleanUpBad: true,
+            }
+          });
+          if (badRecord) {
+            autoCleanUpBad = true;
+          }
+        }
+
         await prisma.reservation.create({
           data: {
             source: reservationData.source,
@@ -130,7 +147,9 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
             endTime: reservationData.endTime,
             price: reservationData.price,
             discount: reservationData.discount ?? 0,
+            isCleanUpBad: autoCleanUpBad,
             emailId: reservationData.emailId,
+            createdAt: parsedMail.date || new Date(),
             usageLog: {
               create: {
                 // 실제 인원은 처음엔 예약 인원과 동일하게 두고, CCTV 관찰 후 이용현황에서 조정

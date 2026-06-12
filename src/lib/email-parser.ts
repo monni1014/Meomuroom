@@ -20,12 +20,13 @@ export interface ParsedReservation {
 export function parseSpaceCloudEmail(subject: string, text: string, messageId: string): ParsedReservation | null {
   try {
     // 1. 공간 추출 ("예약하기 1/2/3" - 제목 또는 본문 머리글에 등장)
-    //    스페이스클라우드는 제목이 아니라 본문 머리글("머무룸 회의실 예약하기 2의...")에
-    //    공간명이 들어오므로 subject와 text를 모두 확인한다.
     const roomSource = `${subject} ${text}`;
     let roomName = "머무룸1";
-    if (roomSource.includes("예약하기 2")) roomName = "머무룸2";
-    else if (roomSource.includes("예약하기 3")) roomName = "머무룸3";
+    if (/(머무룸\s*(?:회의실\s*)?2|2호점|예약하기\s*2)/.test(roomSource)) {
+      roomName = "머무룸2";
+    } else if (/(머무룸\s*(?:회의실\s*)?3|3호점|예약하기\s*3)/.test(roomSource)) {
+      roomName = "머무룸3";
+    }
 
     // 2. 예약내용 (시간) 추출: "2026/06/11 17시 - 21시"
     const timeMatch = text.match(/예약내용\s+(\d{4}\/\d{2}\/\d{2})\s+(\d+)시\s*-\s*(\d+)시/);
@@ -82,10 +83,13 @@ export function parseSpaceCloudEmail(subject: string, text: string, messageId: s
  */
 export function parseNaverEmail(subject: string, text: string, messageId: string): ParsedReservation | null {
   try {
-    // 1. 공간 추출: "예약상품 머무룸 예약하기 1"
+    const roomSource = `${subject} ${text}`;
     let roomName = "머무룸1";
-    if (text.includes("예약하기 2")) roomName = "머무룸2";
-    else if (text.includes("예약하기 3")) roomName = "머무룸3";
+    if (/(머무룸\s*(?:회의실\s*)?2|2호점|예약하기\s*2)/.test(roomSource)) {
+      roomName = "머무룸2";
+    } else if (/(머무룸\s*(?:회의실\s*)?3|3호점|예약하기\s*3)/.test(roomSource)) {
+      roomName = "머무룸3";
+    }
 
     // 2. 금액 및 인원 추출
     //    기본형: "결제금액 머무룸 예약하기 1(1) 24,000원"

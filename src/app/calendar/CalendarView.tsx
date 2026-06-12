@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Building2, Copy } from "lucide-react";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Building2, Copy, Pencil, Phone, Calendar as CalendarIcon, Star } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
 import TimeSelect from "@/components/TimeSelect";
+import MultiDatePicker from "@/components/MultiDatePicker";
 
 interface UsageLog {
   id: string;
@@ -24,17 +25,33 @@ interface Reservation {
   phone: string | null;
   startTime: string;
   endTime: string;
+  notified: boolean;
   price: number;
   discount: number;
-  status: string;
   paymentMethod: string | null;
   isPaid: boolean;
+  memo: string | null;
+  complaints: string | null;
+  isCleanUpBad: boolean;
   emailId: string | null; // null = 수기 입력 (메일 자동연동 아님)
   usageLog: UsageLog | null;
 }
 
 export default function CalendarPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const dateParam = searchParams.get("date");
+
+  useEffect(() => {
+    if (dateParam) {
+      const parsed = new Date(dateParam);
+      if (!isNaN(parsed.getTime())) {
+        setCurrentDate(parsed);
+        setSelectedDate(parsed);
+      }
+    }
+  }, [dateParam]);
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -44,14 +61,21 @@ export default function CalendarPage() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [roomFilter, setRoomFilter] = useState<string>("all");
 
-  // Form states for manual booking
+  const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
+  const [editId, setEditId] = useState<string | null>(null);
+
   const [formName, setFormName] = useState("");
   const [formPhone, setFormPhone] = useState("");
-  const [formPaymentMethod, setFormPaymentMethod] = useState("현장카드");
-  const [formIsPaid, setFormIsPaid] = useState(true);
+  const [discount, setDiscount] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState("온라인");
+  const [isPaid, setIsPaid] = useState(true);
+  const [isCleanUpBad, setIsCleanUpBad] = useState(false);
+  const [memo, setMemo] = useState("");
+  const [complaints, setComplaints] = useState("");
   const [formSource, setFormSource] = useState("naver"); // 예약 루트 (네이버/스페이스클라우드)
   const [formRoom, setFormRoom] = useState("머무룸1");
-  const [formDate, setFormDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [formDates, setFormDates] = useState<string[]>([format(new Date(), "yyyy-MM-dd")]);
+
   const [formStartTime, setFormStartTime] = useState("14:00");
   const [formEndTime, setFormEndTime] = useState("17:00");
   const [formPrice, setFormPrice] = useState("30000");
@@ -59,6 +83,7 @@ export default function CalendarPage() {
   const [formPurpose, setFormPurpose] = useState(""); // 대분류
   const [formDetail, setFormDetail] = useState(""); // 세부내용
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showMultiPicker, setShowMultiPicker] = useState(false);
 
   const fetchReservations = async () => {
     try {
@@ -118,58 +143,74 @@ export default function CalendarPage() {
     isSameDay(new Date(res.startTime), selectedDate)
   );
 
-  const handleCreateReservation = async (e: React.FormEvent) => {
+  const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) return alert("예약자명을 입력하세요.");
+    if (formDates.length === 0) return alert("예약 일자를 하나 이상 선택하세요.");
 
     try {
       setIsSubmitting(true);
-      const startDateTime = `${formDate}T${formStartTime}:00`;
-      const endDateTime = `${formDate}T${formEndTime}:00`;
 
-      const response = await fetch("/api/reservations", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          source: formSource,
-          roomName: formRoom,
-          customerName: formName,
-          phone: formPhone.trim() || null,
-          startTime: startDateTime,
-          endTime: endDateTime,
-          price: parseInt(formPrice, 10) || 0,
-          paymentMethod: formPaymentMethod,
-          isPaid: formIsPaid,
-          headCount: parseInt(formGuests, 10) || 1,
-          purpose: formPurpose || null,
-          detail: formDetail.trim() || null,
-        }),
+      const buildPayload = (dateStr: string) => ({
+        source: formSource,
+        roomName: formRoom,
+        customerName: formName,
+        phone: formPhone.trim() || null,
+        startTime: `${dateStr}T${formStartTime}:00`,
+        endTime: `${dateStr}T${formEndTime}:00`,
+        price: parseInt(formPrice.replace(/,/g, ''), 10) || 0,
+        discount: discount,
+        paymentMethod: paymentMethod,
+        isPaid,
+        isCleanUpBad,
+        memo: memo.trim() || null,
+        complaints: complaints.trim() || null,
+        headCount: parseInt(formGuests, 10) || 1,
+        purpose: formPurpose || null,
+        detail: formDetail.trim() || null,
       });
 
-      if (response.ok) {
-        setFormName("");
-        setFormPhone("");
-        setFormPurpose("");
-        setFormDetail("");
-        setFormPaymentMethod("현장카드");
-        setFormIsPaid(true);
-        setFormSource("naver");
-        setIsModalOpen(false);
-        fetchReservations();
+      if (modalMode === "edit" && editId) {
+        const res = await fetch(`/api/reservations/${editId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildPayload(formDates[0])),
+        });
+        if (!res.ok) throw new Error("수정 실패");
       } else {
-        alert("예약 등록에 실패했습니다.");
+        const promises = formDates.map((dateStr) =>
+          fetch("/api/reservations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildPayload(dateStr)),
+          })
+        );
+        const results = await Promise.all(promises);
+        if (results.some(r => !r.ok)) throw new Error("생성 실패");
       }
+
+      setFormName("");
+      setFormPhone("");
+      setFormPurpose("");
+      setFormDetail("");
+      setDiscount(0);
+      setPaymentMethod("온라인");
+      setIsPaid(true);
+      setIsCleanUpBad(false);
+      setMemo("");
+      setComplaints("");
+      setFormSource("naver");
+      setIsModalOpen(false);
+      fetchReservations();
     } catch (error) {
-      console.error("Create booking error:", error);
+      console.error("Save error:", error);
+      alert("예약 저장에 실패했습니다.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // 반복 예약 복사: 해당 예약 정보로 수동 추가 폼을 미리 채워 연다 (날짜만 바꿔 저장)
-  const openCopyModal = (res: Reservation) => {
+  const fillFormForRes = (res: Reservation) => {
     const s = new Date(res.startTime);
     const e = new Date(res.endTime);
     const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -177,16 +218,36 @@ export default function CalendarPage() {
     setFormPhone(res.phone || "");
     setFormSource(res.source === "spacecloud" ? "spacecloud" : "naver");
     setFormRoom(res.roomName || "머무룸1");
-    setFormDate(format(s, "yyyy-MM-dd"));
+    setFormDates([format(s, "yyyy-MM-dd")]);
     setFormStartTime(hhmm(s));
     setFormEndTime(hhmm(e));
-    setFormPrice(String(res.price || 0));
-    // 온라인 결제는 수동 폼에 없으므로 현장카드로 기본 대체
-    setFormPaymentMethod(res.paymentMethod === "계좌이체" ? "계좌이체" : "현장카드");
-    setFormIsPaid(res.isPaid);
+    setFormPrice(res.price ? res.price.toLocaleString() : "0");
+    setDiscount(res.discount || 0);
+    setPaymentMethod(res.paymentMethod || "온라인");
+    setIsPaid(res.isPaid ?? true);
+    setIsCleanUpBad(res.isCleanUpBad ?? false);
+    setMemo(res.memo || "");
+    setComplaints(res.complaints || "");
     setFormGuests(String(res.usageLog?.headCount || 1));
     setFormPurpose(res.usageLog?.purpose || "");
     setFormDetail(res.usageLog?.detail || "");
+    setShowMultiPicker(false);
+  };
+
+  const openEditModal = (res: Reservation) => {
+    setModalMode("edit");
+    setEditId(res.id);
+    fillFormForRes(res);
+    setShowMultiPicker(false);
+    setIsModalOpen(true);
+  };
+
+  const openCopyModal = (res: Reservation) => {
+    setModalMode("copy");
+    setEditId(null);
+    fillFormForRes(res);
+    setFormDates([]); 
+    setShowMultiPicker(false); 
     setIsModalOpen(true);
   };
 
@@ -280,7 +341,12 @@ export default function CalendarPage() {
             {isSyncing ? "동기화 중..." : "메일 동기화"}
           </button>
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => {
+              setModalMode("create");
+              setEditId(null);
+              setFormDates([format(selectedDate, "yyyy-MM-dd")]);
+              setIsModalOpen(true);
+            }}
             className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-xl shadow-md hover:bg-indigo-700 active:scale-95 transition-all whitespace-nowrap"
           >
             <Plus className="w-4 h-4" />
@@ -342,7 +408,7 @@ export default function CalendarPage() {
               className={cn(
                 "text-center text-xs font-semibold text-slate-400 py-2",
                 idx === 0 && "text-rose-400",
-                idx === 6 && "text-blue-400"
+                idx === 6 && "text-rose-400"
               )}
             >
               {day}
@@ -364,6 +430,9 @@ export default function CalendarPage() {
             const dayReservations = filteredReservations.filter((res) =>
               isSameDay(new Date(res.startTime), day)
             );
+            
+            const hasUnpaid = dayReservations.some((res) => !res.isPaid && res.status !== "CANCELLED");
+            const hasUnpaidExtra = dayReservations.some((res) => res.usageLog && (res.usageLog.extraPrice ?? 0) > 0 && !res.usageLog.isExtraPaid && res.status !== "CANCELLED");
 
             return (
               <button
@@ -379,13 +448,24 @@ export default function CalendarPage() {
                   !isSameMonthOfActive && "opacity-30"
                 )}
               >
-                <span className="text-sm font-semibold">{format(day, "d")}</span>
+                <div className="relative inline-flex items-center">
+                  <span className={cn("text-sm font-semibold", (day.getDay() === 0 || day.getDay() === 6) && !isSelected && "text-rose-500")}>
+                    {format(day, "d")}
+                  </span>
+                  {(hasUnpaid || hasUnpaidExtra) && (
+                    <div className="absolute -top-1 -right-3 flex gap-0.5" title="미결제/미수금 예약 있음">
+                      {hasUnpaid && <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-400 drop-shadow-sm" />}
+                      {hasUnpaidExtra && <Star className="w-2.5 h-2.5 text-red-500 fill-red-500 drop-shadow-sm animate-pulse" />}
+                    </div>
+                  )}
+                </div>
                 
                 {/* Dots container for day's reservations */}
                 <div className="flex gap-0.5 justify-center h-2 mt-1">
                   {dayReservations.map((res) => {
                     const dotClass =
                       res.status === "CANCELLED" ? "bg-slate-300" :
+                      !res.isPaid ? (res.source === "naver" ? "bg-rose-400" : res.source === "spacecloud" ? "bg-rose-700" : "bg-rose-500") :
                       res.source === "naver" ? "bg-green-500" :
                       res.source === "spacecloud" ? "bg-indigo-500" : "bg-amber-500";
                     return (
@@ -448,23 +528,40 @@ export default function CalendarPage() {
                       <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", getSourceBadgeStyle(res.source))}>
                         {getSourceDisplay(res.source)}
                       </span>
-                      {!res.emailId && (
+                      {!res.emailId && res.paymentMethod !== '온라인' && (
                         <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-100">
                           ✍️수기
+                        </span>
+                      )}
+                      {res.isCleanUpBad && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-600 border border-red-500 shadow-sm shadow-red-100" title="정리상태 불량">
+                          🧹불량!
                         </span>
                       )}
                       <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", getRoomBadgeStyle(res.roomName))}>
                         {res.roomName}
                       </span>
-                      <strong className={cn("text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>{res.customerName}</strong>
+                      <strong className={cn("text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
+                        {res.customerName}
+                      </strong>
                       {!isCancelled && res.paymentMethod && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
-                          {res.paymentMethod}
+                        <span className={cn(
+                          "px-1.5 py-0.5 rounded text-[10px] font-semibold border",
+                          res.isPaid 
+                            ? "bg-slate-100 text-slate-600 border-slate-200" 
+                            : "bg-rose-50 text-rose-600 border-rose-300 shadow-sm shadow-rose-100"
+                        )}>
+                          {res.paymentMethod}{!res.isPaid && "(미수)"}
                         </span>
                       )}
-                      {!isCancelled && !res.isPaid && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-600 border border-rose-200">
-                          💸 미결제
+                      {!isCancelled && res.usageLog && (res.usageLog.extraPrice ?? 0) > 0 && (
+                        <span className={cn(
+                          "px-1.5 py-0.5 rounded text-[10px] font-semibold border",
+                          res.usageLog.isExtraPaid 
+                            ? "bg-emerald-50 text-emerald-600 border-emerald-200" 
+                            : "bg-rose-50 text-rose-600 border-rose-300 shadow-sm shadow-rose-100"
+                        )}>
+                          추가금 {res.usageLog.extraPaymentMethod ? `(${res.usageLog.extraPaymentMethod})` : ""}{!res.usageLog.isExtraPaid && " 미결제★"}
                         </span>
                       )}
                     </div>
@@ -482,6 +579,12 @@ export default function CalendarPage() {
                         <p className="flex items-center gap-1 text-slate-700">
                           <Wallet className="w-3.5 h-3.5 text-slate-400" />
                           <span>{isCancelled ? "수수료" : "요금"}: <strong className="text-slate-800">{res.price.toLocaleString()}원</strong></span>
+                        </p>
+                      )}
+                      {res.phone && (
+                        <p className="flex items-center gap-1">
+                          <Phone className="w-3.5 h-3.5" />
+                          <span className={cn(isCancelled ? "line-through text-slate-400" : "")}>{res.phone}</span>
                         </p>
                       )}
                       {!isCancelled && res.discount > 0 && (
@@ -504,14 +607,21 @@ export default function CalendarPage() {
                     )}
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() => openCopyModal(res)}
+                        onClick={(e) => { e.stopPropagation(); openEditModal(res); }}
+                        className="p-2 text-slate-400 hover:text-emerald-500 rounded-lg hover:bg-emerald-50 transition active:scale-95"
+                        title="예약 직접 수정하기"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openCopyModal(res); }}
                         className="p-2 text-slate-400 hover:text-indigo-500 rounded-lg hover:bg-indigo-50 transition active:scale-95"
                         title="이 예약 복사 (반복 예약 빠르게 추가)"
                       >
                         <Copy className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDeleteReservation(res.id)}
+                        onClick={(e) => { e.stopPropagation(); handleDeleteReservation(res.id); }}
                         className="p-2 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 transition active:scale-95"
                         title="예약 및 로그 삭제"
                       >
@@ -532,7 +642,9 @@ export default function CalendarPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="p-4 flex justify-between items-center border-b border-slate-100 bg-slate-50">
-              <h2 className="font-bold text-slate-800">새 수동 예약 추가</h2>
+              <h2 className="font-bold text-slate-800">
+                {modalMode === "edit" ? "예약 일정 수정" : modalMode === "copy" ? "다중 날짜로 여러번 복사" : "새 수동 예약 추가"}
+              </h2>
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="p-1 rounded-full text-slate-400 hover:bg-slate-100 transition active:scale-90"
@@ -541,7 +653,7 @@ export default function CalendarPage() {
               </button>
             </div>
 
-            <form onSubmit={handleCreateReservation} className="p-4 space-y-4">
+            <form onSubmit={handleSaveModal} className="p-4 space-y-4 max-h-[75vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500">예약 루트</label>
@@ -585,7 +697,16 @@ export default function CalendarPage() {
                     type="tel"
                     placeholder="010-1234-5678"
                     value={formPhone}
-                    onChange={(e) => setFormPhone(e.target.value)}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, "");
+                      let formatted = digits;
+                      if (digits.length > 3 && digits.length <= 7) {
+                        formatted = `${digits.slice(0, 3)}-${digits.slice(3)}`;
+                      } else if (digits.length > 7) {
+                        formatted = `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`;
+                      }
+                      setFormPhone(formatted);
+                    }}
                     className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium"
                   />
                 </div>
@@ -593,13 +714,54 @@ export default function CalendarPage() {
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500">예약 일자</label>
-                <input
-                  type="date"
-                  required
-                  value={formDate}
-                  onChange={(e) => setFormDate(e.target.value)}
-                  className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium"
-                />
+                
+                {/* 선택된 날짜들을 개별 입력창으로 나열 (수정 모드일 때는 1개만) */}
+                {formDates.map((date, index) => (
+                  <div key={index} className="flex gap-2 mb-2">
+                    <input
+                      type="date"
+                      required
+                      value={date}
+                      onChange={(e) => {
+                        const newDates = [...formDates];
+                        newDates[index] = e.target.value;
+                        setFormDates(newDates);
+                      }}
+                      className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium bg-white"
+                    />
+                    {modalMode !== "edit" && (
+                      <button
+                        type="button"
+                        onClick={() => setFormDates(formDates.filter((_, i) => i !== index))}
+                        className="p-2.5 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 transition flex items-center justify-center"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                {/* 다중 선택 달력 토글 버튼 (수정 모드가 아닐 때만) */}
+                {modalMode !== "edit" && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowMultiPicker(!showMultiPicker)}
+                      className="w-full text-xs font-bold py-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition border border-dashed border-slate-300"
+                    >
+                      {showMultiPicker ? "닫기 ▲" : "+ 날짜 추가 (달력에서 다중 선택)"}
+                    </button>
+                    
+                    {showMultiPicker && (
+                      <div className="mt-2 animate-in slide-in-from-top-2 duration-200">
+                        <MultiDatePicker 
+                          selectedDates={formDates} 
+                          onChange={setFormDates} 
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -653,56 +815,115 @@ export default function CalendarPage() {
                 />
               </div>
 
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">비고 (자유 입력)</label>
+                <textarea
+                  value={memo}
+                  onChange={(e) => setMemo(e.target.value)}
+                  placeholder="예약 관련 메모나 참고사항을 자유롭게 적어주세요."
+                  rows={2}
+                  className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium resize-y"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500">결제 가격 (원화)</label>
                   <input
-                    type="number"
-                    min="0"
-                    step="1000"
+                    type="text"
                     required
                     value={formPrice}
-                    onChange={(e) => setFormPrice(e.target.value)}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, "");
+                      if (!digits) setFormPrice("");
+                      else setFormPrice(parseInt(digits, 10).toLocaleString());
+                    }}
                     className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium"
                   />
                 </div>
 
                 <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500">쿠폰 및 할인 (원화)</label>
+                  <input
+                    type="text"
+                    value={discount}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, "");
+                      if (!digits) setDiscount(0);
+                      else setDiscount(parseInt(digits, 10));
+                    }}
+                    className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500">결제 수단</label>
                   <select
-                    value={formPaymentMethod}
-                    onChange={(e) => setFormPaymentMethod(e.target.value)}
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
                     className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium bg-white"
                   >
                     <option value="현장카드">현장카드</option>
                     <option value="계좌이체">계좌이체</option>
+                    <option value="온라인">온라인</option>
                   </select>
                 </div>
               </div>
 
-              {/* 결제 완료 여부 토글 */}
-              <button
-                type="button"
-                onClick={() => setFormIsPaid(!formIsPaid)}
-                className={`w-full flex items-center justify-between p-3 rounded-xl border transition active:scale-[0.99] ${
-                  formIsPaid
-                    ? "bg-emerald-50 border-emerald-200"
-                    : "bg-rose-50 border-rose-200"
-                }`}
-              >
-                <span className="text-sm font-bold text-slate-700">결제 완료 여부</span>
-                <span className={`flex items-center gap-1.5 text-sm font-bold ${formIsPaid ? "text-emerald-600" : "text-rose-600"}`}>
-                  <span className={`w-2.5 h-2.5 rounded-full ${formIsPaid ? "bg-emerald-500" : "bg-rose-500"}`} />
-                  {formIsPaid ? "결제완료" : "미결제"}
-                </span>
-              </button>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-rose-500">고객 불만사항 (CS 기록)</label>
+                <textarea
+                  value={complaints}
+                  onChange={(e) => setComplaints(e.target.value)}
+                  placeholder="고객 불만사항이 발생한 경우, 여기에 상세히 기록해 주세요."
+                  rows={2}
+                  className="w-full text-sm p-3 rounded-xl border border-rose-200 outline-hidden focus:border-rose-500 font-medium text-rose-900 bg-rose-50 resize-y"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {/* 결제 완료 여부 토글 */}
+                <button
+                  type="button"
+                  onClick={() => setIsPaid(!isPaid)}
+                  className={`w-full flex items-center justify-between p-3 rounded-xl border transition active:scale-[0.99] ${
+                    isPaid
+                      ? "bg-emerald-50 border-emerald-200"
+                      : "bg-rose-50 border-rose-200"
+                  }`}
+                >
+                  <span className="text-sm font-bold text-slate-700">결제 완료 여부</span>
+                  <span className={`flex items-center gap-1.5 text-sm font-bold ${isPaid ? "text-emerald-600" : "text-rose-600"}`}>
+                    <span className={`w-2 h-2 rounded-full ${isPaid ? "bg-emerald-500" : "bg-rose-500"}`} />
+                    {isPaid ? "결제완료" : "미결제"}
+                  </span>
+                </button>
+
+                {/* 정리 불량 여부 토글 */}
+                <button
+                  type="button"
+                  onClick={() => setIsCleanUpBad(!isCleanUpBad)}
+                  className={`w-full flex items-center justify-between p-3 rounded-xl border transition active:scale-[0.99] ${
+                    isCleanUpBad
+                      ? "bg-orange-50 border-orange-200"
+                      : "bg-slate-50 border-slate-200"
+                  }`}
+                >
+                  <span className="text-sm font-bold text-slate-700">정리 상태 불량</span>
+                  <span className={`flex items-center gap-1.5 text-sm font-bold ${isCleanUpBad ? "text-orange-600" : "text-slate-500"}`}>
+                    {isCleanUpBad ? "🧹 체크됨" : "양호"}
+                  </span>
+                </button>
+              </div>
 
               <button
                 type="submit"
                 disabled={isSubmitting}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 text-sm rounded-xl hover:shadow-lg transition-all active:scale-[0.98] disabled:opacity-50"
               >
-                {isSubmitting ? "예약 등록 중..." : "예약 생성 완료"}
+                {isSubmitting ? "처리 중..." : modalMode === "edit" ? "수정 사항 저장" : modalMode === "copy" ? "여러 날짜에 복사하기" : "예약 생성 완료"}
               </button>
             </form>
           </div>
