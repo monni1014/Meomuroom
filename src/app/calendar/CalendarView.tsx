@@ -15,6 +15,10 @@ interface UsageLog {
   coffeeCount: number;
   purpose: string | null;
   detail: string | null;
+  extraTime: number;
+  extraPrice: number | null;
+  isExtraPaid: boolean;
+  extraPaymentMethod: string | null;
 }
 
 interface Reservation {
@@ -28,6 +32,7 @@ interface Reservation {
   notified: boolean;
   price: number;
   discount: number;
+  status: string;
   paymentMethod: string | null;
   isPaid: boolean;
   memo: string | null;

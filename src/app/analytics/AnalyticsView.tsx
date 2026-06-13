@@ -11,6 +11,10 @@ interface UsageLog {
   coffeeCount: number;
   purpose: string | null;
   detail: string | null;
+  extraTime: number;
+  extraPrice: number | null;
+  isExtraPaid: boolean;
+  extraPaymentMethod: string | null;
 }
 
 interface Reservation {

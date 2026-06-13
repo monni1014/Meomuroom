@@ -13,6 +13,10 @@ interface UsageLog {
   coffeeCount: number;
   purpose: string | null;
   detail: string | null;
+  extraTime: number;
+  extraPrice: number | null;
+  isExtraPaid: boolean;
+  extraPaymentMethod: string | null;
 }
 
 interface Reservation {
@@ -23,6 +27,8 @@ interface Reservation {
   startTime: string;
   endTime: string;
   price: number;
+  discount: number;
+  status: string;
   paymentMethod: string | null;
   memo: string | null;
   complaints: string | null;
@@ -420,12 +426,6 @@ export default function UsagePage() {
   const toTimeInput = (iso: string) => {
     const d = new Date(iso);
     return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  };
-  // 분을 00/30으로 자동 보정 (0~29분→00, 30~59분→30)
-  const snapHalfHour = (t: string) => {
-    if (!t || !t.includes(":")) return t;
-    const [h, m] = t.split(":");
-    return `${h}:${parseInt(m || "0", 10) < 30 ? "00" : "30"}`;
   };
 
   // Last 5 modified logs for displaying recent actions safely
