@@ -110,6 +110,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   let weekStartForFilter = new Date(startOfToday);
   if (weekStartParam) {
     weekStartForFilter = new Date(weekStartParam);
+    weekStartForFilter.setHours(0, 0, 0, 0); // 로컬 자정으로 정규화 (currentWeekIter와 getTime 일치되게)
   } else {
     const day = weekStartForFilter.getDay();
     const diff = weekStartForFilter.getDate() - day + (day === 0 ? -6 : 1);
