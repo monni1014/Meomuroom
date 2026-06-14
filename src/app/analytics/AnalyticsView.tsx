@@ -68,7 +68,7 @@ export default function AnalyticsPage() {
     .filter((res) => res.status !== "CANCELLED")
     .forEach((res) => {
       const purpose = res.usageLog?.purpose || UNCATEGORIZED_LABEL;
-      const price = (res.price || 0) + (res.usageLog?.extraPrice || 0);
+      const price = (res.price || 0);
       purposeRevenue[purpose] = (purposeRevenue[purpose] || 0) + price;
       totalPurposeRevenue += price;
     });
@@ -90,7 +90,7 @@ export default function AnalyticsPage() {
   thisMonthReservations.forEach((res) => {
     const date = new Date(res.startTime);
     const day = date.getDate();
-    const price = (res.price || 0) + (res.usageLog?.extraPrice || 0);
+    const price = (res.price || 0);
     if (day <= 7) weekRevenue[0] += price;
     else if (day <= 14) weekRevenue[1] += price;
     else if (day <= 21) weekRevenue[2] += price;
@@ -105,7 +105,7 @@ export default function AnalyticsPage() {
   ];
 
   // 3. Dynamic scenario percentages based on accumulated sales
-  const totalRevenue = thisMonthReservations.reduce((sum, res) => sum + (res.price || 0) + (res.usageLog?.extraPrice || 0), 0);
+  const totalRevenue = thisMonthReservations.reduce((sum, res) => sum + (res.price || 0), 0);
 
   // Targets: Scenario 1 (Conservative: 15만 원), Scenario 2 (Standard: 35만 원), Scenario 3 (Aggressive: 60만 원)
   const t1 = 150000;

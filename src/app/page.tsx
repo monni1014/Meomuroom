@@ -133,7 +133,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
 
   const activeMonthly = thisMonthReservations.filter(r => r.status !== "CANCELLED");
   const monthlyGuests = activeMonthly.reduce((sum, r) => sum + (r.usageLog?.headCount ?? 0), 0);
-  const monthlyRevenue = thisMonthReservations.reduce((sum, res) => sum + res.price + (res.usageLog?.extraPrice || 0), 0);
+  // 매출 = 요금(price) 합. 캘린더/엑셀 기준과 일치하도록 추가금(extraPrice)은 제외, 취소수수료(취소건 price)는 포함.
+  const monthlyRevenue = thisMonthReservations.reduce((sum, res) => sum + res.price, 0);
   
   const revenueText = monthlyRevenue >= 10000 
     ? (monthlyRevenue / 10000).toFixed(1) + "만" 
@@ -144,7 +145,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
 
   const activeWeekly = thisWeekReservations.filter(r => r.status !== "CANCELLED");
   const weeklyGuests = activeWeekly.reduce((sum, r) => sum + (r.usageLog?.headCount ?? 0), 0);
-  const weeklyRevenue = thisWeekReservations.reduce((sum, res) => sum + res.price + (res.usageLog?.extraPrice || 0), 0);
+  const weeklyRevenue = thisWeekReservations.reduce((sum, res) => sum + res.price, 0);
   
   const wRevenueText = weeklyRevenue >= 10000 
     ? (weeklyRevenue / 10000).toFixed(1) + "만" 
