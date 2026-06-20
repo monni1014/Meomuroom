@@ -93,23 +93,32 @@ export function parseNaverEmail(subject: string, text: string, messageId: string
 
     // 2. 금액 및 인원 추출
     //    기본형: "결제금액 머무룸 예약하기 1(1) 24,000원"
-    //    쿠폰형: "결제금액 머무룸 예약하기 2(6) 45,000원 = 44,000원"
-    //      → 왼쪽(45,000)은 원가, "=" 뒤(44,000)가 최종 매출, 차액(1,000)이 쿠폰 할인
-    const priceMatch = text.match(/결제\s*금액\s*.*?\(\s*(\d+)\s*\)\s*([\d,]+)원(?:\s*=\s*([\d,]+)원)?/);
+    //    쿠폰형: "결제금액 ... 2(6) 45,000원 = 44,000원"
+    //    복합형: "결제금액 ... 2(11) 55,000원 + 방문자리뷰 3천원 환급(1) 0원 = 54,000원"
+    //    → 항상 '='(맨 오른쪽) 뒤 금액이 실제 결제(매출)액. 쿠폰/리뷰환급 다 반영된 최종값.
     let headCount = 1;
     let price = 0;     // 최종 매출액
     let discount = 0;  // 쿠폰/할인 금액
-    if (priceMatch) {
-      headCount = parseInt(priceMatch[1], 10);
-      const originalPrice = parseInt(priceMatch[2].replace(/,/g, ''), 10);
-      const finalPrice = priceMatch[3] ? parseInt(priceMatch[3].replace(/,/g, ''), 10) : originalPrice;
+    const payLineMatch = text.match(/결제\s*금액[^\n]*/);
+    const payLine = payLineMatch ? payLineMatch[0] : "";
+    if (payLine) {
+      // 인원: 결제금액 줄의 첫 번째 (N)
+      const headM = payLine.match(/\(\s*(\d+)\s*\)/);
+      if (headM) headCount = parseInt(headM[1], 10);
+      // 원가: 첫 번째 금액
+      const firstAmtM = payLine.match(/([\d,]+)\s*원/);
+      const originalPrice = firstAmtM ? parseInt(firstAmtM[1].replace(/,/g, ''), 10) : 0;
+      // 최종가: '=' 뒤 마지막 금액 우선, 없으면 원가
+      const eqMatches = [...payLine.matchAll(/=\s*([\d,]+)\s*원/g)];
+      const finalPrice = eqMatches.length > 0
+        ? parseInt(eqMatches[eqMatches.length - 1][1].replace(/,/g, ''), 10)
+        : originalPrice;
       price = finalPrice;
       discount = Math.max(0, originalPrice - finalPrice); // 음수 방지
     } else {
-      // 대안 정규식 (형식이 조금 다를 경우 대비)
+      // 대안 (형식이 많이 다를 경우)
       const fallbackPriceMatch = text.match(/([\d,]+)원/);
       if (fallbackPriceMatch) price = parseInt(fallbackPriceMatch[1].replace(/,/g, ''), 10);
-
       const fallbackHeadMatch = text.match(/\(\s*(\d+)\s*\)/);
       if (fallbackHeadMatch) headCount = parseInt(fallbackHeadMatch[1], 10);
     }

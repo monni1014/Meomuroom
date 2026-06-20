@@ -219,100 +219,53 @@ export default function UsagePage() {
     }
   };
 
-  const recalculateExtraPrice = (newHeadCount: number, newStart: string, newEnd: string) => {
+  // 추가금은 자동계산하지 않는다(수동 입력). 시간이 바뀌면 "추가시간(기록)"만 갱신한다.
+  // 연장 시 인원이 달라지는 경우가 많아 공식으로 추가금을 못 맞추므로, 금액은 사장님이 직접 입력.
+  const recalcExtraTime = (newStart: string, newEnd: string) => {
     if (!selectedResId) return;
     const found = reservations.find((r) => r.id === selectedResId);
     if (!found) return;
 
-    const startD = new Date(found.startTime);
-    let rate = 0;
-    
-    if (found.source === "naver") {
-      const isWeekend = startD.getDay() === 0 || startD.getDay() === 6;
-      rate = isWeekend ? 2500 : 2000;
-    } else if (found.source === "spacecloud") {
-      const isWeekend = startD.getDay() === 0 || startD.getDay() === 6;
-      const holidays = [
-        "01-01", "02-16", "02-17", "02-18", "03-01", "03-02", "05-05", "05-24", "05-25",
-        "06-06", "08-15", "09-24", "09-25", "09-26", "10-03", "10-09", "12-25"
-      ];
-      const isHoliday = holidays.includes(found.startTime.substring(5, 10)); // MM-DD
-      rate = (isWeekend || isHoliday) ? 3000 : 2500;
-    } else {
-      rate = 2000;
-    }
-
-    // 예약 기준 시간 (DB 원본)
+    // 예약 기준 시간 (DB 원본에서 기존 추가시간 빼서 원래 예약시간 산출)
     const origStart = new Date(found.startTime);
     const origEnd = new Date(found.endTime);
-    let currentDbDuration = (origEnd.getTime() - origStart.getTime()) / (1000 * 60 * 60);
-    let reservedHours = currentDbDuration - (found.usageLog?.extraTime || 0);
+    const dbDuration = (origEnd.getTime() - origStart.getTime()) / (1000 * 60 * 60);
+    let reservedHours = dbDuration - (found.usageLog?.extraTime || 0);
     if (reservedHours <= 0) reservedHours = 1;
 
-    // 변경된 실제 사용 시간
-    const sDate = new Date(`1970-01-01T${newStart}:00`);
-    let eDate = new Date(`1970-01-01T${newEnd}:00`);
-    if (eDate <= sDate) {
-      eDate = new Date(`1970-01-02T${newEnd}:00`);
-    }
-    let newDurationHours = (eDate.getTime() - sDate.getTime()) / (1000 * 60 * 60);
-    if (newDurationHours <= 0) newDurationHours = 1;
+    // 변경된 실제 사용 시간 (분 단위 계산, 26시 같은 값 안전 처리)
+    const hmToMin = (t: string) => { const [h, m] = (t || "0:0").split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+    const sMin = hmToMin(newStart);
+    let eMin = hmToMin(newEnd);
+    if (eMin <= sMin) eMin += 24 * 60;
+    const newDurationHours = (eMin - sMin) / 60;
 
-    const calculatedExtraTime = newDurationHours - reservedHours;
-    setExtraTime(calculatedExtraTime);
-
-    // 예약 인원
-    let reservedHeadCount = 0;
-    if (found.usageLog?.reservedHeadCount) {
-      reservedHeadCount = found.usageLog.reservedHeadCount;
-    } else {
-      if (rate > 0) {
-        reservedHeadCount = Math.round(((found.price || 0) + (found.discount || 0)) / (rate * reservedHours));
-      }
-      if (reservedHeadCount <= 0 || !isFinite(reservedHeadCount)) reservedHeadCount = 2; // fallback
-    }
-
-    // 최소 과금 인원 적용
-    let minHeadCount = 4;
-    if (found.source === "spacecloud") {
-      minHeadCount = 5;
-    }
-    const billableNewHeadCount = Math.max(minHeadCount, newHeadCount);
-    const billableReservedHeadCount = Math.max(minHeadCount, reservedHeadCount);
-
-    // 계산식: (실제인원 * 사용시간 * 요율) - (예약인원 * 예약시간 * 요율)
-    const actualValue = billableNewHeadCount * rate * newDurationHours;
-    const reservedValue = billableReservedHeadCount * rate * reservedHours;
-
-    let calculatedExtra = actualValue - reservedValue;
-    if (calculatedExtra < 0) calculatedExtra = 0; // 줄어들어도 환불 로직은 보통 없으므로 0으로 하한 설정
-
-    setExtraPrice(calculatedExtra);
-    setCurrentPrice(originalPrice + calculatedExtra);
+    const extra = newDurationHours - reservedHours;
+    setExtraTime(extra > 0 ? extra : 0); // 시간 기록용 (금액엔 영향 없음)
   };
 
   const handleHeadCountChange = (newCount: number) => {
     if (newCount < 0) return;
-    setHeadCount(newCount);
-    recalculateExtraPrice(newCount, editStart, editEnd);
+    setHeadCount(newCount); // 실제 인원 기록만 (금액 영향 없음)
   };
 
   const handleStartTimeChange = (newStart: string) => {
     setEditStart(newStart);
-    recalculateExtraPrice(headCount, newStart, editEnd);
+    recalcExtraTime(newStart, editEnd);
   };
 
   const handleEndTimeChange = (newEnd: string) => {
     setEditEnd(newEnd);
-    recalculateExtraPrice(headCount, editStart, newEnd);
+    recalcExtraTime(editStart, newEnd);
   };
 
   const addExtraTime = (hours: number) => {
     if (!editEnd) return;
     const pad2 = (n: number) => String(n).padStart(2, "0");
-    const eDate = new Date(`1970-01-01T${editEnd}:00`);
-    eDate.setHours(eDate.getHours() + hours);
-    const newEnd = `${pad2(eDate.getHours())}:${pad2(eDate.getMinutes())}`;
+    const [h, m] = editEnd.split(":").map(Number);
+    let eMin = (h || 0) * 60 + (m || 0) + hours * 60;
+    if (eMin > 26 * 60) eMin = 26 * 60; // 최대 26시까지
+    const newEnd = `${pad2(Math.floor(eMin / 60))}:${pad2(eMin % 60)}`;
     handleEndTimeChange(newEnd);
   };
 
@@ -322,6 +275,13 @@ export default function UsagePage() {
     if (editDate && editStart && editEnd && editEnd <= editStart) {
       return alert("종료 시간이 시작 시간보다 빨라요. 확인해 주세요.");
     }
+
+    // "HH:mm"(25/26시 포함) → 올바른 ISO. 24시 이상은 익일 시각으로 자동 롤오버.
+    const buildISO = (dateStr: string, timeStr: string) => {
+      const [y, mo, d] = dateStr.split("-").map(Number);
+      const [hh, mi] = timeStr.split(":").map(Number);
+      return new Date(y, mo - 1, d, hh || 0, mi || 0, 0, 0).toISOString();
+    };
 
     try {
       setIsSubmitting(true);
@@ -346,9 +306,9 @@ export default function UsagePage() {
           complaints: complaints.trim() || null, // 고객 불만사항
           isPaid,
           isCleanUpBad,
-          // 시간 수정
-          ...(editDate && editStart ? { startTime: `${editDate}T${editStart}:00` } : {}),
-          ...(editDate && editEnd ? { endTime: `${editDate}T${editEnd}:00` } : {}),
+          // 시간 수정 (26시 등은 익일로 변환)
+          ...(editDate && editStart ? { startTime: buildISO(editDate, editStart) } : {}),
+          ...(editDate && editEnd ? { endTime: buildISO(editDate, editEnd) } : {}),
         }),
       });
 
@@ -524,8 +484,8 @@ export default function UsagePage() {
                   <TimeSelect value={editStart} onChange={handleStartTimeChange} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-500">종료 (수정 시 추가금 자동계산)</label>
-                  <TimeSelect value={editEnd} onChange={handleEndTimeChange} />
+                  <label className="text-[11px] font-bold text-slate-500">종료 (수정 시 추가시간만 자동 반영)</label>
+                  <TimeSelect value={editEnd} onChange={handleEndTimeChange} maxHour={26} />
                 </div>
               </div>
             </div>
