@@ -1,4 +1,4 @@
-import { Calendar, Users, Coffee, TrendingUp, RefreshCw, Building2 } from "lucide-react";
+import { Calendar, Users, Coffee, TrendingUp, RefreshCw, Building2, Clock } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import EmailSyncButton from "./EmailSyncButton";
 import AutoRefresh from "./AutoRefresh";
@@ -24,16 +24,14 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const startOfThisMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
   const endOfThisMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth() + 1, 0, 23, 59, 59, 999);
 
-  // Fetch today's reservations (오늘 메일로 연동되어 들어온 예약만 표시)
+  // Fetch today's reservations (오늘 들어온 예약 — 메일 자동연동 + 수동 예약 모두 포함)
   const todayReservations = await prisma.reservation.findMany({
     where: {
       createdAt: {
         gte: startOfToday,
         lte: endOfToday
       },
-      emailId: {
-        not: null
-      }
+      status: { not: "CANCELLED" }
     },
     orderBy: {
       createdAt: "desc"
@@ -132,7 +130,16 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   });
 
   const activeMonthly = thisMonthReservations.filter(r => r.status !== "CANCELLED");
+  // 이용객(실제 인원)은 실제 이용한 건만 → 취소·노쇼 제외 (노쇼는 아무도 안 왔으니 0명)
   const monthlyGuests = activeMonthly.reduce((sum, r) => sum + (r.usageLog?.headCount ?? 0), 0);
+  // 건수는 "성사된 예약" 기준 → 노쇼는 포함(슬롯 판매됨), 일반 취소만 제외
+  const countedMonthly = thisMonthReservations.filter(r => r.status !== "CANCELLED" || r.isNoShow);
+  // 총 예약 시간 (성사된 건 기준, 공간별 분리)
+  const sumHours = (list: typeof countedMonthly) =>
+    Math.round(list.reduce((s, r) => s + (r.endTime.getTime() - r.startTime.getTime()) / 3600000, 0));
+  const monthHours = sumHours(countedMonthly);
+  const room1Hours = sumHours(countedMonthly.filter(r => r.roomName === "머무룸1"));
+  const room2Hours = sumHours(countedMonthly.filter(r => r.roomName === "머무룸2"));
   // 매출 = 요금(price) 합. 캘린더/엑셀 기준과 일치하도록 추가금(extraPrice)은 제외, 취소수수료(취소건 price)는 포함.
   const monthlyRevenue = thisMonthReservations.reduce((sum, res) => sum + res.price, 0);
   
@@ -140,19 +147,20 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
     ? (monthlyRevenue / 10000).toFixed(1) + "만" 
     : monthlyRevenue.toLocaleString();
 
-  const room1Count = thisMonthReservations.filter(r => r.roomName === "머무룸1").length;
-  const room2Count = thisMonthReservations.filter(r => r.roomName === "머무룸2").length;
+  const room1Count = countedMonthly.filter(r => r.roomName === "머무룸1").length;
+  const room2Count = countedMonthly.filter(r => r.roomName === "머무룸2").length;
 
   const activeWeekly = thisWeekReservations.filter(r => r.status !== "CANCELLED");
   const weeklyGuests = activeWeekly.reduce((sum, r) => sum + (r.usageLog?.headCount ?? 0), 0);
+  const countedWeekly = thisWeekReservations.filter(r => r.status !== "CANCELLED" || r.isNoShow);
   const weeklyRevenue = thisWeekReservations.reduce((sum, res) => sum + res.price, 0);
   
   const wRevenueText = weeklyRevenue >= 10000 
     ? (weeklyRevenue / 10000).toFixed(1) + "만" 
     : weeklyRevenue.toLocaleString();
 
-  const wRoom1Count = thisWeekReservations.filter(r => r.roomName === "머무룸1").length;
-  const wRoom2Count = thisWeekReservations.filter(r => r.roomName === "머무룸2").length;
+  const wRoom1Count = countedWeekly.filter(r => r.roomName === "머무룸1").length;
+  const wRoom2Count = countedWeekly.filter(r => r.roomName === "머무룸2").length;
 
   const getSourceDisplay = (source: string) => {
     switch(source) {
@@ -209,33 +217,37 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
             <span className="text-xs text-slate-400">이번 달 예약 통계</span>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-2">
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
               <div className="p-3 bg-indigo-50 rounded-full text-indigo-600">
+                <Clock className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-medium text-slate-500">총 예약 시간</p>
+              <p className="text-2xl font-semibold text-slate-900">{monthHours}시간</p>
+              <p className="text-xs text-slate-400">
+                <span className="text-sky-600">룸1</span> {room1Hours} · <span className="text-purple-600">룸2</span> {room2Hours}
+              </p>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
+              <div className="p-3 bg-sky-50 rounded-full text-sky-600">
                 <Calendar className="w-6 h-6" />
               </div>
-              <p className="text-sm font-medium text-slate-500">이번 달 예약</p>
-              <p className="text-2xl font-semibold text-slate-900">{thisMonthReservations.length}건</p>
+              <p className="text-sm font-medium text-slate-500">예약 건수</p>
+              <p className="text-2xl font-semibold text-slate-900">{countedMonthly.length}건</p>
+              <p className="text-xs text-slate-400">
+                <span className="text-sky-600">룸1</span> {room1Count} · <span className="text-purple-600">룸2</span> {room2Count}
+              </p>
             </div>
-            
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-2">
+
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
               <div className="p-3 bg-emerald-50 rounded-full text-emerald-600">
                 <Users className="w-6 h-6" />
               </div>
               <p className="text-sm font-medium text-slate-500">월 이용객</p>
               <p className="text-2xl font-semibold text-slate-900">{monthlyGuests}명</p>
             </div>
-            
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-2">
-              <div className="p-3 bg-sky-50 rounded-full text-sky-600">
-                <Building2 className="w-6 h-6" />
-              </div>
-              <p className="text-sm font-medium text-slate-500">공간별 예약</p>
-              <p className="text-lg font-semibold text-slate-900">
-                <span className="text-sky-600">룸1</span> {room1Count} · <span className="text-purple-600">룸2</span> {room2Count}
-              </p>
-            </div>
-            
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-2">
+
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
               <div className="p-3 bg-rose-50 rounded-full text-rose-600">
                 <TrendingUp className="w-6 h-6" />
               </div>
@@ -259,7 +271,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
                 <Calendar className="w-5 h-5" />
               </div>
               <p className="text-xs font-medium text-slate-500">주간 예약</p>
-              <p className="text-xl font-bold text-slate-800">{thisWeekReservations.length}건</p>
+              <p className="text-xl font-bold text-slate-800">{countedWeekly.length}건</p>
             </div>
             
             <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 flex flex-col items-center justify-center space-y-2">

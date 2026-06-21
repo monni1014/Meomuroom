@@ -20,6 +20,7 @@ model Reservation {
   price        Int       @default(0)     // 최종 매출액 (쿠폰 할인 적용 후)
   discount     Int       @default(0)     // 사용한 쿠폰/할인 금액 (원가 - 최종가)
   status       String    @default("CONFIRMED") // "CONFIRMED" | "CANCELLED"
+  isNoShow     Boolean   @default(false)        // 취소 중에서도 노쇼인 경우 (수수료/집계는 취소와 동일, 표기만 구분)
   paymentMethod String?  @default("온라인")     // "현장카드" | "계좌이체" | "온라인"
   isPaid        Boolean  @default(true)         // 결제 완료 여부 (이체 등 미결제는 false)
   emailId      String?   @unique

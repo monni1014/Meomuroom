@@ -29,6 +29,7 @@ interface Reservation {
   price: number;
   discount: number;
   status: string;
+  isNoShow: boolean;
   paymentMethod: string | null;
   memo: string | null;
   complaints: string | null;
@@ -269,6 +270,47 @@ export default function UsagePage() {
     handleEndTimeChange(newEnd);
   };
 
+  // 수동 취소/노쇼 (기록 남기고 수수료를 매출로 반영. 매출·집계는 동일, 표기만 구분)
+  const handleCancelReservation = async (isNoShow: boolean) => {
+    if (!selectedResId) return;
+    const label = isNoShow ? "노쇼" : "취소";
+    const feeStr = prompt(
+      `${label} 처리합니다.\n${label} 수수료(매출로 잡힐 금액)를 입력하세요.\n· 수수료 없음 → 0\n· 전액(100%) → ${currentPrice.toLocaleString()}원`,
+      String(currentPrice)
+    );
+    if (feeStr === null) return;
+    const fee = parseInt(feeStr.replace(/[^\d]/g, ""), 10);
+    if (isNaN(fee)) { alert("숫자를 입력해 주세요."); return; }
+    try {
+      const res = await fetch(`/api/reservations/${selectedResId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "CANCELLED", price: fee, isNoShow }),
+      });
+      if (res.ok) fetchReservations(selectedResId);
+      else alert(`${label} 처리에 실패했습니다.`);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 취소된 예약 되살리기 (확정 상태로 복귀, 금액·시간은 아래에서 직접 조정)
+  const handleRestore = async () => {
+    if (!selectedResId) return;
+    if (!confirm("이 취소 예약을 다시 살릴까요?\n예약 확정 상태로 되돌립니다. (금액·시간은 아래에서 조정하세요)")) return;
+    try {
+      const res = await fetch(`/api/reservations/${selectedResId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "CONFIRMED", isNoShow: false }),
+      });
+      if (res.ok) fetchReservations(selectedResId);
+      else alert("되살리기에 실패했습니다.");
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleSave = async () => {
     if (!selectedResId) return alert("기록할 예약을 먼저 선택하세요.");
 
@@ -449,6 +491,40 @@ export default function UsagePage() {
           {/* 공간명 수정 */}
           {selectedRes && (
             <div className="mt-3 space-y-3">
+              {selectedRes.status === "CANCELLED" ? (
+                <div className={`flex items-center justify-between gap-2 p-3 rounded-xl border ${selectedRes.isNoShow ? "bg-orange-50 border-orange-200" : "bg-slate-100 border-slate-200"}`}>
+                  <span className={`text-sm font-semibold ${selectedRes.isNoShow ? "text-orange-700" : "text-slate-600"}`}>
+                    {selectedRes.isNoShow ? "👻 노쇼 처리된 예약입니다" : "🚫 취소된 예약입니다"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleRestore}
+                    className="px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition active:scale-95 whitespace-nowrap"
+                    title="다시 확정 상태로 되살리기"
+                  >
+                    ↩️ 되살리기
+                  </button>
+                </div>
+              ) : (
+                <div className="flex justify-end gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleCancelReservation(false)}
+                    className="px-2.5 py-1.5 text-[11px] font-bold text-slate-400 hover:text-amber-700 rounded-lg hover:bg-amber-50 transition active:scale-95 whitespace-nowrap"
+                    title="취소 처리 (수수료 입력 — 기록 남김)"
+                  >
+                    🚫 취소 처리
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCancelReservation(true)}
+                    className="px-2.5 py-1.5 text-[11px] font-bold text-orange-500 hover:text-orange-700 rounded-lg hover:bg-orange-50 transition active:scale-95 whitespace-nowrap"
+                    title="노쇼 처리 (보통 100% 과금 — 기록 남김)"
+                  >
+                    👻 노쇼 처리
+                  </button>
+                </div>
+              )}
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-500">이용 공간</label>
                 <div className="flex gap-2">

@@ -33,6 +33,7 @@ interface Reservation {
   price: number;
   discount: number;
   status: string;
+  isNoShow: boolean;
   paymentMethod: string | null;
   isPaid: boolean;
   memo: string | null;
@@ -265,6 +266,46 @@ export default function CalendarPage() {
       });
       if (res.ok) fetchReservations();
       else alert("결제완료 처리에 실패했습니다.");
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 수동 취소/노쇼 (기록 남기고 수수료를 매출로 반영. 수수료 없으면 삭제하면 됨)
+  // isNoShow=true면 노쇼(보통 100% 과금), false면 일반 취소. 매출·집계 처리는 동일, 표기만 구분.
+  const handleCancel = async (id: string, currentPrice: number, isNoShow: boolean) => {
+    const label = isNoShow ? "노쇼" : "취소";
+    const feeStr = prompt(
+      `${label} 처리합니다.\n${label} 수수료(매출로 잡힐 금액)를 입력하세요.\n· 수수료 없음 → 0\n· 전액(100%) → ${currentPrice.toLocaleString()}원`,
+      String(currentPrice)
+    );
+    if (feeStr === null) return; // 입력창 취소
+    const fee = parseInt(feeStr.replace(/[^\d]/g, ""), 10);
+    if (isNaN(fee)) { alert("숫자를 입력해 주세요."); return; }
+    try {
+      const res = await fetch(`/api/reservations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "CANCELLED", price: fee, isNoShow }),
+      });
+      if (res.ok) fetchReservations();
+      else alert(`${label} 처리에 실패했습니다.`);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 취소된 예약 되살리기 (예: 전날취소 100% 수수료 → 수동으로 일정 조정 후 다시 확정)
+  const handleRestore = async (id: string) => {
+    if (!confirm("이 취소 예약을 다시 살릴까요?\n예약 확정 상태로 되돌립니다. (금액·시간은 이용현황에서 따로 조정하세요)")) return;
+    try {
+      const res = await fetch(`/api/reservations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "CONFIRMED", isNoShow: false }),
+      });
+      if (res.ok) fetchReservations();
+      else alert("되살리기에 실패했습니다.");
     } catch (err) {
       console.error(err);
     }
@@ -526,9 +567,15 @@ export default function CalendarPage() {
                   <div className="space-y-2 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {isCancelled && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-600">
-                          🚫 취소됨
-                        </span>
+                        res.isNoShow ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700 border border-orange-300">
+                            👻 노쇼
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-600">
+                            🚫 취소됨
+                          </span>
+                        )
                       )}
                       <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", getSourceBadgeStyle(res.source))}>
                         {getSourceDisplay(res.source)}
@@ -601,6 +648,15 @@ export default function CalendarPage() {
                   </div>
 
                   <div className="flex flex-col items-end gap-1.5">
+                    {isCancelled && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleRestore(res.id); }}
+                        className="px-2.5 py-1.5 text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition active:scale-95 whitespace-nowrap"
+                        title="취소된 예약을 다시 확정 상태로 되살리기"
+                      >
+                        ↩️ 되살리기
+                      </button>
+                    )}
                     {!isCancelled && !res.isPaid && (
                       <button
                         onClick={() => handleMarkPaid(res.id)}
@@ -625,10 +681,28 @@ export default function CalendarPage() {
                       >
                         <Copy className="w-4 h-4" />
                       </button>
+                      {!isCancelled && (
+                        <>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleCancel(res.id, res.price, false); }}
+                            className="px-2 py-1.5 text-[11px] font-bold text-slate-500 hover:text-amber-700 rounded-lg hover:bg-amber-50 transition active:scale-95 whitespace-nowrap"
+                            title="취소 처리 (수수료 입력 — 기록 남김)"
+                          >
+                            취소
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleCancel(res.id, res.price, true); }}
+                            className="px-2 py-1.5 text-[11px] font-bold text-orange-500 hover:text-orange-700 rounded-lg hover:bg-orange-50 transition active:scale-95 whitespace-nowrap"
+                            title="노쇼 처리 (보통 100% 과금 — 기록 남김)"
+                          >
+                            노쇼
+                          </button>
+                        </>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); handleDeleteReservation(res.id); }}
                         className="p-2 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 transition active:scale-95"
-                        title="예약 및 로그 삭제"
+                        title="예약 및 로그 완전 삭제"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

@@ -25,6 +25,7 @@ interface Reservation {
   endTime: string;
   price: number;
   status: string;
+  isNoShow: boolean;
   usageLog: UsageLog | null;
 }
 
@@ -107,6 +108,16 @@ export default function AnalyticsPage() {
   // 3. Dynamic scenario percentages based on accumulated sales
   const totalRevenue = thisMonthReservations.reduce((sum, res) => sum + (res.price || 0), 0);
 
+  // 취소/노쇼 집계 (대시보드엔 안 띄우고 통계에서만 표기)
+  const cancelledList = thisMonthReservations.filter((res) => res.status === "CANCELLED");
+  const noShowList = cancelledList.filter((res) => res.isNoShow);
+  const realCancelList = cancelledList.filter((res) => !res.isNoShow);
+  const noShowCount = noShowList.length;
+  const realCancelCount = realCancelList.length;
+  const cancelledFee = cancelledList.reduce((sum, res) => sum + (res.price || 0), 0); // 취소+노쇼 수수료 합
+  // 예약 건수 = 성사된 건(확정 + 노쇼). 일반 취소만 제외.
+  const bookedCount = thisMonthReservations.length - realCancelCount;
+
   // Targets: Scenario 1 (Conservative: 15만 원), Scenario 2 (Standard: 35만 원), Scenario 3 (Aggressive: 60만 원)
   const t1 = 150000;
   const t2 = 350000;
@@ -139,6 +150,26 @@ export default function AnalyticsPage() {
         <p className="text-[11px] font-bold tracking-wider text-white/80 uppercase relative z-10">이달의 총 매출액</p>
         <p className="text-3xl font-extrabold relative z-10">{totalRevenue.toLocaleString()}원</p>
         <p className="text-[10px] text-white/70 mt-2 font-medium relative z-10">네이버 및 스페이스클라우드 webhook 실시간 종합 집계액</p>
+      </div>
+
+      {/* 이용/취소/노쇼 집계 (대시보드엔 없고 통계에서만) */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 text-center">
+          <p className="text-[11px] font-bold text-slate-400">예약 건수 (노쇼 포함)</p>
+          <p className="text-xl font-extrabold text-slate-800 mt-1">{bookedCount}건</p>
+        </div>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 text-center">
+          <p className="text-[11px] font-bold text-slate-400">취소</p>
+          <p className="text-xl font-extrabold text-slate-800 mt-1">{realCancelCount}건</p>
+        </div>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-orange-100 text-center">
+          <p className="text-[11px] font-bold text-orange-400">노쇼</p>
+          <p className="text-xl font-extrabold text-orange-600 mt-1">{noShowCount}건</p>
+        </div>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 text-center">
+          <p className="text-[11px] font-bold text-slate-400">취소·노쇼 수수료</p>
+          <p className="text-xl font-extrabold text-slate-800 mt-1">{cancelledFee.toLocaleString()}원</p>
+        </div>
       </div>
 
       {/* Purpose Ratio Section */}

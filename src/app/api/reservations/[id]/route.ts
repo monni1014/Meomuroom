@@ -8,7 +8,7 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const { customerName, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime } = body;
+    const { customerName, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow } = body;
 
     // First check if reservation exists
     const existing = await prisma.reservation.findUnique({
@@ -35,6 +35,8 @@ export async function PATCH(
     if (complaints !== undefined) updateData.complaints = complaints;
     if (roomName !== undefined) updateData.roomName = roomName;
     if (isCleanUpBad !== undefined) updateData.isCleanUpBad = Boolean(isCleanUpBad);
+    if (status !== undefined) updateData.status = status; // CONFIRMED ↔ CANCELLED (취소 되살리기 등)
+    if (isNoShow !== undefined) updateData.isNoShow = Boolean(isNoShow); // 노쇼 표기 (취소의 하위 구분)
 
     // Prepare usage data update
     if (headCount !== undefined || reservedHeadCount !== undefined || coffeeCount !== undefined || purpose !== undefined || detail !== undefined || extraPrice !== undefined || isExtraPaid !== undefined || extraPaymentMethod !== undefined || extraTime !== undefined) {
