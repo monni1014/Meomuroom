@@ -1,4 +1,4 @@
-import { Calendar, Users, Coffee, TrendingUp, RefreshCw, Building2, Clock } from "lucide-react";
+import { Calendar, Users, Coffee, TrendingUp, RefreshCw, Clock } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import EmailSyncButton from "./EmailSyncButton";
 import AutoRefresh from "./AutoRefresh";
@@ -131,7 +131,10 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
 
   const activeMonthly = thisMonthReservations.filter(r => r.status !== "CANCELLED");
   // 이용객(실제 인원)은 실제 이용한 건만 → 취소·노쇼 제외 (노쇼는 아무도 안 왔으니 0명)
-  const monthlyGuests = activeMonthly.reduce((sum, r) => sum + (r.usageLog?.headCount ?? 0), 0);
+  const sumGuests = (list: typeof activeMonthly) => list.reduce((sum, r) => sum + (r.usageLog?.headCount ?? 0), 0);
+  const monthlyGuests = sumGuests(activeMonthly);
+  const room1Guests = sumGuests(activeMonthly.filter(r => r.roomName === "머무룸1"));
+  const room2Guests = sumGuests(activeMonthly.filter(r => r.roomName === "머무룸2"));
   // 건수는 "성사된 예약" 기준 → 노쇼는 포함(슬롯 판매됨), 일반 취소만 제외
   const countedMonthly = thisMonthReservations.filter(r => r.status !== "CANCELLED" || r.isNoShow);
   // 총 예약 시간 (성사된 건 기준, 공간별 분리)
@@ -142,25 +145,32 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const room2Hours = sumHours(countedMonthly.filter(r => r.roomName === "머무룸2"));
   // 매출 = 요금(price) 합. 캘린더/엑셀 기준과 일치하도록 추가금(extraPrice)은 제외, 취소수수료(취소건 price)는 포함.
   const monthlyRevenue = thisMonthReservations.reduce((sum, res) => sum + res.price, 0);
-  
-  const revenueText = monthlyRevenue >= 10000 
-    ? (monthlyRevenue / 10000).toFixed(1) + "만" 
-    : monthlyRevenue.toLocaleString();
+  const sumPrice = (list: typeof thisMonthReservations) => list.reduce((s, r) => s + r.price, 0);
+  const fmtMan = (won: number) => won >= 10000 ? (won / 10000).toFixed(1) + "만" : won.toLocaleString();
+  const room1Revenue = fmtMan(sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸1")));
+  const room2Revenue = fmtMan(sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸2")));
+
+  const revenueText = fmtMan(monthlyRevenue);
 
   const room1Count = countedMonthly.filter(r => r.roomName === "머무룸1").length;
   const room2Count = countedMonthly.filter(r => r.roomName === "머무룸2").length;
 
   const activeWeekly = thisWeekReservations.filter(r => r.status !== "CANCELLED");
-  const weeklyGuests = activeWeekly.reduce((sum, r) => sum + (r.usageLog?.headCount ?? 0), 0);
+  const weeklyGuests = sumGuests(activeWeekly);
+  const wRoom1Guests = sumGuests(activeWeekly.filter(r => r.roomName === "머무룸1"));
+  const wRoom2Guests = sumGuests(activeWeekly.filter(r => r.roomName === "머무룸2"));
   const countedWeekly = thisWeekReservations.filter(r => r.status !== "CANCELLED" || r.isNoShow);
   const weeklyRevenue = thisWeekReservations.reduce((sum, res) => sum + res.price, 0);
-  
-  const wRevenueText = weeklyRevenue >= 10000 
-    ? (weeklyRevenue / 10000).toFixed(1) + "만" 
-    : weeklyRevenue.toLocaleString();
+  const wRoom1Revenue = fmtMan(sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸1")));
+  const wRoom2Revenue = fmtMan(sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸2")));
+
+  const wRevenueText = fmtMan(weeklyRevenue);
 
   const wRoom1Count = countedWeekly.filter(r => r.roomName === "머무룸1").length;
   const wRoom2Count = countedWeekly.filter(r => r.roomName === "머무룸2").length;
+  const weekHours = sumHours(countedWeekly);
+  const wRoom1Hours = sumHours(countedWeekly.filter(r => r.roomName === "머무룸1"));
+  const wRoom2Hours = sumHours(countedWeekly.filter(r => r.roomName === "머무룸2"));
 
   const getSourceDisplay = (source: string) => {
     switch(source) {
@@ -245,6 +255,9 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-sm font-medium text-slate-500">월 이용객</p>
               <p className="text-2xl font-semibold text-slate-900">{monthlyGuests}명</p>
+              <p className="text-xs text-slate-400">
+                <span className="text-sky-600">룸1</span> {room1Guests} · <span className="text-purple-600">룸2</span> {room2Guests}
+              </p>
             </div>
 
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
@@ -253,6 +266,9 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-sm font-medium text-slate-500">월 매출</p>
               <p className="text-2xl font-semibold text-slate-900">{revenueText}</p>
+              <p className="text-xs text-slate-400">
+                <span className="text-sky-600">룸1</span> {room1Revenue} · <span className="text-purple-600">룸2</span> {room2Revenue}
+              </p>
             </div>
           </div>
         </div>
@@ -266,38 +282,48 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
             </div>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 flex flex-col items-center justify-center space-y-2">
+            <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
               <div className="p-3 bg-white rounded-full text-indigo-400 shadow-sm">
+                <Clock className="w-5 h-5" />
+              </div>
+              <p className="text-xs font-medium text-slate-500">총 예약 시간</p>
+              <p className="text-xl font-bold text-slate-800">{weekHours}시간</p>
+              <p className="text-[11px] text-slate-400">
+                <span className="text-sky-600">룸1</span> {wRoom1Hours} · <span className="text-purple-600">룸2</span> {wRoom2Hours}
+              </p>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
+              <div className="p-3 bg-white rounded-full text-sky-400 shadow-sm">
                 <Calendar className="w-5 h-5" />
               </div>
-              <p className="text-xs font-medium text-slate-500">주간 예약</p>
+              <p className="text-xs font-medium text-slate-500">예약 건수</p>
               <p className="text-xl font-bold text-slate-800">{countedWeekly.length}건</p>
+              <p className="text-[11px] text-slate-400">
+                <span className="text-sky-600">룸1</span> {wRoom1Count} · <span className="text-purple-600">룸2</span> {wRoom2Count}
+              </p>
             </div>
-            
-            <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 flex flex-col items-center justify-center space-y-2">
+
+            <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
               <div className="p-3 bg-white rounded-full text-emerald-400 shadow-sm">
                 <Users className="w-5 h-5" />
               </div>
               <p className="text-xs font-medium text-slate-500">주 이용객</p>
               <p className="text-xl font-bold text-slate-800">{weeklyGuests}명</p>
-            </div>
-            
-            <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 flex flex-col items-center justify-center space-y-2">
-              <div className="p-3 bg-white rounded-full text-sky-400 shadow-sm">
-                <Building2 className="w-5 h-5" />
-              </div>
-              <p className="text-xs font-medium text-slate-500">공간별 예약</p>
-              <p className="text-base font-bold text-slate-800">
-                <span className="text-sky-600">룸1</span> {wRoom1Count} · <span className="text-purple-600">룸2</span> {wRoom2Count}
+              <p className="text-[11px] text-slate-400">
+                <span className="text-sky-600">룸1</span> {wRoom1Guests} · <span className="text-purple-600">룸2</span> {wRoom2Guests}
               </p>
             </div>
-            
-            <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 flex flex-col items-center justify-center space-y-2">
+
+            <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
               <div className="p-3 bg-white rounded-full text-rose-400 shadow-sm">
                 <TrendingUp className="w-5 h-5" />
               </div>
               <p className="text-xs font-medium text-slate-500">주 매출</p>
               <p className="text-xl font-bold text-slate-800">{wRevenueText}</p>
+              <p className="text-[11px] text-slate-400">
+                <span className="text-sky-600">룸1</span> {wRoom1Revenue} · <span className="text-purple-600">룸2</span> {wRoom2Revenue}
+              </p>
             </div>
           </div>
         </div>
