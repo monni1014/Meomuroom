@@ -85,6 +85,15 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
       const subject = parsedMail.subject || '';
       const text = parsedMail.text || '';
 
+      // 무통장입금 "입금대기(접수)" 메일은 무시한다.
+      //  - 무통장입금은 ① 접수=입금대기 ② 입금완료=확정, 두 통이 오고 같은 예약이다.
+      //  - 입금 전(미확정)엔 슬롯도 안 막고 등록도 안 한다. 입금되면 "확정" 메일이 따로 오므로 그때 등록.
+      //  - 이렇게 해야 같은 예약이 2건 등록되는 중복도 사라진다.
+      if (subject.includes('입금대기') || /결제상태\s*입금대기/.test(text)) {
+        console.log(`[EmailSync] 입금대기(미확정) 메일 무시: ${subject}`);
+        continue;
+      }
+
       // 이미 등록된 메일인지 확인
       const existing = await prisma.reservation.findUnique({ where: { emailId: messageId } });
       if (existing) {
