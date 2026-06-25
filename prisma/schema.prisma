@@ -31,6 +31,14 @@ model Reservation {
   usageLog     UsageLog?
 }
 
+model ProcessedEmail {
+  id            String   @id @default(cuid())
+  messageId     String   @unique
+  source        String?
+  reservationId String?
+  createdAt     DateTime @default(now())
+}
+
 model UsageLog {
   id            String      @id @default(cuid())
   reservationId String      @unique

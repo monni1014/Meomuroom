@@ -2,8 +2,31 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { parseEmail, ParsedReservation } from './email-parser';
 import { prisma } from './prisma';
+import { processNaverEmailWithRpa } from './naver-rpa-sync';
+
+async function markEmailProcessed(messageId: string, source?: string | null, reservationId?: string | null) {
+  await prisma.processedEmail.upsert({
+    where: { messageId },
+    update: {
+      source: source || undefined,
+      reservationId: reservationId || undefined,
+    },
+    create: {
+      messageId,
+      source: source || undefined,
+      reservationId: reservationId || undefined,
+    },
+  });
+}
 
 export async function syncEmails(): Promise<{ processed: number; newReservations: number }> {
+  const globalLock = globalThis as unknown as { __emailSyncRunning?: boolean };
+  if (globalLock.__emailSyncRunning) {
+    console.log('[EmailSync] Previous sync is still running. Skip this request.');
+    return { processed: 0, newReservations: 0 };
+  }
+  globalLock.__emailSyncRunning = true;
+
   console.log('[EmailSync] 동기화 시작...');
   
   const client = new ImapFlow({
@@ -85,12 +108,19 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
       const subject = parsedMail.subject || '';
       const text = parsedMail.text || '';
 
+      const processedEmail = await prisma.processedEmail.findUnique({ where: { messageId } });
+      if (processedEmail) {
+        console.log(`[EmailSync] Already processed email ignored: ${messageId}`);
+        continue;
+      }
+
       // 무통장입금 "입금대기(접수)" 메일은 무시한다.
       //  - 무통장입금은 ① 접수=입금대기 ② 입금완료=확정, 두 통이 오고 같은 예약이다.
       //  - 입금 전(미확정)엔 슬롯도 안 막고 등록도 안 한다. 입금되면 "확정" 메일이 따로 오므로 그때 등록.
       //  - 이렇게 해야 같은 예약이 2건 등록되는 중복도 사라진다.
       if (subject.includes('입금대기') || /결제상태\s*입금대기/.test(text)) {
         console.log(`[EmailSync] 입금대기(미확정) 메일 무시: ${subject}`);
+        await markEmailProcessed(messageId, "naver");
         continue;
       }
 
@@ -98,10 +128,28 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
       const existing = await prisma.reservation.findUnique({ where: { emailId: messageId } });
       if (existing) {
         console.log(`[EmailSync] 이미 처리된 메일 무시: ${messageId}`);
+        await markEmailProcessed(messageId, existing.source, existing.id);
         continue;
       }
 
       const reservationData = parseEmail(subject, text, messageId);
+
+      // Naver emails contain masked customer names and no phone number.
+      // They are now only a trigger for the RPA detail workflow, not a DB source.
+      // This prevents duplicates like "양*우" from email + "양진우" from RPA/detail.
+      if (reservationData?.source === "naver") {
+        const rpaResult = await processNaverEmailWithRpa({
+          messageId,
+          subject,
+          text,
+          html: parsedMail.html,
+          parsedReservation: reservationData,
+          receivedAt: parsedMail.date || new Date(),
+        });
+        if (rpaResult.changed) newReservations++;
+        await markEmailProcessed(messageId, "naver");
+        continue;
+      }
 
       if (reservationData && reservationData.isCancelled) {
         // === 취소 메일 처리 ===
@@ -115,7 +163,7 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
         });
 
         if (target) {
-          await prisma.reservation.update({
+          const updated = await prisma.reservation.update({
             where: { id: target.id },
             data: {
               status: "CANCELLED",
@@ -123,9 +171,11 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
             },
           });
           console.log(`[EmailSync] 예약 취소 처리 완료: ${reservationData.roomName} ${reservationData.customerName} (수수료 ${reservationData.refundFee ?? 0}원)`);
+          await markEmailProcessed(messageId, reservationData.source, updated.id);
           newReservations++;
         } else {
           console.log(`[EmailSync] 취소 대상 예약을 찾지 못함: ${reservationData.roomName} ${reservationData.customerName} ${reservationData.startTime.toISOString()}`);
+          await markEmailProcessed(messageId, reservationData.source);
         }
         continue;
       }
@@ -147,7 +197,7 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
           }
         }
 
-        await prisma.reservation.create({
+        const created = await prisma.reservation.create({
           data: {
             source: reservationData.source,
             roomName: reservationData.roomName,
@@ -170,6 +220,7 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
             }
           }
         });
+        await markEmailProcessed(messageId, reservationData.source, created.id);
         newReservations++;
       } else {
         console.log(`[EmailSync] 예약 메일이 아님 (파싱 실패): ${subject}`);
@@ -180,6 +231,7 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
     // 에러 시에도 연결이 남아있지 않도록 강제 종료
     try { client.close(); } catch { /* 무시 */ }
   } finally {
+    globalLock.__emailSyncRunning = false;
     console.log(`[EmailSync] 동기화 종료. 확인: ${processed}건, 등록: ${newReservations}건`);
   }
 

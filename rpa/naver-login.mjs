@@ -9,7 +9,7 @@ async function main() {
   const browser = await launchRpaBrowser({ headless: false });
 
   try {
-    const context = await newRpaContext(browser);
+    const context = await newRpaContext(browser, { blockHeavyResources: false });
     const page = await context.newPage();
 
     await page.goto(startUrl, {

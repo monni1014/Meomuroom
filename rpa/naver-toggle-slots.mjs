@@ -154,10 +154,13 @@ async function clickNextWeekArrow(page) {
   await humanDelay(page, "after exact next-week arrow", 1000, 2200);
 }
 
-async function openDaySlotPanel(page, dateValue, targetLabel, startHour) {
-  const timeText = `${String(startHour).padStart(2, "0")}:00`;
-  const clickPoint = await page.evaluate(
-    ({ targetLabel, timeText }) => {
+async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour) {
+  const startTimeText = `${String(startHour).padStart(2, "0")}:00`;
+  const endTimeText = `${String(Math.max(startHour, endHour - 1)).padStart(2, "0")}:00`;
+
+  async function findClickPoint(timeText, useBlockCenter = false) {
+    return page.evaluate(
+      ({ targetLabel, timeText, startTimeText, endTimeText, useBlockCenter }) => {
       function visible(element) {
         const style = window.getComputedStyle(element);
         const rect = element.getBoundingClientRect();
@@ -180,33 +183,63 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour) {
 
       if (!dayRect || !timeRect) return null;
 
+      if (useBlockCenter) {
+        const startRect = elements
+          .map((element) => ({ text: (element.textContent || "").replace(/\s+/g, " ").trim(), rect: element.getBoundingClientRect() }))
+          .filter(({ text, rect }) => text === startTimeText && rect.x > 250 && rect.x < 380)
+          .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height))[0]?.rect;
+        const endRect = elements
+          .map((element) => ({ text: (element.textContent || "").replace(/\s+/g, " ").trim(), rect: element.getBoundingClientRect() }))
+          .filter(({ text, rect }) => text === endTimeText && rect.x > 250 && rect.x < 380)
+          .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height))[0]?.rect;
+
+        if (startRect && endRect) {
+          return {
+            x: dayRect.x + dayRect.width / 2,
+            y: ((startRect.y + startRect.height / 2) + (endRect.y + endRect.height / 2)) / 2,
+          };
+        }
+      }
+
       return {
         x: dayRect.x + dayRect.width / 2,
         y: timeRect.y + timeRect.height / 2,
       };
     },
-    { targetLabel, timeText }
-  );
-
-  if (!clickPoint) {
-    throw new Error(`Could not locate exact date column ${targetLabel} and time row ${timeText}.`);
-  }
-
-  await page.mouse.click(clickPoint.x, clickPoint.y);
-  await humanDelay(page, "after day slot click", 900, 2200);
-
-  const expectedPanelTitle = formatPanelDateTitle(dateValue);
-  const panelTitleVisible = await page.getByText(expectedPanelTitle, { exact: false })
-    .first()
-    .isVisible()
-    .catch(() => false);
-
-  if (!panelTitleVisible) {
-    await saveScreenshot(page, "naver-slots-date-mismatch");
-    throw new Error(
-      `Opened wrong date panel. Expected ${expectedPanelTitle}. Refusing to toggle or save.`
+      { targetLabel, timeText, startTimeText, endTimeText, useBlockCenter }
     );
   }
+
+  const expectedPanelTitle = formatPanelDateTitle(dateValue);
+
+  for (const attempt of [
+    { timeText: startTimeText, useBlockCenter: false },
+    { timeText: endTimeText, useBlockCenter: false },
+    { timeText: startTimeText, useBlockCenter: true },
+  ]) {
+    const clickPoint = await findClickPoint(attempt.timeText, attempt.useBlockCenter);
+    if (!clickPoint) continue;
+
+    await page.mouse.click(clickPoint.x, clickPoint.y);
+    await humanDelay(page, "after day slot click", 900, 2200);
+
+    const panelTitleVisible = await page.getByText(expectedPanelTitle, { exact: false })
+      .first()
+      .isVisible()
+      .catch(() => false);
+
+    if (panelTitleVisible) {
+      return;
+    }
+
+    await page.keyboard.press("Escape");
+    await humanDelay(page, "after failed panel attempt escape", 500, 1100);
+  }
+
+  await saveScreenshot(page, "naver-slots-date-mismatch");
+  throw new Error(
+    `Opened wrong date panel. Expected ${expectedPanelTitle}. Refusing to toggle or save.`
+  );
 }
 
 async function clickHourToggle(page, hour, mode) {
@@ -417,7 +450,7 @@ async function main() {
     console.log(`Target day: ${targetLabel}`);
     await saveScreenshot(page, "naver-slots-04-target-week");
 
-    await openDaySlotPanel(page, dateValue, targetLabel, startHour);
+    await openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour);
     await saveScreenshot(page, "naver-slots-05-slot-panel");
 
     if (!apply) {

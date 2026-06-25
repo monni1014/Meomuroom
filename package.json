@@ -10,6 +10,7 @@
     "rpa:test-proxy": "node rpa/test-proxy.mjs",
     "rpa:naver-login": "node rpa/naver-login.mjs",
     "rpa:naver-open": "node rpa/open-naver-booking.mjs",
+    "rpa:naver-read-booking-detail": "node rpa/naver-read-booking-detail.mjs",
     "rpa:naver-slots": "node rpa/naver-toggle-slots.mjs",
     "rpa:naver-screenshot": "node rpa/naver-screenshot.mjs",
     "rpa:naver-inspect-products": "node rpa/naver-inspect-products.mjs",
