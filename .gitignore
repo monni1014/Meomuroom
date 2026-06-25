@@ -21,3 +21,7 @@ tsconfig.tsbuildinfo
 email_dump.txt
 fetch-naver-email.js
 
+# RPA local session/screenshot files
+rpa/.auth/
+rpa/screenshots/
+

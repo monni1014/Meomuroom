@@ -6,7 +6,14 @@
     "dev": "next dev --port=3000 --hostname=0.0.0.0",
     "build": "prisma generate && next build",
     "start": "node server.ts",
-    "lint": "eslint"
+    "lint": "eslint",
+    "rpa:test-proxy": "node rpa/test-proxy.mjs",
+    "rpa:naver-login": "node rpa/naver-login.mjs",
+    "rpa:naver-open": "node rpa/open-naver-booking.mjs",
+    "rpa:naver-slots": "node rpa/naver-toggle-slots.mjs",
+    "rpa:naver-screenshot": "node rpa/naver-screenshot.mjs",
+    "rpa:naver-inspect-products": "node rpa/naver-inspect-products.mjs",
+    "rpa:naver-inspect-product-detail": "node rpa/naver-inspect-product-detail.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",
@@ -33,9 +40,12 @@
     "@types/node-cron": "^3.0.11",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "playwright": "^1.61.1",
     "prisma": "^7.8.0",
+    "proxy-chain": "^3.0.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
