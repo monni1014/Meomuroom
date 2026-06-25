@@ -43,6 +43,9 @@ interface Reservation {
   usageLog: UsageLog | null;
 }
 
+const RPA_CHECK_MARKER = "RPA_CHECK_REQUIRED";
+const hasRpaIssue = (memo?: string | null) => Boolean(memo?.includes(RPA_CHECK_MARKER));
+
 export default function CalendarPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -588,6 +591,11 @@ export default function CalendarPage() {
                       {res.isCleanUpBad && (
                         <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-600 border border-red-500 shadow-sm shadow-red-100" title="정리상태 불량">
                           🧹불량!
+                        </span>
+                      )}
+                      {hasRpaIssue(res.memo) && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-300 shadow-sm shadow-yellow-100" title="RPA가 슬롯 처리 중 확실하지 않은 상황을 감지했습니다. 직접 확인해 주세요.">
+                          RPA 확인필요
                         </span>
                       )}
                       <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", getRoomBadgeStyle(res.roomName))}>

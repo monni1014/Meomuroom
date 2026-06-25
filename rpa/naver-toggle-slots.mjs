@@ -158,9 +158,74 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour
   const startTimeText = `${String(startHour).padStart(2, "0")}:00`;
   const endTimeText = `${String(Math.max(startHour, endHour - 1)).padStart(2, "0")}:00`;
 
+  const dayColumn = await page.evaluate((targetLabel) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    const candidates = [...document.querySelectorAll("body *")]
+      .filter(visible)
+      .map((element) => ({
+        text: (element.textContent || "").replace(/\s+/g, " ").trim(),
+        rect: element.getBoundingClientRect(),
+      }))
+      .filter(({ text, rect }) =>
+        /^\d{1,2}\.\d{1,2}\([^)]+\)$/.test(text)
+        && rect.y > 300
+        && rect.y < 390
+        && rect.x > 300
+        && rect.x < 950
+        && rect.width < 120
+      )
+      .sort((a, b) => a.rect.x - b.rect.x);
+
+    const found = candidates.find((candidate) => candidate.text === targetLabel);
+    return found
+      ? {
+          x: found.rect.x + found.rect.width / 2,
+          labels: candidates.map((candidate) => ({
+            text: candidate.text,
+            x: Math.round(candidate.rect.x + candidate.rect.width / 2),
+          })),
+        }
+      : null;
+  }, targetLabel);
+
+  if (!dayColumn) {
+    throw new Error(`Could not locate target date column ${targetLabel}.`);
+  }
+  const dayCenterX = dayColumn.x;
+  console.log(`Date columns: ${dayColumn.labels.map((label) => `${label.text}@${label.x}`).join(", ")}`);
+  console.log(`Target date column ${targetLabel}: x=${Math.round(dayCenterX)}`);
+
+  async function scrollTimeRowIntoView(timeText) {
+    const scrolled = await page.evaluate((targetLabel) => {
+      const candidates = [...document.querySelectorAll("body *")]
+        .map((element) => ({
+          element,
+          text: (element.textContent || "").replace(/\s+/g, " ").trim(),
+          rect: element.getBoundingClientRect(),
+        }))
+        .filter(({ text, rect }) => text === targetLabel && rect.x > 250 && rect.x < 380)
+        .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+
+      const target = candidates[0]?.element;
+      if (!target) return false;
+
+      target.scrollIntoView({ block: "center", inline: "nearest" });
+      return true;
+    }, timeText);
+
+    if (scrolled) {
+      await humanDelay(page, `after scroll to ${timeText}`, 600, 1400);
+    }
+  }
+
   async function findClickPoint(timeText, useBlockCenter = false) {
     return page.evaluate(
-      ({ targetLabel, timeText, startTimeText, endTimeText, useBlockCenter }) => {
+      ({ targetLabel, timeText, startTimeText, endTimeText, useBlockCenter, dayCenterX }) => {
       function visible(element) {
         const style = window.getComputedStyle(element);
         const rect = element.getBoundingClientRect();
@@ -168,20 +233,15 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour
       }
 
       const elements = [...document.querySelectorAll("body *")].filter(visible);
-      const dayCandidates = elements
-        .map((element) => ({ element, text: (element.textContent || "").replace(/\s+/g, " ").trim(), rect: element.getBoundingClientRect() }))
-        .filter(({ text, rect }) => text === targetLabel && rect.y > 250 && rect.y < 450)
-        .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
-
       const timeCandidates = elements
         .map((element) => ({ element, text: (element.textContent || "").replace(/\s+/g, " ").trim(), rect: element.getBoundingClientRect() }))
         .filter(({ text, rect }) => text === timeText && rect.x > 250 && rect.x < 380)
         .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
 
-      const dayRect = dayCandidates[0]?.rect;
       const timeRect = timeCandidates[0]?.rect;
 
-      if (!dayRect || !timeRect) return null;
+      if (!timeRect) return null;
+      if (timeRect.y < 0 || timeRect.y > window.innerHeight) return null;
 
       if (useBlockCenter) {
         const startRect = elements
@@ -195,18 +255,18 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour
 
         if (startRect && endRect) {
           return {
-            x: dayRect.x + dayRect.width / 2,
+            x: dayCenterX,
             y: ((startRect.y + startRect.height / 2) + (endRect.y + endRect.height / 2)) / 2,
           };
         }
       }
 
       return {
-        x: dayRect.x + dayRect.width / 2,
+        x: dayCenterX,
         y: timeRect.y + timeRect.height / 2,
       };
     },
-      { targetLabel, timeText, startTimeText, endTimeText, useBlockCenter }
+      { targetLabel, timeText, startTimeText, endTimeText, useBlockCenter, dayCenterX }
     );
   }
 
@@ -217,6 +277,7 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour
     { timeText: endTimeText, useBlockCenter: false },
     { timeText: startTimeText, useBlockCenter: true },
   ]) {
+    await scrollTimeRowIntoView(attempt.timeText);
     const clickPoint = await findClickPoint(attempt.timeText, attempt.useBlockCenter);
     if (!clickPoint) continue;
 
@@ -244,11 +305,41 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour
 
 async function clickHourToggle(page, hour, mode) {
   const label = `${String(hour).padStart(2, "0")}:00`;
+  const scrolled = await page.evaluate((targetLabel) => {
+    const candidates = [...document.querySelectorAll("body *")]
+      .map((element) => ({
+        element,
+        text: (element.textContent || "").replace(/\s+/g, " ").trim(),
+        rect: element.getBoundingClientRect(),
+      }))
+      .filter(({ text, rect }) =>
+        text === targetLabel
+        && rect.x > window.innerWidth * 0.35
+        && rect.x < window.innerWidth * 0.9
+      )
+      .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+
+    const target = candidates[0]?.element;
+    if (!target) return false;
+
+    target.scrollIntoView({ block: "center", inline: "nearest" });
+    return true;
+  }, label);
+
+  if (scrolled) {
+    await humanDelay(page, `after panel scroll to ${label}`, 350, 900);
+  }
+
   const toggle = await page.evaluate((targetLabel) => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
-      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+      return style.visibility !== "hidden"
+        && style.display !== "none"
+        && rect.width > 0
+        && rect.height > 0
+        && rect.y >= 0
+        && rect.y <= window.innerHeight;
     }
 
     function parseRgb(color) {
@@ -295,7 +386,8 @@ async function clickHourToggle(page, hour, mode) {
     const labels = elements
       .filter((element) => (element.textContent || "").trim() === targetLabel)
       .map((element) => element.getBoundingClientRect())
-      .sort((a, b) => b.x - a.x);
+      .filter((rect) => rect.x > window.innerWidth * 0.35 && rect.x < window.innerWidth * 0.9)
+      .sort((a, b) => (a.width * a.height) - (b.width * b.height));
 
     const timeRect = labels[0];
     if (!timeRect) return null;
@@ -341,6 +433,100 @@ async function clickHourToggle(page, hour, mode) {
   await page.mouse.click(toggle.x, toggle.y);
   await humanDelay(page, `after ${label} toggle`, 500, 1400);
   console.log(`${label}: changed to ${mode}`);
+}
+
+async function assertHourToggleState(page, hour, mode) {
+  const label = `${String(hour).padStart(2, "0")}:00`;
+  const actualState = await page.evaluate((targetLabel) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden"
+        && style.display !== "none"
+        && rect.width > 0
+        && rect.height > 0
+        && rect.y >= 0
+        && rect.y <= window.innerHeight;
+    }
+
+    function parseRgb(color) {
+      const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (!match) return null;
+      return {
+        r: Number(match[1]),
+        g: Number(match[2]),
+        b: Number(match[3]),
+      };
+    }
+
+    function elementColorState(element) {
+      const rect = element.getBoundingClientRect();
+      const candidates = [element, ...element.querySelectorAll("*")]
+        .map((candidate) => {
+          const candidateRect = candidate.getBoundingClientRect();
+          const style = window.getComputedStyle(candidate);
+          const rgb = parseRgb(style.backgroundColor);
+          return { rect: candidateRect, rgb };
+        })
+        .filter(({ rect: candidateRect, rgb }) => {
+          if (!rgb) return false;
+          if (candidateRect.width < 28 || candidateRect.width > 90) return false;
+          if (candidateRect.height < 16 || candidateRect.height > 48) return false;
+          const sameCenterY = Math.abs((candidateRect.y + candidateRect.height / 2) - (rect.y + rect.height / 2)) < 4;
+          return sameCenterY;
+        })
+        .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+
+      const target = candidates[0];
+      if (!target) return null;
+
+      const { rgb } = target;
+      if (rgb.g > 130 && rgb.r < 100 && rgb.b < 140) return "open";
+      if (Math.abs(rgb.r - rgb.g) < 35 && Math.abs(rgb.g - rgb.b) < 35 && rgb.r > 110 && rgb.r < 230) {
+        return "close";
+      }
+
+      return null;
+    }
+
+    const elements = [...document.querySelectorAll("body *")].filter(visible);
+    const labels = elements
+      .filter((element) => (element.textContent || "").trim() === targetLabel)
+      .map((element) => element.getBoundingClientRect())
+      .filter((rect) => rect.x > window.innerWidth * 0.35 && rect.x < window.innerWidth * 0.9)
+      .sort((a, b) => (a.width * a.height) - (b.width * b.height));
+
+    const timeRect = labels[0];
+    if (!timeRect) return null;
+
+    const rowCenterY = timeRect.y + timeRect.height / 2;
+    const toggles = elements
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const state = elementColorState(element);
+        return { rect, state };
+      })
+      .filter(({ rect, state }) => {
+        const sameRow = Math.abs((rect.y + rect.height / 2) - rowCenterY) < 18;
+        const rightSide = rect.x > timeRect.x + timeRect.width;
+        const switchSize = rect.width >= 32 && rect.width <= 90 && rect.height >= 18 && rect.height <= 48;
+        return sameRow && rightSide && switchSize && state;
+      })
+      .sort((a, b) => a.rect.x - b.rect.x);
+
+    return toggles[0]?.state || null;
+  }, label);
+
+  if (actualState !== mode) {
+    throw new Error(`Unsafe save blocked: ${label} is ${actualState || "unknown"}, expected ${mode}.`);
+  }
+}
+
+async function assertSlotPanelState(page, startHour, endHour, mode) {
+  for (let hour = startHour; hour < endHour; hour += 1) {
+    await clickHourToggle(page, hour, mode);
+    await assertHourToggleState(page, hour, mode);
+  }
 }
 
 async function clickSlotPanelSave(page) {
@@ -458,9 +644,7 @@ async function main() {
       return;
     }
 
-    for (let hour = startHour; hour < endHour; hour += 1) {
-      await clickHourToggle(page, hour, mode);
-    }
+    await assertSlotPanelState(page, startHour, endHour, mode);
 
     await clickSlotPanelSave(page);
     await saveScreenshot(page, "naver-slots-06-after-toggle");

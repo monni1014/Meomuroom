@@ -143,7 +143,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const monthHours = sumHours(countedMonthly);
   const room1Hours = sumHours(countedMonthly.filter(r => r.roomName === "머무룸1"));
   const room2Hours = sumHours(countedMonthly.filter(r => r.roomName === "머무룸2"));
-  // 매출 = 요금(price) 합. 캘린더/엑셀 기준과 일치하도록 추가금(extraPrice)은 제외, 취소수수료(취소건 price)는 포함.
+  // 매출 = 캘린더에 표시되는 최종금액(price) 합계. extraPrice는 추가금 사유/금액 기록용이며 중복 합산하지 않는다.
   const monthlyRevenue = thisMonthReservations.reduce((sum, res) => sum + res.price, 0);
   const sumPrice = (list: typeof thisMonthReservations) => list.reduce((s, r) => s + r.price, 0);
   const fmtMan = (won: number) => won >= 10000 ? (won / 10000).toFixed(1) + "만" : won.toLocaleString();

@@ -10,6 +10,8 @@ const ROOM_PRODUCT_URL: Record<string, string> = {
   "2": "https://partner.booking.naver.com/bizes/1473933/biz-items/7007523/detail",
 };
 
+const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
+
 type NaverDetailResult = {
   bookingStatus?: string | null;
   bookingNumber?: string | null;
@@ -131,6 +133,26 @@ async function runNodeScript(args: string[], timeout = 180_000) {
     maxBuffer: 1024 * 1024 * 5,
   });
   return result.stdout;
+}
+
+async function markRpaCheckRequired(reservationId: string, reason: string) {
+  const clippedReason = reason.replace(/\s+/g, " ").trim().slice(0, 300);
+  const current = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    select: { memo: true },
+  });
+
+  if (!current) return;
+  if (current.memo?.includes(RPA_CHECK_MARKER)) return;
+
+  const memo = [current.memo, `${RPA_CHECK_MARKER} ${clippedReason}`]
+    .filter(Boolean)
+    .join("\n");
+
+  await prisma.reservation.update({
+    where: { id: reservationId },
+    data: { memo },
+  });
 }
 
 async function readNaverDetail(bookingId: string, dateValue?: string) {
@@ -373,24 +395,32 @@ function canSetSlot(item: NormalizedNaverReservation) {
     && toKstDateValue(item.startTime) === toKstDateValue(item.endTime);
 }
 
-async function setNaverSlot(item: NormalizedNaverReservation, mode: "close" | "open") {
+async function setNaverSlot(item: NormalizedNaverReservation, mode: "close" | "open", reservationId?: string) {
   if (!canSetSlot(item)) {
-    return { ok: false, skipped: true, reason: `Unsupported slot time ${item.dateValue} ${item.startClock}-${item.endClock}` };
+    const reason = `Unsupported slot time ${item.dateValue} ${item.startClock}-${item.endClock}`;
+    if (reservationId) await markRpaCheckRequired(reservationId, reason);
+    return { ok: false, skipped: true, reason };
   }
 
   const productUrl = ROOM_PRODUCT_URL[item.room];
-  await runNodeScript([
-    "rpa/naver-toggle-slots.mjs",
-    `--room=${item.room}`,
-    `--date=${item.dateValue}`,
-    `--start=${item.startClock}`,
-    `--end=${item.endClock}`,
-    `--mode=${mode}`,
-    `--product-url=${productUrl}`,
-    "--apply",
-  ], 240_000);
+  try {
+    await runNodeScript([
+      "rpa/naver-toggle-slots.mjs",
+      `--room=${item.room}`,
+      `--date=${item.dateValue}`,
+      `--start=${item.startClock}`,
+      `--end=${item.endClock}`,
+      `--mode=${mode}`,
+      `--product-url=${productUrl}`,
+      "--apply",
+    ], 240_000);
 
-  return { ok: true, skipped: false, reason: null };
+    return { ok: true, skipped: false, reason: null };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (reservationId) await markRpaCheckRequired(reservationId, reason);
+    return { ok: false, skipped: false, reason };
+  }
 }
 
 export async function processNaverEmailWithRpa({
@@ -433,7 +463,7 @@ export async function processNaverEmailWithRpa({
 
     const result = await cancelNaverReservation(normalized, messageId, parsedReservation.refundFee ?? 0, receivedAt);
     if (result.changed) {
-      const slot = await setNaverSlot(normalized, "open");
+      const slot = await setNaverSlot(normalized, "open", result.reservation.id);
       console.log(`[NaverRPA] Slot open result for ${bookingId || normalized.bookingNumber}: ${slot.ok ? "ok" : slot.reason}`);
     } else {
       console.log(`[NaverRPA] Reservation already cancelled. Skip slot open: ${result.reservation.id}`);
@@ -454,7 +484,7 @@ export async function processNaverEmailWithRpa({
   const result = await upsertNaverReservation(normalized, messageId, receivedAt);
 
   if (normalized.status === "CONFIRMED") {
-    const slot = await setNaverSlot(normalized, "close");
+    const slot = await setNaverSlot(normalized, "close", result.reservation.id);
     console.log(`[NaverRPA] Slot close result for ${bookingId}: ${slot.ok ? "ok" : slot.reason}`);
   }
 

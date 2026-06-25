@@ -3,6 +3,9 @@
 import { useRouter } from "next/navigation";
 import { UNCATEGORIZED_LABEL } from "@/lib/categories";
 
+const RPA_CHECK_MARKER = "RPA_CHECK_REQUIRED";
+const hasRpaIssue = (memo?: string | null) => Boolean(memo?.includes(RPA_CHECK_MARKER));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default function TodayReservationsList({ reservations }: { reservations: any[] }) {
   const router = useRouter();
@@ -82,6 +85,11 @@ export default function TodayReservationsList({ reservations }: { reservations: 
                 {!isCancelled && !res.isPaid && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-600">
                     💸 미결제
+                  </span>
+                )}
+                {hasRpaIssue(res.memo) && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-300">
+                    RPA 확인필요
                   </span>
                 )}
                 <span>· {res.usageLog?.headCount || 0}명 ({res.usageLog?.purpose || UNCATEGORIZED_LABEL}{res.usageLog?.detail ? ` · ${res.usageLog.detail}` : ""})</span>
