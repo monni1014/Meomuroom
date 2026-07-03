@@ -292,15 +292,89 @@ async function openReservationList(page) {
 }
 
 async function openCalendarView(page) {
-  const bodyText = await page.locator("body").innerText({ timeout: 10_000 }).catch(() => "");
-  if (bodyText.includes(TEXT.calendarView)) {
-    await clickVisibleText(page, TEXT.calendarView, 20_000);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (await isCalendarView(page)) {
+      await humanDelay(page, "after SpaceCloud calendar view open", 1600, 3600);
+      return;
+    }
+
+    const bodyText = await page.locator("body").innerText({ timeout: 15_000 }).catch(() => "");
+    if (bodyText.includes(TEXT.calendarView)) {
+      await clickCalendarViewButton(page);
+      await page.waitForFunction(
+        ({ addReservation }) => {
+          const text = document.body?.innerText || "";
+          return text.includes(addReservation) && /\b20\d{2}\.\d{1,2}\b/.test(text);
+        },
+        { addReservation: TEXT.addReservation },
+        { timeout: 30_000 },
+      ).catch(() => {});
+      continue;
+    }
+
+    await humanDelay(page, "wait for SpaceCloud reservation list/calendar", 1200, 3000);
   }
 
-  await page.waitForFunction(() => /\b20\d{2}\.\d{1,2}\b/.test(document.body?.innerText || ""), null, {
-    timeout: 30_000,
-  });
-  await humanDelay(page, "after SpaceCloud calendar view open", 1600, 3600);
+  throw new Error("Could not open SpaceCloud calendar view.");
+}
+
+async function isCalendarView(page) {
+  return page.evaluate((addReservationText) => {
+    const text = document.body?.innerText || "";
+    return text.includes(addReservationText)
+      && /\b20\d{2}\.\d{1,2}\b/.test(text)
+      && text.includes("\uc77c\uc694\uc77c")
+      && text.includes("\uc6d4\uc694\uc77c")
+      && text.includes("\ud654\uc694\uc77c");
+  }, TEXT.addReservation).catch(() => false);
+}
+
+async function assertCalendarView(page, contextLabel) {
+  if (await isCalendarView(page)) return;
+  await saveScreenshot(page, "spacecloud-external-not-calendar");
+  throw new Error(`SpaceCloud calendar view is not ready before ${contextLabel}.`);
+}
+
+async function clickCalendarViewButton(page) {
+  const box = await page.evaluate((calendarViewText) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    const candidates = [...document.querySelectorAll("button,a,[role='button'],div,span")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text: (element.textContent || "").replace(/\s+/g, " ").trim(),
+        };
+      })
+      .filter((candidate) =>
+        candidate.text === calendarViewText
+        && candidate.x > window.innerWidth * 0.5
+        && candidate.y > 250
+        && candidate.y < 520
+        && candidate.width >= 80
+        && candidate.width <= 220
+        && candidate.height >= 35
+        && candidate.height <= 90
+      )
+      .sort((a, b) => (a.width * a.height) - (b.width * b.height));
+
+    return candidates[0] || null;
+  }, TEXT.calendarView);
+
+  if (!box) throw new Error("Could not find SpaceCloud calendar view button.");
+
+  await humanDelay(page, "before SpaceCloud calendar view button click", 900, 2200);
+  await humanClick(page, box.x + box.width / 2, box.y + box.height / 2, "SpaceCloud calendar view");
+  await humanDelay(page, "after SpaceCloud calendar view button click", 1600, 3600);
 }
 
 async function selectNativeSelectOption(page, optionText) {
@@ -529,6 +603,53 @@ async function navigateToMonth(page, dateValue) {
   throw new Error(`Could not navigate SpaceCloud calendar to ${targetKey}.`);
 }
 
+async function selectCalendarDay(page, dateValue) {
+  const { day } = parseDateValue(dateValue);
+  const dayText = String(day).padStart(2, "0");
+  const altDayText = String(day);
+
+  const box = await page.evaluate(({ dayText, altDayText }) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    const candidates = [...document.querySelectorAll("body *")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        const hasDay = new RegExp(`^\\s*(${dayText}|${altDayText})(?!\\d)`).test(text);
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text,
+          hasDay,
+          area: rect.width * rect.height,
+        };
+      })
+      .filter((item) =>
+        item.hasDay
+        && item.width >= 120
+        && item.height >= 80
+        && item.y > 420
+        && item.y < window.innerHeight - 40
+      )
+      .sort((a, b) => a.area - b.area);
+
+    return candidates[0] || null;
+  }, { dayText, altDayText });
+
+  if (!box) throw new Error(`Could not find SpaceCloud calendar day: ${dateValue}`);
+
+  await humanDelay(page, `before SpaceCloud calendar day ${dateValue} click`, 900, 2200);
+  await humanClick(page, box.x + Math.min(34, box.width / 2), box.y + Math.min(32, box.height / 3), `SpaceCloud calendar day ${dateValue}`);
+  await humanDelay(page, `after SpaceCloud calendar day ${dateValue} click`, 900, 2200);
+}
+
 async function clickAddReservation(page) {
   await clickVisibleText(page, TEXT.addReservation, 20_000);
   await page.waitForFunction(
@@ -542,9 +663,35 @@ async function clickAddReservation(page) {
   await humanDelay(page, "after SpaceCloud add modal open", 1200, 2800);
 }
 
-async function fillInputByIndex(page, index, value) {
-  const handle = await page.evaluateHandle(({ index, value }) => {
-    const inputs = [...document.querySelectorAll("input,textarea")]
+async function assertModalDate(page, dateValue) {
+  const expected = formatModalDate(dateValue).replace(/\s+/g, "");
+  const actual = await page.evaluate(() => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    function modalBounds() {
+      const elements = [...document.querySelectorAll("div,section,article,form")].filter(visible);
+      const candidates = elements
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+          return { element, rect, text, area: rect.width * rect.height };
+        })
+        .filter((item) =>
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
+          && item.text.includes("\uc608\uc57d\uc2dc\uac04")
+        )
+        .sort((a, b) => a.area - b.area);
+      return candidates[0]?.element || null;
+    }
+
+    const modal = modalBounds();
+    if (!modal) return "";
+    const inputs = [...modal.querySelectorAll("input,textarea")]
       .filter((element) => {
         const style = window.getComputedStyle(element);
         const rect = element.getBoundingClientRect();
@@ -556,21 +703,263 @@ async function fillInputByIndex(page, index, value) {
           && !element.disabled
           && !["checkbox", "radio", "button", "submit", "reset", "hidden"].includes(type);
       });
+    return (inputs[0]?.value || "").replace(/\s+/g, "");
+  });
+
+  if (actual !== expected) {
+    await saveScreenshot(page, "spacecloud-external-date-mismatch");
+    throw new Error(`SpaceCloud modal date mismatch. expected=${formatModalDate(dateValue)} actual=${actual || "-"}`);
+  }
+}
+
+async function typeModalDate(page, dateValue) {
+  const { day } = parseDateValue(dateValue);
+  const dayText = String(day).padStart(2, "0");
+  const altDayText = String(day);
+  const box = await page.evaluate(() => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    function modalBounds() {
+      const elements = [...document.querySelectorAll("div,section,article,form")].filter(visible);
+      const candidates = elements
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+          return { element, rect, text, area: rect.width * rect.height };
+        })
+        .filter((item) =>
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
+          && item.text.includes("\uc608\uc57d\uc2dc\uac04")
+        )
+        .sort((a, b) => a.area - b.area);
+      return candidates[0]?.element || null;
+    }
+
+    const modal = modalBounds();
+    if (!modal) return null;
+    const inputs = [...modal.querySelectorAll("input")]
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        const type = (element.getAttribute("type") || "text").toLowerCase();
+        return style.visibility !== "hidden"
+          && style.display !== "none"
+          && rect.width > 0
+          && rect.height > 0
+          && !element.disabled
+          && !["checkbox", "radio", "button", "submit", "reset", "hidden"].includes(type);
+      });
+    const input = inputs[0];
+    if (!input) return null;
+    const rect = input.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  });
+
+  if (!box) throw new Error("Could not find SpaceCloud modal date input.");
+
+  await humanDelay(page, "before modal date input click", 700, 1700);
+  await humanClick(page, box.x + box.width / 2, box.y + box.height / 2, "modal date input");
+  await humanDelay(page, "after modal date picker open", 900, 2000);
+
+  const dayBox = await page.evaluate(({ dayText, altDayText }) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    const candidates = [...document.querySelectorAll("body *")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text,
+          area: rect.width * rect.height,
+        };
+      })
+      .filter((item) =>
+        (item.text === dayText || item.text === altDayText)
+        && item.width >= 12
+        && item.width <= 70
+        && item.height >= 12
+        && item.height <= 70
+        && item.y >= 230
+        && item.y <= 540
+      )
+      .sort((a, b) => a.area - b.area);
+
+    return candidates[0] || null;
+  }, { dayText, altDayText });
+
+  if (!dayBox) throw new Error(`Could not find SpaceCloud modal date picker day: ${dayText}`);
+
+  await humanDelay(page, `before modal date picker day ${dayText} click`, 700, 1700);
+  await humanClick(page, dayBox.x + dayBox.width / 2, dayBox.y + dayBox.height / 2, `modal date picker day ${dayText}`);
+  await humanDelay(page, "after modal date picker day click", 900, 2000);
+}
+
+async function clickModalTextButton(page, text, timeout = 20_000) {
+  await page.waitForFunction(
+    (targetText) => (document.body?.innerText || "").includes(targetText),
+    text,
+    { timeout },
+  );
+
+  const box = await page.evaluate((targetText) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    function modalBounds() {
+      const elements = [...document.querySelectorAll("div,section,article,form")].filter(visible);
+      const candidates = elements
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+          return { element, rect, text, area: rect.width * rect.height };
+        })
+        .filter((item) =>
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
+          && item.text.includes("\uc608\uc57d\uc2dc\uac04")
+          && item.rect.width >= 360
+          && item.rect.width <= 900
+          && item.rect.height >= 360
+          && item.rect.height <= window.innerHeight
+        )
+        .sort((a, b) => a.area - b.area);
+
+      const modal = candidates[0]?.rect;
+      if (!modal) return null;
+      return { x: modal.x, y: modal.y, width: modal.width, height: modal.height };
+    }
+
+    const modal = modalBounds();
+    if (!modal) return null;
+
+    const candidates = [...document.querySelectorAll("button,a,[role='button'],div")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const candidateText = (element.textContent || "").replace(/\s+/g, " ").trim();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text: candidateText,
+          exact: candidateText === targetText,
+          buttonLike: candidateText === targetText && rect.width >= 90 && rect.height >= 35,
+          bottomRightButton: candidateText.includes(targetText)
+            && rect.x > modal.x + modal.width / 2
+            && rect.y > modal.y + modal.height - 110
+            && rect.width >= 120
+            && rect.height >= 40,
+          area: rect.width * rect.height,
+        };
+      })
+      .filter((candidate) =>
+        candidate.text.includes(targetText)
+        && candidate.x >= modal.x
+        && candidate.y >= modal.y
+        && candidate.x + candidate.width <= modal.x + modal.width
+        && candidate.y + candidate.height <= modal.y + modal.height
+        && candidate.width >= 60
+        && candidate.height >= 30
+      )
+      .sort((a, b) =>
+        Number(b.bottomRightButton) - Number(a.bottomRightButton)
+        || Number(b.buttonLike) - Number(a.buttonLike)
+        || Number(b.exact) - Number(a.exact)
+        || b.area - a.area
+        || b.y - a.y
+      );
+
+    return candidates[0] || null;
+  }, text);
+
+  if (!box) throw new Error(`Could not find SpaceCloud modal button: ${text}`);
+
+  await humanDelay(page, `before modal ${text} click`, 700, 1700);
+  await humanClick(page, box.x + box.width / 2, box.y + box.height / 2, `modal ${text}`);
+  await humanDelay(page, `after modal ${text} click`, 900, 2200);
+}
+
+async function fillInputByIndex(page, index, value) {
+  const handle = await page.evaluateHandle(({ index }) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    function modalBounds() {
+      const elements = [...document.querySelectorAll("div,section,article,form")].filter(visible);
+      const candidates = elements
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+          return { element, rect, text, area: rect.width * rect.height };
+        })
+        .filter((item) =>
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
+          && item.text.includes("\uc608\uc57d\uc2dc\uac04")
+          && item.rect.width >= 360
+          && item.rect.width <= 900
+          && item.rect.height >= 360
+          && item.rect.height <= window.innerHeight
+        )
+        .sort((a, b) => a.area - b.area);
+
+      const modal = candidates[0]?.rect;
+      if (!modal) return null;
+      return { x: modal.x, y: modal.y, width: modal.width, height: modal.height };
+    }
+
+    const modal = modalBounds();
+    if (!modal) return null;
+
+    const inputs = [...document.querySelectorAll("input,textarea")]
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        const type = (element.getAttribute("type") || "text").toLowerCase();
+        return style.visibility !== "hidden"
+          && style.display !== "none"
+          && rect.width > 0
+          && rect.height > 0
+          && rect.x >= modal.x
+          && rect.y >= modal.y
+          && rect.x + rect.width <= modal.x + modal.width
+          && rect.y + rect.height <= modal.y + modal.height
+          && !element.disabled
+          && !["checkbox", "radio", "button", "submit", "reset", "hidden"].includes(type);
+      });
     const target = inputs[index];
     if (!target) return null;
-    const prototype = target.tagName.toLowerCase() === "textarea"
-      ? window.HTMLTextAreaElement.prototype
-      : window.HTMLInputElement.prototype;
-    const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
-    if (setter) setter.call(target, value);
-    else target.value = value;
-    target.dispatchEvent(new Event("input", { bubbles: true }));
-    target.dispatchEvent(new Event("change", { bubbles: true }));
     return target;
-  }, { index, value });
+  }, { index });
 
   const element = handle.asElement();
   if (!element) throw new Error(`Could not fill SpaceCloud modal input index ${index}.`);
+  const box = await element.boundingBox();
+  if (!box) throw new Error(`Could not locate SpaceCloud modal input index ${index}.`);
+  await humanClick(page, box.x + box.width / 2, box.y + box.height / 2, `modal input ${index}`);
+  await humanDelay(page, `after input ${index} click`, 300, 900);
+  await element.fill(value, { timeout: 10_000 });
   await humanDelay(page, `after input ${index} fill`, 500, 1200);
 }
 
@@ -653,7 +1042,27 @@ async function chooseTimeSelect(page, selectIndex, hour) {
 
 async function ensureNotFullDay(page) {
   await page.evaluate((fullDayText) => {
-    const labels = [...document.querySelectorAll("label")];
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    const modal = [...document.querySelectorAll("div,section,article,form")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        return { element, rect, text, area: rect.width * rect.height };
+      })
+      .filter((item) =>
+        item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+        && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
+        && item.text.includes("\uc608\uc57d\uc2dc\uac04")
+      )
+      .sort((a, b) => a.area - b.area)[0]?.element || document.body;
+
+    const labels = [...modal.querySelectorAll("label")];
     const label = labels.find((item) => (item.textContent || "").includes(fullDayText));
     const input = label?.querySelector("input[type='checkbox']");
     if (input && input.checked && !input.disabled) {
@@ -664,10 +1073,20 @@ async function ensureNotFullDay(page) {
 }
 
 async function addExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply }) {
+  const alreadyAdded = await findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker });
+  if (alreadyAdded) {
+    await saveScreenshot(page, "spacecloud-external-already-added");
+    await page.keyboard.press("Escape").catch(() => {});
+    await humanDelay(page, "after already-added popup escape", 700, 1600);
+    console.log("Matching SpaceCloud external reservation already exists. Skip duplicate add.");
+    return { ok: true, alreadyClosed: true, dryRun: !apply };
+  }
+
   await clickAddReservation(page);
   await saveScreenshot(page, "spacecloud-external-add-modal");
+  await typeModalDate(page, dateValue);
+  await assertModalDate(page, dateValue);
 
-  await fillInputByIndex(page, 0, formatModalDate(dateValue));
   await chooseTimeSelect(page, 0, startHour);
   await chooseTimeSelect(page, 1, endHour);
   await ensureNotFullDay(page);
@@ -681,12 +1100,22 @@ async function addExternalReservation(page, { dateValue, startHour, endHour, mar
     return { ok: true, dryRun: true };
   }
 
-  await clickVisibleText(page, TEXT.confirm, 20_000);
-  await page.waitForFunction(
-    (directAddedText) => !(document.body?.innerText || "").includes(directAddedText),
-    TEXT.directAdded,
-    { timeout: 20_000 },
-  ).catch(() => {});
+  await clickModalTextButton(page, TEXT.confirm, 20_000);
+  try {
+    await page.waitForFunction(
+      () => !(document.body?.innerText || "").includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00"),
+      null,
+      { timeout: 20_000 },
+    );
+  } catch (error) {
+    const lastErrorBody = page.__spaceCloudLastErrorBody || "";
+    if (lastErrorBody.includes("\ud574\ub2f9 \uae30\uac04\uc5d0 \uc774\ubbf8 \uc608\uc57d\uc774 \uc788\uc2b5\ub2c8\ub2e4")) {
+      console.log("SpaceCloud says the target period is already reserved. Treat close as success.");
+      await saveScreenshot(page, "spacecloud-external-already-reserved");
+      return { ok: true, alreadyClosed: true, dryRun: false };
+    }
+    throw error;
+  }
   await humanDelay(page, "after SpaceCloud external save", 2200, 5200);
   await saveScreenshot(page, "spacecloud-external-after-add");
 
@@ -711,7 +1140,7 @@ async function findAndOpenExternalReservation(page, { dateValue, startHour, endH
       for (let i = 0; i < 8 && current; i += 1) {
         const rect = current.getBoundingClientRect();
         const text = (current.textContent || "").replace(/\s+/g, " ").trim();
-        const hasDay = new RegExp(`(^|\\s)(${dayText}|${altDayText})(\\s|$)`).test(text);
+        const hasDay = new RegExp(`^\\s*(${dayText}|${altDayText})(?!\\d)`).test(text);
         if (hasDay && rect.width > 120 && rect.height > 80 && rect.y > 420) return current;
         current = current.parentElement;
       }
@@ -842,13 +1271,39 @@ async function main() {
       blockHeavyResources: true,
     });
     page = await context.newPage();
+    page.__spaceCloudLastErrorBody = "";
+    page.on("console", (message) => {
+      if (["error", "warning"].includes(message.type())) {
+        console.log(`[SpaceCloud browser ${message.type()}] ${message.text().slice(0, 500)}`);
+      }
+    });
+    page.on("request", (request) => {
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) {
+        console.log(`[SpaceCloud request] ${request.method()} ${request.url().slice(0, 300)}`);
+      }
+    });
+    page.on("response", async (response) => {
+      const request = response.request();
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) {
+        console.log(`[SpaceCloud response] ${response.status()} ${response.url().slice(0, 300)}`);
+        if (response.status() >= 400) {
+          const body = await response.text().catch(() => "");
+          page.__spaceCloudLastErrorBody = body;
+          if (body) console.log(`[SpaceCloud response body] ${body.slice(0, 1000)}`);
+        }
+      }
+    });
 
     await openReservationList(page);
     await saveScreenshot(page, "spacecloud-external-01-list");
     await openCalendarView(page);
+    await assertCalendarView(page, "product selection");
     await selectProduct(page, room);
-    if (mode === "open") {
-      await navigateToMonth(page, dateValue);
+    await assertCalendarView(page, "month navigation");
+    await navigateToMonth(page, dateValue);
+    await assertCalendarView(page, "date selection");
+    if (mode === "close") {
+      await selectCalendarDay(page, dateValue);
     }
     await saveScreenshot(page, "spacecloud-external-02-calendar");
 
