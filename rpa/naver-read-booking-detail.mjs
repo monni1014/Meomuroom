@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
 import { optionalEnv } from "./lib/env.mjs";
+import { humanClickElement, humanDelay, humanMouseMove } from "./lib/human.mjs";
 import { naverStorageStatePath } from "./lib/paths.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
 
@@ -48,6 +49,10 @@ function extractPhone(text) {
   return digits.replace(/(\d{3})(\d{4})(\d{4})/, "$1-$2-$3");
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function extractValueAfterLabels(text, labels) {
   const lines = normalizeText(text)
     .split("\n")
@@ -71,6 +76,62 @@ function extractValueAfterLabels(text, labels) {
 function extractBookingNumber(text) {
   const match = text.match(/\b\d{9,12}\b/);
   return match ? match[0] : null;
+}
+
+function extractListRowByBookingId(text, bookingId) {
+  if (!bookingId) return { customerName: null, phone: null };
+
+  const lines = normalizeText(text)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (let idIndex = 0; idIndex < lines.length; idIndex += 1) {
+    if (!lines[idIndex].includes(bookingId)) continue;
+
+    const lowerBound = Math.max(0, idIndex - 8);
+    let phone = null;
+    let phoneIndex = -1;
+
+    for (let i = idIndex - 1; i >= lowerBound; i -= 1) {
+      phone = extractPhone(lines[i]);
+      if (phone) {
+        phoneIndex = i;
+        break;
+      }
+    }
+
+    if (!phone || phoneIndex <= lowerBound) continue;
+
+    const customerName = lines[phoneIndex - 1];
+    if (customerName && !extractPhone(customerName) && !/\d{4,}/.test(customerName)) {
+      return { customerName, phone };
+    }
+  }
+
+  return { customerName: null, phone: null };
+}
+
+function extractCompactBookingInfo(text, bookingId) {
+  if (!bookingId) return { customerName: null, phone: null };
+
+  const compact = normalizeText(text).replace(/\s+/g, "");
+  const id = escapeRegExp(bookingId);
+  const phonePattern = "(01[016789]-?\\d{3,4}-?\\d{4})";
+
+  const detailMatch = compact.match(new RegExp(`예약자([가-힣]{2,10})전화번호${phonePattern}예약번호${id}`));
+  if (detailMatch) {
+    return { customerName: detailMatch[1], phone: extractPhone(detailMatch[2]) };
+  }
+
+  const rowMatch = compact.match(new RegExp(`(?:확정|취소|노쇼|이용완료|확정대기)([가-힣]{2,10})${phonePattern}${id}`));
+  if (rowMatch) {
+    const statusNameMatches = [...rowMatch[1].matchAll(/(?:확정|취소|노쇼|이용완료|확정대기)?([가-힣]{2,5})/g)];
+    const customerName = statusNameMatches.at(-1)?.[1] || rowMatch[1];
+    return { customerName, phone: extractPhone(rowMatch[2]) };
+  }
+
+  return { customerName: null, phone: null };
 }
 
 function extractBookingStatus(text) {
@@ -105,6 +166,34 @@ function extractUseDateTime(text) {
   return { dateText: null, timeText: null, combined: null };
 }
 
+async function waitForVisiblePhone(page, bookingId, timeout = 55_000) {
+  await page.waitForFunction(
+    (id) => {
+      const text = document.body?.innerText || document.body?.textContent || "";
+      const compact = text.replace(/\s+/g, "");
+      const hasTarget = !id || compact.includes(id);
+      const hasPhone = /01[016789]-?\d{3,4}-?\d{4}/.test(compact);
+      const hasDetailHint = /(?:\uC608\uC57D|\uC804\uD654\uBC88\uD638|\uACB0\uC81C|\uC774\uC6A9\uC77C\uC2DC|\uC0C1\uC138)/.test(text);
+
+      return hasTarget && hasPhone && hasDetailHint;
+    },
+    bookingId,
+    { timeout },
+  );
+}
+
+async function retryNaverDetailReadiness(page, bookingId) {
+  try {
+    await waitForVisiblePhone(page, bookingId, 55_000);
+    return;
+  } catch {
+    console.log("Naver detail phone was not visible yet. Reload once before final parse.");
+    await page.reload({ timeout: 60_000, waitUntil: "domcontentloaded" });
+    await humanDelay(page, "after naver detail reload", 2800, 6200);
+    await waitForVisiblePhone(page, bookingId, 55_000);
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const target = args._[0] || optionalEnv("NAVER_BOOKING_DETAIL_URL", "");
@@ -124,32 +213,77 @@ async function main() {
 
     if (bookingId) {
       await page.goto(buildBookingListUrl(args.date), { timeout: 60_000, waitUntil: "domcontentloaded" });
-      await page.waitForTimeout(5000);
+      await humanDelay(page, "after booking list open", 3200, 5800);
 
       const bookingLink = page.getByText(bookingId, { exact: true }).first();
       await bookingLink.waitFor({ state: "visible", timeout: 20_000 });
-      await page.waitForTimeout(700);
-      await bookingLink.click();
-      await page.waitForTimeout(3500);
+      await humanDelay(page, "before booking detail click", 1800, 3600);
+      await humanClickElement(page, bookingLink, "booking detail link");
+      await humanDelay(page, "after booking detail click", 2800, 6200);
+      await humanMouseMove(page, 1020, 360, "Naver booking detail read");
+      await page.waitForFunction((id) => {
+        const sideText = [...document.querySelectorAll('[class*="SideLayer__visible"], [class*="SideFrame__"], [class*="Detail__"]')]
+          .map((element) => element.textContent || "")
+          .join("\n");
+        const listText = [...document.querySelectorAll('[class*="BookingListView__list-contents"], [class*="BookingListView__booking-list-table"]')]
+          .map((element) => element.textContent || "")
+          .join("\n");
+        const text = `${sideText}\n${listText}`;
+        const compact = text.replace(/\s+/g, "");
+        return text.includes("예약 상세정보")
+          && compact.includes(id)
+          && /01[016789]-?\d{3,4}-?\d{4}/.test(compact);
+      }, bookingId, { timeout: 55_000 }).catch(async () => {
+        await retryNaverDetailReadiness(page, bookingId);
+      });
+      await humanDelay(page, "after booking detail ready", 2200, 4800);
     } else {
       await page.goto(target, { timeout: 60_000, waitUntil: "domcontentloaded" });
-      await page.waitForTimeout(3500);
+      await humanDelay(page, "after booking detail url open", 2800, 6200);
+      await humanMouseMove(page, 1020, 360, "Naver booking detail url read");
+      await page.waitForFunction(() => {
+        const text = [...document.querySelectorAll('[class*="SideLayer__visible"], [class*="SideFrame__"], [class*="Detail__"]')]
+          .map((element) => element.textContent || "")
+          .join("\n");
+        const compact = text.replace(/\s+/g, "");
+        return text.includes("예약 상세정보")
+          && compact.includes("예약자")
+          && /01[016789]-?\d{3,4}-?\d{4}/.test(compact);
+      }, null, { timeout: 55_000 }).catch(async () => {
+        await retryNaverDetailReadiness(page, null);
+      });
+      await humanDelay(page, "after booking detail ready", 2200, 4800);
     }
 
     const screenshot = await saveScreenshot(page, "naver-booking-detail-read");
-    const bodyText = await page.locator("body").innerText({ timeout: 10_000 });
-    const text = normalizeText(bodyText);
+    const bodyText = await page.locator("body").innerText({ timeout: 20_000 });
+    const supplementalText = await page.evaluate(() => {
+      const selectors = [
+        '[class*="SideLayer__visible"]',
+        '[class*="SideFrame__"]',
+        '[class*="Detail__"]',
+        '[class*="BookingListView__list-contents"]',
+        '[class*="BookingListView__booking-list-table"]',
+      ];
+      return selectors
+        .flatMap((selector) => [...document.querySelectorAll(selector)])
+        .map((element) => `${element.innerText || ""}\n${element.textContent || ""}`)
+        .join("\n");
+    });
+    const text = normalizeText(`${bodyText}\n${supplementalText}`);
     const detailStart = text.lastIndexOf("예약 상세정보");
     const detailText = detailStart >= 0 ? text.slice(detailStart) : text;
     const useDateTime = extractUseDateTime(detailText);
+    const listRow = extractListRowByBookingId(text, bookingId);
+    const compactInfo = extractCompactBookingInfo(text, bookingId);
 
     const result = {
       currentUrl: page.url(),
       screenshot,
       bookingStatus: extractBookingStatus(detailText),
-      bookingNumber: extractValueAfterLabels(detailText, ["예약번호", "예약 번호"]) || extractBookingNumber(detailText),
-      customerName: extractValueAfterLabels(detailText, ["예약자", "예약자명", "이름"]),
-      phone: extractValueAfterLabels(detailText, ["전화번호", "휴대폰 번호", "연락처"]) || extractPhone(detailText),
+      bookingNumber: extractValueAfterLabels(detailText, ["예약번호", "예약 번호"]) || bookingId || extractBookingNumber(detailText),
+      customerName: extractValueAfterLabels(detailText, ["예약자", "예약자명", "이름"]) || listRow.customerName || compactInfo.customerName,
+      phone: extractValueAfterLabels(detailText, ["전화번호", "휴대폰 번호", "연락처"]) || extractPhone(detailText) || listRow.phone || compactInfo.phone,
       productName: extractValueAfterLabels(detailText, ["상품", "예약상품", "상품명"]),
       useDateTime: useDateTime.combined || extractValueAfterLabels(detailText, ["이용일시", "예약일시", "방문일시"]),
       useDateText: useDateTime.dateText,
@@ -159,6 +293,13 @@ async function main() {
       priceText: extractValueAfterLabels(detailText, ["결제금액", "결제 금액", "결제금액 합계"]),
       visibleTextSample: detailText.slice(0, 1200),
     };
+
+    if (!result.customerName || result.customerName.includes("*")) {
+      throw new Error("Naver detail customer name was not fully visible after retry.");
+    }
+    if (!result.phone) {
+      throw new Error("Naver detail phone number was not visible after retry.");
+    }
 
     console.log(JSON.stringify(result, null, 2));
   } finally {

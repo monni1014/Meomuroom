@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
+import { humanClickElement } from "./lib/human.mjs";
 import { naverStorageStatePath } from "./lib/paths.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
 
@@ -17,7 +18,7 @@ async function main() {
     const page = await context.newPage();
     await page.goto(productUrl, { timeout: 60_000, waitUntil: "domcontentloaded" });
     await page.waitForTimeout(3_000);
-    await page.getByText("\uc77c\uc815\uc124\uc815", { exact: false }).first().click();
+    await humanClickElement(page, page.getByText("\uc77c\uc815\uc124\uc815", { exact: false }).first(), "inspect schedule tab");
     await page.waitForTimeout(4_000);
 
     const data = await page.evaluate(() => {

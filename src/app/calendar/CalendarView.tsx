@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
 import TimeSelect from "@/components/TimeSelect";
 import MultiDatePicker from "@/components/MultiDatePicker";
+import RpaStatusBadge from "@/components/RpaStatusBadge";
 
 interface UsageLog {
   id: string;
@@ -29,6 +30,8 @@ interface Reservation {
   phone: string | null;
   startTime: string;
   endTime: string;
+  createdAt: string;
+  updatedAt: string;
   notified: boolean;
   price: number;
   discount: number;
@@ -42,9 +45,6 @@ interface Reservation {
   emailId: string | null; // null = 수기 입력 (메일 자동연동 아님)
   usageLog: UsageLog | null;
 }
-
-const RPA_CHECK_MARKER = "RPA_CHECK_REQUIRED";
-const hasRpaIssue = (memo?: string | null) => Boolean(memo?.includes(RPA_CHECK_MARKER));
 
 export default function CalendarPage() {
   const router = useRouter();
@@ -593,11 +593,7 @@ export default function CalendarPage() {
                           🧹불량!
                         </span>
                       )}
-                      {hasRpaIssue(res.memo) && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-300 shadow-sm shadow-yellow-100" title="RPA가 슬롯 처리 중 확실하지 않은 상황을 감지했습니다. 직접 확인해 주세요.">
-                          RPA 확인필요
-                        </span>
-                      )}
+                      <RpaStatusBadge memo={res.memo} createdAt={res.createdAt} updatedAt={res.updatedAt} />
                       <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", getRoomBadgeStyle(res.roomName))}>
                         {res.roomName}
                       </span>

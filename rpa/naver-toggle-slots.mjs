@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
 import { parseArgs, parseHour, parseRoom, requiredArg } from "./lib/cli.mjs";
 import { optionalEnv } from "./lib/env.mjs";
-import { humanDelay } from "./lib/human.mjs";
+import { humanClick, humanClickElement, humanDelay } from "./lib/human.mjs";
 import { naverStorageStatePath } from "./lib/paths.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
 
@@ -66,11 +66,38 @@ function formatShortMonthDay(dateValue) {
   return `${date.getMonth() + 1}.${date.getDate()}`;
 }
 
+function toKstDateOnlyMs(dateValue) {
+  return new Date(`${dateValue}T00:00:00+09:00`).getTime();
+}
+
+function parseVisibleWeekRange(text) {
+  const match = text.match(/(20\d{2})\.(\d{1,2})\.(\d{1,2})\s*~\s*(?:(20\d{2})\.)?(\d{1,2})\.(\d{1,2})/);
+  if (!match) return null;
+
+  const startYear = Number(match[1]);
+  const startMonth = Number(match[2]);
+  const startDay = Number(match[3]);
+  const endMonth = Number(match[5]);
+  const endDay = Number(match[6]);
+  const endYear = match[4]
+    ? Number(match[4])
+    : startYear + (endMonth < startMonth ? 1 : 0);
+
+  const startValue = `${startYear}-${String(startMonth).padStart(2, "0")}-${String(startDay).padStart(2, "0")}`;
+  const endValue = `${endYear}-${String(endMonth).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`;
+
+  return {
+    label: match[0],
+    startMs: toKstDateOnlyMs(startValue),
+    endMs: toKstDateOnlyMs(endValue),
+  };
+}
+
 async function clickTextIfVisible(page, text, timeout = 15_000) {
   const locator = page.getByText(text, { exact: false }).first();
   await locator.waitFor({ state: "visible", timeout });
   await humanDelay(page, "before text click", 700, 1700);
-  await locator.click();
+  await humanClickElement(page, locator, `click ${text}`);
   await humanDelay(page, "after text click", 700, 1600);
 }
 
@@ -117,41 +144,93 @@ async function closeSlotPanelIfOpen(page) {
 async function navigateToDate(page, dateValue) {
   const targetLabel = formatKoreanDateLabel(dateValue);
   const targetMonthDay = formatShortMonthDay(dateValue);
+  const targetMs = toKstDateOnlyMs(dateValue);
 
-  for (let i = 0; i < 8; i += 1) {
-    if (await page.getByText(targetLabel, { exact: false }).first().isVisible().catch(() => false)) {
-      return targetLabel;
-    }
+  await page.waitForFunction(() => /20\d{2}\.\d{1,2}\.\d{1,2}\s*~/.test(document.body?.innerText || ""), null, {
+    timeout: 30_000,
+  });
 
+  for (let i = 0; i < 12; i += 1) {
     const visibleText = await page.locator("body").innerText({ timeout: 5_000 });
-    const visibleDayHeaders = [...visibleText.matchAll(/\b\d{1,2}\.\d{1,2}\([^)]+\)/g)].map((match) => match[0]);
+    const visibleDayHeaders = [...visibleText.matchAll(/\b\d{1,2}\.\d{1,2}\s*\([^)]+\)/g)]
+      .map((match) => match[0].replace(/\s+/g, ""));
     const actualVisibleHeader = visibleDayHeaders.find((header) => header.startsWith(`${targetMonthDay}(`));
 
     if (actualVisibleHeader) {
-      console.log(`Target day is visible as ${actualVisibleHeader}; no next arrow click.`);
+      console.log(`Target day is visible as ${actualVisibleHeader}; no week arrow click.`);
       return actualVisibleHeader;
     }
 
-    const currentRange = visibleText.match(/20\d{2}\.\d{1,2}\.\d{1,2}\s*~\s*\d{1,2}\.\d{1,2}/)?.[0] || "unknown";
-    console.log(`Target ${targetLabel} is not visible. Click exact next-week arrow from ${currentRange}.`);
-    await clickNextWeekArrow(page);
+    const currentRange = parseVisibleWeekRange(visibleText);
+    if (!currentRange) {
+      console.log(`Target ${targetLabel} is not visible, but current week range is not loaded yet. Wait before moving.`);
+      await humanDelay(page, "wait for week range", 1000, 2200);
+      continue;
+    }
+
+    if (targetMs >= currentRange.startMs && targetMs <= currentRange.endMs) {
+      throw new Error(
+        `Target ${targetLabel} is inside visible week ${currentRange.label}, but the day header was not found. Refusing to move weeks.`
+      );
+    }
+
+    const direction = targetMs < currentRange.startMs ? "previous" : "next";
+    console.log(`Target ${targetLabel} is not visible. Click ${direction}-week arrow from ${currentRange.label}.`);
+    await clickWeekArrow(page, direction);
   }
 
-  throw new Error(`Could not navigate to ${targetLabel} with next-week arrow.`);
+  throw new Error(`Could not navigate to ${targetLabel} with week arrows.`);
 }
 
-async function clickNextWeekArrow(page) {
-  const nextButton = page.getByRole("button", { name: TEXT.next }).first();
-  await nextButton.waitFor({ state: "visible", timeout: 10_000 });
-  const box = await nextButton.boundingBox();
+async function clickWeekArrow(page, direction) {
+  const box = await page.evaluate((targetDirection) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
 
-  if (!box) {
-    throw new Error("Could not locate exact next-week arrow button.");
+    const candidates = [...document.querySelectorAll("button,[role='button']")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text: (element.textContent || "").replace(/\s+/g, " ").trim(),
+          aria: element.getAttribute("aria-label") || "",
+        };
+      })
+      .filter((candidate) =>
+        candidate.x > 240
+        && candidate.x < 980
+        && candidate.y > 170
+        && candidate.y < 360
+        && candidate.width <= 90
+        && candidate.height <= 90
+      )
+      .sort((a, b) => a.x - b.x);
+
+    if (candidates.length === 0) return null;
+    return targetDirection === "previous" ? candidates[0] : candidates[candidates.length - 1];
+  }, direction);
+
+  const fallbackLocator = direction === "next"
+    ? page.getByRole("button", { name: TEXT.next }).first()
+    : page.getByRole("button", { name: /이전|전일|어제/ }).first();
+
+  const fallbackBox = box ? null : await fallbackLocator.boundingBox().catch(() => null);
+  const targetBox = box || fallbackBox;
+
+  if (!targetBox) {
+    throw new Error(`Could not locate exact ${direction}-week arrow button.`);
   }
 
-  await humanDelay(page, "before exact next-week arrow", 700, 1600);
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await humanDelay(page, "after exact next-week arrow", 1000, 2200);
+  await humanDelay(page, `before exact ${direction}-week arrow`, 700, 1600);
+  await humanClick(page, targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, `${direction}-week arrow`);
+  await humanDelay(page, `after exact ${direction}-week arrow`, 1000, 2200);
 }
 
 async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour) {
@@ -281,7 +360,7 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour
     const clickPoint = await findClickPoint(attempt.timeText, attempt.useBlockCenter);
     if (!clickPoint) continue;
 
-    await page.mouse.click(clickPoint.x, clickPoint.y);
+    await humanClick(page, clickPoint.x, clickPoint.y, `open ${targetLabel} slot panel`);
     await humanDelay(page, "after day slot click", 900, 2200);
 
     const panelTitleVisible = await page.getByText(expectedPanelTitle, { exact: false })
@@ -430,92 +509,99 @@ async function clickHourToggle(page, hour, mode) {
   }
 
   await humanDelay(page, `before ${label} toggle`, 500, 1200);
-  await page.mouse.click(toggle.x, toggle.y);
+  await humanClick(page, toggle.x, toggle.y, `${label} toggle`);
   await humanDelay(page, `after ${label} toggle`, 500, 1400);
   console.log(`${label}: changed to ${mode}`);
 }
 
 async function assertHourToggleState(page, hour, mode) {
   const label = `${String(hour).padStart(2, "0")}:00`;
-  const actualState = await page.evaluate((targetLabel) => {
-    function visible(element) {
-      const style = window.getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
-      return style.visibility !== "hidden"
-        && style.display !== "none"
-        && rect.width > 0
-        && rect.height > 0
-        && rect.y >= 0
-        && rect.y <= window.innerHeight;
-    }
+  let actualState = null;
 
-    function parseRgb(color) {
-      const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-      if (!match) return null;
-      return {
-        r: Number(match[1]),
-        g: Number(match[2]),
-        b: Number(match[3]),
-      };
-    }
-
-    function elementColorState(element) {
-      const rect = element.getBoundingClientRect();
-      const candidates = [element, ...element.querySelectorAll("*")]
-        .map((candidate) => {
-          const candidateRect = candidate.getBoundingClientRect();
-          const style = window.getComputedStyle(candidate);
-          const rgb = parseRgb(style.backgroundColor);
-          return { rect: candidateRect, rgb };
-        })
-        .filter(({ rect: candidateRect, rgb }) => {
-          if (!rgb) return false;
-          if (candidateRect.width < 28 || candidateRect.width > 90) return false;
-          if (candidateRect.height < 16 || candidateRect.height > 48) return false;
-          const sameCenterY = Math.abs((candidateRect.y + candidateRect.height / 2) - (rect.y + rect.height / 2)) < 4;
-          return sameCenterY;
-        })
-        .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
-
-      const target = candidates[0];
-      if (!target) return null;
-
-      const { rgb } = target;
-      if (rgb.g > 130 && rgb.r < 100 && rgb.b < 140) return "open";
-      if (Math.abs(rgb.r - rgb.g) < 35 && Math.abs(rgb.g - rgb.b) < 35 && rgb.r > 110 && rgb.r < 230) {
-        return "close";
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    actualState = await page.evaluate((targetLabel) => {
+      function visible(element) {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.visibility !== "hidden"
+          && style.display !== "none"
+          && rect.width > 0
+          && rect.height > 0
+          && rect.y >= 0
+          && rect.y <= window.innerHeight;
       }
 
-      return null;
-    }
+      function parseRgb(color) {
+        const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+        if (!match) return null;
+        return {
+          r: Number(match[1]),
+          g: Number(match[2]),
+          b: Number(match[3]),
+        };
+      }
 
-    const elements = [...document.querySelectorAll("body *")].filter(visible);
-    const labels = elements
-      .filter((element) => (element.textContent || "").trim() === targetLabel)
-      .map((element) => element.getBoundingClientRect())
-      .filter((rect) => rect.x > window.innerWidth * 0.35 && rect.x < window.innerWidth * 0.9)
-      .sort((a, b) => (a.width * a.height) - (b.width * b.height));
-
-    const timeRect = labels[0];
-    if (!timeRect) return null;
-
-    const rowCenterY = timeRect.y + timeRect.height / 2;
-    const toggles = elements
-      .map((element) => {
+      function elementColorState(element) {
         const rect = element.getBoundingClientRect();
-        const state = elementColorState(element);
-        return { rect, state };
-      })
-      .filter(({ rect, state }) => {
-        const sameRow = Math.abs((rect.y + rect.height / 2) - rowCenterY) < 18;
-        const rightSide = rect.x > timeRect.x + timeRect.width;
-        const switchSize = rect.width >= 32 && rect.width <= 90 && rect.height >= 18 && rect.height <= 48;
-        return sameRow && rightSide && switchSize && state;
-      })
-      .sort((a, b) => a.rect.x - b.rect.x);
+        const candidates = [element, ...element.querySelectorAll("*")]
+          .map((candidate) => {
+            const candidateRect = candidate.getBoundingClientRect();
+            const style = window.getComputedStyle(candidate);
+            const rgb = parseRgb(style.backgroundColor);
+            return { rect: candidateRect, rgb };
+          })
+          .filter(({ rect: candidateRect, rgb }) => {
+            if (!rgb) return false;
+            if (candidateRect.width < 28 || candidateRect.width > 90) return false;
+            if (candidateRect.height < 16 || candidateRect.height > 48) return false;
+            const sameCenterY = Math.abs((candidateRect.y + candidateRect.height / 2) - (rect.y + rect.height / 2)) < 4;
+            return sameCenterY;
+          })
+          .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
 
-    return toggles[0]?.state || null;
-  }, label);
+        const target = candidates[0];
+        if (!target) return null;
+
+        const { rgb } = target;
+        if (rgb.g > 130 && rgb.r < 100 && rgb.b < 140) return "open";
+        if (Math.abs(rgb.r - rgb.g) < 35 && Math.abs(rgb.g - rgb.b) < 35 && rgb.r > 110 && rgb.r < 230) {
+          return "close";
+        }
+
+        return null;
+      }
+
+      const elements = [...document.querySelectorAll("body *")].filter(visible);
+      const labels = elements
+        .filter((element) => (element.textContent || "").trim() === targetLabel)
+        .map((element) => element.getBoundingClientRect())
+        .filter((rect) => rect.x > window.innerWidth * 0.35 && rect.x < window.innerWidth * 0.9)
+        .sort((a, b) => (a.width * a.height) - (b.width * b.height));
+
+      const timeRect = labels[0];
+      if (!timeRect) return null;
+
+      const rowCenterY = timeRect.y + timeRect.height / 2;
+      const toggles = elements
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const state = elementColorState(element);
+          return { rect, state };
+        })
+        .filter(({ rect, state }) => {
+          const sameRow = Math.abs((rect.y + rect.height / 2) - rowCenterY) < 18;
+          const rightSide = rect.x > timeRect.x + timeRect.width;
+          const switchSize = rect.width >= 32 && rect.width <= 90 && rect.height >= 18 && rect.height <= 48;
+          return sameRow && rightSide && switchSize && state;
+        })
+        .sort((a, b) => a.rect.x - b.rect.x);
+
+      return toggles[0]?.state || null;
+    }, label);
+
+    if (actualState === mode) return;
+    await humanDelay(page, `wait for ${label} ${mode} state`, 350, 800);
+  }
 
   if (actualState !== mode) {
     throw new Error(`Unsafe save blocked: ${label} is ${actualState || "unknown"}, expected ${mode}.`);
@@ -573,7 +659,7 @@ async function clickSlotPanelSave(page) {
   }
 
   await humanDelay(page, "before save button", 900, 2200);
-  await buttonElement.click();
+  await humanClickElement(page, buttonElement, "slot panel save");
   await humanDelay(page, "after save button", 1800, 4000);
   console.log("Slot panel saved.");
 }

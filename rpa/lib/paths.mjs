@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 
 export const rpaRoot = resolve("rpa");
 export const naverStorageStatePath = resolve("rpa/.auth/naver-storage-state.json");
+export const spaceCloudStorageStatePath = resolve("rpa/.auth/spacecloud-storage-state.json");
 export const screenshotDir = resolve("rpa/screenshots");
 
 export function ensureParentDir(filePath) {

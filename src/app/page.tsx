@@ -1,18 +1,82 @@
-import { Calendar, Users, Coffee, TrendingUp, RefreshCw, Clock } from "lucide-react";
+import { Calendar, Users, TrendingUp, Clock } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import EmailSyncButton from "./EmailSyncButton";
 import AutoRefresh from "./AutoRefresh";
-import { UNCATEGORIZED_LABEL } from "@/lib/categories";
 import MonthlyReservationsList from "@/components/MonthlyReservationsList";
 import TodayReservationsList from "@/components/TodayReservationsList";
 import WeekFilter from "@/components/WeekFilter";
+import MonthFilter from "@/components/MonthFilter";
 
 export const dynamic = "force-dynamic";
+
+const SERVICE_START_MONTH = new Date(2025, 7, 1); // 2025년 8월
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function pad2(n: number) {
+  return n.toString().padStart(2, "0");
+}
+
+function monthKey(date: Date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+}
+
+function dateKey(date: Date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function parseMonthParam(value: string | undefined, fallback: Date) {
+  const match = value?.match(/^(20\d{2})-(0[1-9]|1[0-2])$/);
+  if (!match) return new Date(fallback.getFullYear(), fallback.getMonth(), 1);
+  return new Date(Number(match[1]), Number(match[2]) - 1, 1);
+}
+
+function parseDateParam(value: string | undefined) {
+  const match = value?.match(/^(20\d{2})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  date.setHours(0, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfWeekMonday(date: Date) {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  const day = result.getDay();
+  result.setDate(result.getDate() - day + (day === 0 ? -6 : 1));
+  return result;
+}
+
+function maxDate(a: Date, b: Date) {
+  return a.getTime() >= b.getTime() ? a : b;
+}
+
+function minDate(a: Date, b: Date) {
+  return a.getTime() <= b.getTime() ? a : b;
+}
+
+function buildMonthOptions(start: Date, end: Date, selected: Date) {
+  const rangeStart = new Date(Math.min(start.getTime(), selected.getTime()));
+  const rangeEnd = new Date(Math.max(end.getTime(), selected.getTime()));
+  const current = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+  const last = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
+  const options: { value: string; label: string }[] = [];
+
+  while (current <= last) {
+    options.push({
+      value: monthKey(current),
+      label: `${current.getFullYear()}년 ${current.getMonth() + 1}월`,
+    });
+    current.setMonth(current.getMonth() + 1);
+  }
+
+  return options;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default async function DashboardPage(props: { searchParams?: Promise<any> | any }) {
   const searchParams = await Promise.resolve(props.searchParams || {});
   const weekStartParam = searchParams.weekStart as string | undefined;
+  const monthParam = searchParams.month as string | undefined;
 
   // Get current date boundaries for Today
   const startOfToday = new Date();
@@ -20,9 +84,23 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const endOfToday = new Date();
   endOfToday.setHours(23, 59, 59, 999);
 
-  // Get current date boundaries for This Month
-  const startOfThisMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
-  const endOfThisMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth() + 1, 0, 23, 59, 59, 999);
+  const currentMonthStart = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
+  const selectedMonthStart = parseMonthParam(monthParam, currentMonthStart);
+  const selectedMonthEnd = new Date(selectedMonthStart.getFullYear(), selectedMonthStart.getMonth() + 1, 0, 23, 59, 59, 999);
+  const selectedMonthKey = monthKey(selectedMonthStart);
+  const selectedMonthLabel = `${selectedMonthStart.getFullYear()}년 ${selectedMonthStart.getMonth() + 1}월`;
+
+  const reservationBounds = await prisma.reservation.aggregate({
+    _min: { startTime: true },
+    _max: { startTime: true },
+  });
+  const firstDataMonth = reservationBounds._min.startTime
+    ? minDate(new Date(reservationBounds._min.startTime.getFullYear(), reservationBounds._min.startTime.getMonth(), 1), SERVICE_START_MONTH)
+    : SERVICE_START_MONTH;
+  const lastDataMonth = reservationBounds._max.startTime
+    ? maxDate(new Date(reservationBounds._max.startTime.getFullYear(), reservationBounds._max.startTime.getMonth(), 1), currentMonthStart)
+    : currentMonthStart;
+  const monthOptions = buildMonthOptions(firstDataMonth, lastDataMonth, selectedMonthStart);
 
   // Fetch today's reservations (오늘 들어온 예약 — 메일 자동연동 + 수동 예약 모두 포함)
   const todayReservations = await prisma.reservation.findMany({
@@ -41,12 +119,12 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
     }
   });
 
-  // Fetch this month's reservations
+  // Fetch selected month's reservations
   const thisMonthReservations = await prisma.reservation.findMany({
     where: {
       startTime: {
-        gte: startOfThisMonth,
-        lte: endOfThisMonth
+        gte: selectedMonthStart,
+        lte: selectedMonthEnd
       }
     },
     orderBy: {
@@ -57,64 +135,25 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
     }
   });
 
-  // Get current date boundaries for Selected Week (Monday to Sunday)
-  let startOfSelectedWeek: Date;
-  
-  if (weekStartParam) {
-    startOfSelectedWeek = new Date(weekStartParam);
-    startOfSelectedWeek.setHours(0, 0, 0, 0);
-  } else {
-    // Default to the current week's Monday
-    const monday = new Date(startOfToday);
-    const day = monday.getDay();
-    const diff = monday.getDate() - day + (day === 0 ? -6 : 1);
-    monday.setDate(diff);
-    
-    startOfSelectedWeek = new Date(monday);
-    startOfSelectedWeek.setHours(0, 0, 0, 0);
-  }
+  const firstWeekStartOfMonth = startOfWeekMonday(selectedMonthStart);
+  const todayWeekStart = startOfWeekMonday(startOfToday);
+  const parsedWeekStart = parseDateParam(weekStartParam);
+  const defaultWeekStart =
+    selectedMonthKey === monthKey(startOfToday) ? todayWeekStart : firstWeekStartOfMonth;
+  const parsedWeekEnd = parsedWeekStart ? new Date(parsedWeekStart.getTime() + 6 * DAY_MS) : null;
+  const parsedWeekIntersectsSelectedMonth =
+    parsedWeekStart && parsedWeekEnd && parsedWeekStart <= selectedMonthEnd && parsedWeekEnd >= selectedMonthStart;
 
-  // Clamp to current month boundaries so week stats don't bleed into other months
-  if (startOfSelectedWeek < startOfThisMonth) {
-    startOfSelectedWeek = new Date(startOfThisMonth);
-  }
-  
-  let endOfSelectedWeek = new Date(startOfSelectedWeek);
-  // Original end of week was startOfSelectedWeek + 6 days, but since start might be clamped, 
-  // we calculate from the actual week start.
-  if (weekStartParam) {
-    const wStart = new Date(weekStartParam);
-    endOfSelectedWeek = new Date(wStart);
-    endOfSelectedWeek.setDate(wStart.getDate() + 6);
-  } else {
-    // If no param, we find the Monday of today's week
-    const monday = new Date(startOfToday);
-    const day = monday.getDay();
-    const diff = monday.getDate() - day + (day === 0 ? -6 : 1);
-    monday.setDate(diff);
-    endOfSelectedWeek = new Date(monday);
-    endOfSelectedWeek.setDate(monday.getDate() + 6);
-  }
-  endOfSelectedWeek.setHours(23, 59, 59, 999);
+  const weekStartForFilter = parsedWeekIntersectsSelectedMonth
+    ? parsedWeekStart
+    : defaultWeekStart;
 
-  if (endOfSelectedWeek > endOfThisMonth) {
-    endOfSelectedWeek = new Date(endOfThisMonth);
-  }
+  const rawEndOfSelectedWeek = new Date(weekStartForFilter.getTime() + 6 * DAY_MS);
+  rawEndOfSelectedWeek.setHours(23, 59, 59, 999);
 
-  // Pad function for formatting YYYY-MM-DD
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  
-  // We need to pass the actual Monday to WeekFilter so it matches the option values
-  let weekStartForFilter = new Date(startOfToday);
-  if (weekStartParam) {
-    weekStartForFilter = new Date(weekStartParam);
-    weekStartForFilter.setHours(0, 0, 0, 0); // 로컬 자정으로 정규화 (currentWeekIter와 getTime 일치되게)
-  } else {
-    const day = weekStartForFilter.getDay();
-    const diff = weekStartForFilter.getDate() - day + (day === 0 ? -6 : 1);
-    weekStartForFilter.setDate(diff);
-  }
-  const startOfSelectedWeekStr = `${weekStartForFilter.getFullYear()}-${pad(weekStartForFilter.getMonth() + 1)}-${pad(weekStartForFilter.getDate())}`;
+  const startOfSelectedWeek = maxDate(weekStartForFilter, selectedMonthStart);
+  const endOfSelectedWeek = minDate(rawEndOfSelectedWeek, selectedMonthEnd);
+  const startOfSelectedWeekStr = dateKey(weekStartForFilter);
 
   // Fetch selected week's reservations
   const thisWeekReservations = await prisma.reservation.findMany({
@@ -172,32 +211,12 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const wRoom1Hours = sumHours(countedWeekly.filter(r => r.roomName === "머무룸1"));
   const wRoom2Hours = sumHours(countedWeekly.filter(r => r.roomName === "머무룸2"));
 
-  const getSourceDisplay = (source: string) => {
-    switch(source) {
-      case "naver": return "네이버";
-      case "spacecloud": return "스페이스클라우드";
-      case "direct": return "직접";
-      default: return "직접";
-    }
-  };
-
-  const formatTimeRange = (start: Date, end: Date) => {
-    const pad = (n: number) => n.toString().padStart(2, "0");
-    const m = `${start.getMonth() + 1}/${start.getDate()}`;
-    const startStr = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
-    const endStr = `${pad(end.getHours())}:${pad(end.getMinutes())}`;
-    return `[${m}] ${startStr} - ${endStr}`;
-  };
-
   // Determine week number for the title
   let weekNum = 1;
-  let currentWeekIter = new Date(startOfThisMonth);
-  const iterDay = currentWeekIter.getDay();
-  const iterDiff = currentWeekIter.getDate() - iterDay + (iterDay === 0 ? -6 : 1);
-  currentWeekIter.setDate(iterDiff);
+  const currentWeekIter = new Date(firstWeekStartOfMonth);
   currentWeekIter.setHours(0, 0, 0, 0);
 
-  while (currentWeekIter <= endOfThisMonth) {
+  while (currentWeekIter <= selectedMonthEnd) {
     if (currentWeekIter.getTime() === weekStartForFilter.getTime()) {
       break;
     }
@@ -222,9 +241,14 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       <section className="space-y-6">
         {/* Monthly Stats */}
         <div className="space-y-3">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-slate-900">{startOfThisMonth.getMonth() + 1}월 현황</h2>
-            <span className="text-xs text-slate-400">이번 달 예약 통계</span>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">{selectedMonthLabel} 현황</h2>
+              <span className="text-xs text-slate-400">선택한 월 예약 통계</span>
+            </div>
+            <div className="bg-slate-100 rounded-lg px-2 py-1 w-fit">
+              <MonthFilter currentMonth={selectedMonthKey} months={monthOptions} />
+            </div>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center justify-center space-y-1.5">
@@ -276,9 +300,9 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
         {/* Weekly Stats */}
         <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-slate-900">{startOfThisMonth.getMonth() + 1}월 {weekNum}주차 현황</h2>
+            <h2 className="text-lg font-semibold text-slate-900">{selectedMonthStart.getMonth() + 1}월 {weekNum}주차 현황</h2>
             <div className="bg-slate-100 rounded-lg px-2 py-1">
-              <WeekFilter currentWeekStart={startOfSelectedWeekStr} />
+              <WeekFilter currentWeekStart={startOfSelectedWeekStr} monthStart={dateKey(selectedMonthStart)} />
             </div>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -344,7 +368,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       {/* This Month's Reservations */}
       <section className="space-y-3 pt-6">
         <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold text-slate-900">이 달 예약 일정</h2>
+          <h2 className="text-lg font-semibold text-slate-900">{selectedMonthLabel} 예약 일정</h2>
           <span className="text-xs text-slate-400">다가오는 일정 우선</span>
         </div>
         <MonthlyReservationsList reservations={thisMonthReservations} />

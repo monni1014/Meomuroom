@@ -4,9 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { UNCATEGORIZED_LABEL } from "@/lib/categories";
 import { ChevronDown, ChevronUp } from "lucide-react";
-
-const RPA_CHECK_MARKER = "RPA_CHECK_REQUIRED";
-const hasRpaIssue = (memo?: string | null) => Boolean(memo?.includes(RPA_CHECK_MARKER));
+import RpaStatusBadge from "@/components/RpaStatusBadge";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default function MonthlyReservationsList({ reservations }: { reservations: any[] }) {
@@ -98,12 +96,8 @@ export default function MonthlyReservationsList({ reservations }: { reservations
                       💸 미결제
                     </span>
                   )}
-                  {hasRpaIssue(res.memo) && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-300">
-                      RPA 확인필요
-                    </span>
-                  )}
-                  <span>· {res.usageLog?.headCount || 0}명 ({res.usageLog?.purpose || UNCATEGORIZED_LABEL}{res.usageLog?.detail ? ` · ${res.usageLog.detail}` : ""})</span>
+                <RpaStatusBadge memo={res.memo} createdAt={res.createdAt} updatedAt={res.updatedAt} />
+                <span>· {res.usageLog?.headCount || 0}명 ({res.usageLog?.purpose || UNCATEGORIZED_LABEL}{res.usageLog?.detail ? ` · ${res.usageLog.detail}` : ""})</span>
                   {res.price > 0 && (
                     <span className="font-medium">
                       · {res.price.toLocaleString()}원

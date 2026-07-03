@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { prisma } from "./prisma";
 import type { ParsedReservation } from "./email-parser";
+import { clearRpaPendingForReservation, RPA_PENDING_MARKER } from "./rpa-reservation-state";
 
 const execFileAsync = promisify(execFile);
 
@@ -39,10 +40,15 @@ type NormalizedNaverReservation = {
   startClock: string;
   endClock: string;
   price: number;
+  discount: number;
   headCount: number;
   status: "CONFIRMED" | "CANCELLED";
   paymentMethod: string;
   isPaid: boolean;
+};
+
+type RpaRecheckGlobal = typeof globalThis & {
+  __naverSlotRpaIssueRecheckedAt?: Map<string, number>;
 };
 
 function toKstDateValue(date: Date) {
@@ -73,6 +79,10 @@ function parseHeadCount(value?: string | null) {
 function parseRoom(productName?: string | null): "1" | "2" {
   if (productName?.includes("2")) return "2";
   return "1";
+}
+
+function parseRoomFromRoomName(roomName?: string | null): "1" | "2" {
+  return roomName?.includes("2") ? "2" : "1";
 }
 
 function parseKoreanTimePrefix(prefix: string, hourText: string, minuteText: string) {
@@ -143,11 +153,40 @@ async function markRpaCheckRequired(reservationId: string, reason: string) {
   });
 
   if (!current) return;
-  if (current.memo?.includes(RPA_CHECK_MARKER)) return;
+  if (current.memo?.includes(clippedReason)) return;
 
   const memo = [current.memo, `${RPA_CHECK_MARKER} ${clippedReason}`]
     .filter(Boolean)
     .join("\n");
+
+  await prisma.reservation.update({
+    where: { id: reservationId },
+    data: { memo },
+  });
+}
+
+function removeRpaCheckLines(memo: string | null, shouldRemove: (line: string) => boolean = () => true) {
+  if (!memo?.includes(RPA_CHECK_MARKER)) return memo;
+
+  const remaining = memo
+    .split(/\r?\n/)
+    .filter((line) => !(line.includes(RPA_CHECK_MARKER) && shouldRemove(line)))
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+
+  return remaining.length > 0 ? remaining.join("\n") : null;
+}
+
+async function clearRpaCheckRequired(reservationId: string, shouldRemove?: (line: string) => boolean) {
+  const current = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    select: { memo: true },
+  });
+
+  if (!current?.memo?.includes(RPA_CHECK_MARKER)) return;
+
+  const memo = removeRpaCheckLines(current.memo, shouldRemove);
+  if (memo === current.memo) return;
 
   await prisma.reservation.update({
     where: { id: reservationId },
@@ -161,7 +200,7 @@ async function readNaverDetail(bookingId: string, dateValue?: string) {
   return parseJsonFromStdout(await runNodeScript(args));
 }
 
-function normalizeDetail(detail: NaverDetailResult): NormalizedNaverReservation {
+function normalizeDetail(detail: NaverDetailResult, fallbackDiscount = 0): NormalizedNaverReservation {
   if (!detail.bookingNumber) throw new Error("Naver detail missing booking number.");
   if (!detail.customerName) throw new Error("Naver detail missing customer name.");
 
@@ -181,6 +220,7 @@ function normalizeDetail(detail: NaverDetailResult): NormalizedNaverReservation 
     startClock: toClock(startTime),
     endClock: toClock(endTime),
     price: parseAmount(detail.priceText),
+    discount: fallbackDiscount,
     headCount: parseHeadCount(detail.quantity),
     status,
     paymentMethod: "온라인",
@@ -203,6 +243,7 @@ function normalizeParsedReservation(parsed: ParsedReservation, bookingId?: strin
     startClock: toClock(parsed.startTime),
     endClock: toClock(parsed.endTime),
     price: parsed.isCancelled ? (parsed.refundFee ?? 0) : parsed.price,
+    discount: parsed.discount ?? 0,
     headCount: parsed.headCount,
     status: parsed.isCancelled ? "CANCELLED" : "CONFIRMED",
     paymentMethod: "온라인",
@@ -258,6 +299,7 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
         startTime: item.startTime,
         endTime: item.endTime,
         price: item.price,
+        discount: item.discount,
         status: item.status,
         paymentMethod: item.paymentMethod,
         isPaid: item.isPaid,
@@ -268,6 +310,7 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
       include: { usageLog: true },
     });
 
+    await clearRpaPendingForReservation(updated.id);
     return { reservation: updated, created: false };
   }
 
@@ -282,6 +325,7 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
       endTime: item.endTime,
       createdAt: receivedAt || new Date(),
       price: item.price,
+      discount: item.discount,
       status: item.status,
       paymentMethod: item.paymentMethod,
       isPaid: item.isPaid,
@@ -332,7 +376,8 @@ async function cancelNaverReservation(
   const reservationEmailId = /^\d+$/.test(item.bookingNumber) ? `naver:${item.bookingNumber}` : messageId;
 
   if (existing) {
-    if (existing.status === "CANCELLED" && existing.price === cancellationPrice) {
+    const wasPending = Boolean(existing.memo?.includes(RPA_PENDING_MARKER));
+    if (existing.status === "CANCELLED" && existing.price === cancellationPrice && !wasPending) {
       return { reservation: existing, created: false, changed: false };
     }
 
@@ -357,6 +402,7 @@ async function cancelNaverReservation(
       include: { usageLog: true },
     });
 
+    await clearRpaPendingForReservation(updated.id);
     return { reservation: updated, created: false, changed: true };
   }
 
@@ -395,9 +441,89 @@ function canSetSlot(item: NormalizedNaverReservation) {
     && toKstDateValue(item.startTime) === toKstDateValue(item.endTime);
 }
 
+function isSlotRpaIssueMemo(memo?: string | null) {
+  if (!memo?.includes(RPA_CHECK_MARKER)) return false;
+  return [
+    "naver-toggle-slots",
+    "Naver slot",
+    "Unsupported slot time",
+    "Unsupported Naver slot time",
+    "Could not navigate",
+    "Could not find visual toggle",
+    "Unsafe save blocked",
+    "Command failed",
+  ].some((pattern) => memo.includes(pattern));
+}
+
+function normalizeReservationForSlotRecheck(reservation: {
+  id: string;
+  emailId: string | null;
+  roomName: string;
+  customerName: string | null;
+  phone: string | null;
+  startTime: Date;
+  endTime: Date;
+  price: number;
+  discount: number;
+  status: string;
+  paymentMethod: string | null;
+  isPaid: boolean;
+  isNoShow: boolean;
+  usageLog: { reservedHeadCount: number; headCount: number } | null;
+}): NormalizedNaverReservation {
+  const room = parseRoomFromRoomName(reservation.roomName);
+
+  return {
+    bookingNumber: reservation.emailId || reservation.id,
+    room,
+    roomName: `머무룸${room}`,
+    customerName: reservation.customerName || "",
+    phone: reservation.phone,
+    startTime: reservation.startTime,
+    endTime: reservation.endTime,
+    dateValue: toKstDateValue(reservation.startTime),
+    startClock: toClock(reservation.startTime),
+    endClock: toClock(reservation.endTime),
+    price: reservation.price,
+    discount: reservation.discount,
+    headCount: reservation.usageLog?.reservedHeadCount || reservation.usageLog?.headCount || 1,
+    status: reservation.status === "CANCELLED" ? "CANCELLED" : "CONFIRMED",
+    paymentMethod: reservation.paymentMethod || "온라인",
+    isPaid: reservation.isPaid,
+  };
+}
+
+function getRpaRecheckMap() {
+  const g = globalThis as RpaRecheckGlobal;
+  g.__naverSlotRpaIssueRecheckedAt ??= new Map<string, number>();
+  return g.__naverSlotRpaIssueRecheckedAt;
+}
+
+function isNaverSlotCheckLine(line: string) {
+  return [
+    "Naver slot",
+    "Unsupported Naver slot time",
+    "Unsupported slot time",
+    "naver-toggle-slots",
+    "Could not navigate",
+    "Could not find visual toggle",
+    "Unsafe save blocked",
+  ].some((pattern) => line.includes(pattern));
+}
+
+function isSpaceCloudExternalCheckLine(line: string) {
+  return [
+    "SpaceCloud external",
+    "spacecloud-external-reservation",
+    "SpaceCloud login required",
+    "SpaceCloud product",
+    "SpaceCloud calendar",
+  ].some((pattern) => line.includes(pattern));
+}
+
 async function setNaverSlot(item: NormalizedNaverReservation, mode: "close" | "open", reservationId?: string) {
   if (!canSetSlot(item)) {
-    const reason = `Unsupported slot time ${item.dateValue} ${item.startClock}-${item.endClock}`;
+    const reason = `Unsupported Naver slot time ${item.dateValue} ${item.startClock}-${item.endClock}`;
     if (reservationId) await markRpaCheckRequired(reservationId, reason);
     return { ok: false, skipped: true, reason };
   }
@@ -415,12 +541,101 @@ async function setNaverSlot(item: NormalizedNaverReservation, mode: "close" | "o
       "--apply",
     ], 240_000);
 
+    if (reservationId) await clearRpaCheckRequired(reservationId, isNaverSlotCheckLine);
     return { ok: true, skipped: false, reason: null };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    if (reservationId) await markRpaCheckRequired(reservationId, reason);
+    if (reservationId) await markRpaCheckRequired(reservationId, `Naver slot ${mode} failed: ${reason}`);
     return { ok: false, skipped: false, reason };
   }
+}
+
+async function setSpaceCloudExternalReservation(
+  item: NormalizedNaverReservation,
+  mode: "close" | "open",
+  reservationId?: string,
+) {
+  if (!canSetSlot(item)) {
+    const reason = `Unsupported SpaceCloud external reservation time ${item.dateValue} ${item.startClock}-${item.endClock}`;
+    if (reservationId) await markRpaCheckRequired(reservationId, reason);
+    return { ok: false, skipped: true, reason };
+  }
+
+  const bookingNumber = item.bookingNumber || reservationId || `${item.dateValue}-${item.startClock}-${item.endClock}`;
+
+  try {
+    const args = [
+      "rpa/spacecloud-external-reservation.mjs",
+      `--room=${item.room}`,
+      `--date=${item.dateValue}`,
+      `--start=${item.startClock}`,
+      `--end=${item.endClock}`,
+      `--mode=${mode}`,
+      `--booking-number=${bookingNumber}`,
+      "--apply",
+    ];
+    if (item.customerName) args.push(`--customer-name=${item.customerName}`);
+    if (item.phone) args.push(`--phone=${item.phone}`);
+
+    await runNodeScript(args, 360_000);
+
+    if (reservationId) await clearRpaCheckRequired(reservationId, isSpaceCloudExternalCheckLine);
+    return { ok: true, skipped: false, reason: null };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (reservationId) {
+      await markRpaCheckRequired(reservationId, `SpaceCloud external reservation ${mode} failed: ${reason}`);
+    }
+    return { ok: false, skipped: false, reason };
+  }
+}
+
+export async function recheckNaverSlotRpaIssues(limit = 1) {
+  const cooldownMs = 10 * 60 * 1000;
+  const now = Date.now();
+  const attemptedAt = getRpaRecheckMap();
+  const candidates = await prisma.reservation.findMany({
+    where: {
+      memo: { contains: RPA_CHECK_MARKER },
+      roomName: { in: ["머무룸1", "머무룸2"] },
+      endTime: { gte: new Date(now - 24 * 60 * 60 * 1000) },
+    },
+    include: { usageLog: true },
+    orderBy: { updatedAt: "asc" },
+    take: 10,
+  });
+
+  let checked = 0;
+  let resolved = 0;
+
+  for (const reservation of candidates) {
+    if (checked >= limit) break;
+    if (!isSlotRpaIssueMemo(reservation.memo)) continue;
+
+    const lastAttempt = attemptedAt.get(reservation.id) || 0;
+    if (now - lastAttempt < cooldownMs) continue;
+    attemptedAt.set(reservation.id, now);
+
+    const item = normalizeReservationForSlotRecheck(reservation);
+    const mode = reservation.status === "CANCELLED" && !reservation.isNoShow ? "open" : "close";
+    console.log(`[NaverRPA] Recheck slot issue: ${reservation.id} ${item.dateValue} ${item.startClock}-${item.endClock} mode=${mode}`);
+
+    const beforeMemo = reservation.memo;
+    const slot = await setNaverSlot(item, mode, reservation.id);
+    checked += 1;
+
+    if (slot.ok) {
+      const after = await prisma.reservation.findUnique({
+        where: { id: reservation.id },
+        select: { memo: true },
+      });
+      if (beforeMemo !== after?.memo && !after?.memo?.includes(RPA_CHECK_MARKER)) {
+        resolved += 1;
+      }
+    }
+  }
+
+  return { checked, resolved };
 }
 
 export async function processNaverEmailWithRpa({
@@ -440,8 +655,7 @@ export async function processNaverEmailWithRpa({
 }) {
   const bookingId = extractBookingId(subject, text, html);
   if (!bookingId && !parsedReservation.isCancelled) {
-    console.log(`[NaverRPA] Could not find booking id in email: ${subject}`);
-    return { changed: false, skipped: true };
+    throw new Error(`Could not find Naver booking id in email: ${subject}`);
   }
 
   if (parsedReservation.isCancelled) {
@@ -450,7 +664,9 @@ export async function processNaverEmailWithRpa({
     if (bookingId) {
       try {
         console.log(`[NaverRPA] Read cancelled detail for booking ${bookingId}`);
-        normalized = normalizeDetail(await readNaverDetail(bookingId, toKstDateValue(parsedReservation.startTime)));
+        const detail = await readNaverDetail(bookingId, toKstDateValue(parsedReservation.startTime));
+        detail.bookingNumber ||= bookingId;
+        normalized = normalizeDetail(detail);
       } catch (error) {
         console.log(
           `[NaverRPA] Could not read cancelled detail. Use email fallback: ${error instanceof Error ? error.message : error}`,
@@ -465,6 +681,10 @@ export async function processNaverEmailWithRpa({
     if (result.changed) {
       const slot = await setNaverSlot(normalized, "open", result.reservation.id);
       console.log(`[NaverRPA] Slot open result for ${bookingId || normalized.bookingNumber}: ${slot.ok ? "ok" : slot.reason}`);
+      const spaceCloudSlot = await setSpaceCloudExternalReservation(normalized, "open", result.reservation.id);
+      console.log(
+        `[NaverRPA] SpaceCloud external open result for ${bookingId || normalized.bookingNumber}: ${spaceCloudSlot.ok ? "ok" : spaceCloudSlot.reason}`,
+      );
     } else {
       console.log(`[NaverRPA] Reservation already cancelled. Skip slot open: ${result.reservation.id}`);
     }
@@ -473,19 +693,22 @@ export async function processNaverEmailWithRpa({
   }
 
   const existingReservation = await findExistingReservationByParsedEmail(parsedReservation);
-  if (existingReservation) {
+  if (existingReservation && !existingReservation.memo?.includes(RPA_PENDING_MARKER)) {
     console.log(`[NaverRPA] Reservation already exists. Skip RPA: ${existingReservation.id}`);
     return { changed: false, skipped: true };
   }
 
   console.log(`[NaverRPA] Read detail for booking ${bookingId}`);
   const detail = await readNaverDetail(bookingId!, toKstDateValue(parsedReservation.startTime));
-  const normalized = normalizeDetail(detail);
+  detail.bookingNumber ||= bookingId;
+  const normalized = normalizeDetail(detail, parsedReservation.discount ?? 0);
   const result = await upsertNaverReservation(normalized, messageId, receivedAt);
 
   if (normalized.status === "CONFIRMED") {
     const slot = await setNaverSlot(normalized, "close", result.reservation.id);
     console.log(`[NaverRPA] Slot close result for ${bookingId}: ${slot.ok ? "ok" : slot.reason}`);
+    const spaceCloudSlot = await setSpaceCloudExternalReservation(normalized, "close", result.reservation.id);
+    console.log(`[NaverRPA] SpaceCloud external close result for ${bookingId}: ${spaceCloudSlot.ok ? "ok" : spaceCloudSlot.reason}`);
   }
 
   return { changed: true, skipped: false, created: result.created };

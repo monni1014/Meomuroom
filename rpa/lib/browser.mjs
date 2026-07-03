@@ -2,13 +2,11 @@ import { chromium } from "playwright";
 import * as proxyChain from "proxy-chain";
 import { getUpstreamProxyUrl } from "./env.mjs";
 
-export async function launchRpaBrowser({ headless = false } = {}) {
-  const localProxyUrl = await proxyChain.anonymizeProxy(getUpstreamProxyUrl());
+export async function launchRpaBrowser({ headless = false, useProxy = true } = {}) {
+  const localProxyUrl = useProxy ? await proxyChain.anonymizeProxy(getUpstreamProxyUrl()) : null;
   const browser = await chromium.launch({
     headless,
-    proxy: {
-      server: localProxyUrl,
-    },
+    ...(localProxyUrl ? { proxy: { server: localProxyUrl } } : {}),
   });
 
   const closeBrowser = browser.close.bind(browser);
@@ -16,7 +14,9 @@ export async function launchRpaBrowser({ headless = false } = {}) {
     try {
       await closeBrowser(...args);
     } finally {
-      await proxyChain.closeAnonymizedProxy(localProxyUrl, true);
+      if (localProxyUrl) {
+        await proxyChain.closeAnonymizedProxy(localProxyUrl, true);
+      }
     }
   };
 

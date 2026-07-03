@@ -3,7 +3,18 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { format, addWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 
-export default function WeekFilter({ currentWeekStart }: { currentWeekStart: string }) {
+function parseLocalDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+export default function WeekFilter({
+  currentWeekStart,
+  monthStart,
+}: {
+  currentWeekStart: string;
+  monthStart: string;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -14,20 +25,20 @@ export default function WeekFilter({ currentWeekStart }: { currentWeekStart: str
   };
 
   const options = [];
-  const today = new Date();
-  const monthStart = startOfMonth(today);
-  const monthEnd = endOfMonth(today);
+  const selectedMonth = parseLocalDate(monthStart);
+  const selectedMonthStart = startOfMonth(selectedMonth);
+  const selectedMonthEnd = endOfMonth(selectedMonth);
   
   // 첫 번째 주: 해당 월의 1일이 포함된 주 (월요일 시작)
-  let current = startOfWeek(monthStart, { weekStartsOn: 1 });
+  let current = startOfWeek(selectedMonthStart, { weekStartsOn: 1 });
   let weekNum = 1;
 
-  while (current <= monthEnd) {
+  while (current <= selectedMonthEnd) {
     const sRaw = current;
     const eRaw = endOfWeek(current, { weekStartsOn: 1 });
     
-    const s = sRaw < monthStart ? monthStart : sRaw;
-    const e = eRaw > monthEnd ? monthEnd : eRaw;
+    const s = sRaw < selectedMonthStart ? selectedMonthStart : sRaw;
+    const e = eRaw > selectedMonthEnd ? selectedMonthEnd : eRaw;
     
     // 만약 주차의 목요일이 이전 달이라면 해당 월의 1주차로 치지 않는 표준도 있지만,
     // 직관적으로 1일이 포함된 주를 1주차로 표기합니다.

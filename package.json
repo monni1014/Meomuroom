@@ -14,7 +14,11 @@
     "rpa:naver-slots": "node rpa/naver-toggle-slots.mjs",
     "rpa:naver-screenshot": "node rpa/naver-screenshot.mjs",
     "rpa:naver-inspect-products": "node rpa/naver-inspect-products.mjs",
-    "rpa:naver-inspect-product-detail": "node rpa/naver-inspect-product-detail.mjs"
+    "rpa:naver-inspect-product-detail": "node rpa/naver-inspect-product-detail.mjs",
+    "rpa:spacecloud-login": "node rpa/spacecloud-login.mjs",
+    "rpa:spacecloud-login-local": "node rpa/spacecloud-login.mjs --no-proxy",
+    "rpa:spacecloud-read-detail": "node rpa/spacecloud-read-reservation-detail.mjs",
+    "rpa:spacecloud-external": "node rpa/spacecloud-external-reservation.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",

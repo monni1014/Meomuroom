@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Search, Users, Coffee, Tag, AlertCircle, Pencil, ChevronDown, Wallet, Clock } from "lucide-react";
 import { MAJOR_CATEGORIES, SUB_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
 import TimeSelect from "@/components/TimeSelect";
+import RpaStatusBadge from "@/components/RpaStatusBadge";
 
 interface UsageLog {
   id: string;
@@ -26,6 +27,8 @@ interface Reservation {
   customerName: string | null;
   startTime: string;
   endTime: string;
+  createdAt: string;
+  updatedAt: string;
   price: number;
   discount: number;
   status: string;
@@ -38,9 +41,6 @@ interface Reservation {
   isCleanUpBad: boolean;
   usageLog: UsageLog | null;
 }
-
-const RPA_CHECK_MARKER = "RPA_CHECK_REQUIRED";
-const hasRpaIssue = (memo?: string | null) => Boolean(memo?.includes(RPA_CHECK_MARKER));
 
 export default function UsagePage() {
   const router = useRouter();
@@ -141,9 +141,11 @@ export default function UsagePage() {
           } else {
             calculatedExtra = extraPeople * initialRate * durationHours;
           }
+          const totalPrice = defaultRes.price || 0;
+          const basePrice = Math.max(0, totalPrice - calculatedExtra);
           setExtraPrice(calculatedExtra);
-          setOriginalPrice(defaultRes.price || 0);
-          setCurrentPrice(defaultRes.price || 0);
+          setOriginalPrice(basePrice);
+          setCurrentPrice(totalPrice);
         }
       }
     } catch (err) {
@@ -217,9 +219,11 @@ export default function UsagePage() {
         // UsageLog가 없으면 확정된 추가금이 없으므로 0
         calculatedExtra = 0;
       }
+      const totalPrice = found.price || 0;
+      const basePrice = Math.max(0, totalPrice - calculatedExtra);
       setExtraPrice(calculatedExtra);
-      setOriginalPrice(found.price || 0);
-      setCurrentPrice(found.price || 0);
+      setOriginalPrice(basePrice);
+      setCurrentPrice(totalPrice);
     }
   };
 
@@ -284,6 +288,7 @@ export default function UsagePage() {
     if (feeStr === null) return;
     const fee = parseInt(feeStr.replace(/[^\d]/g, ""), 10);
     if (isNaN(fee)) { alert("숫자를 입력해 주세요."); return; }
+
     try {
       const res = await fetch(`/api/reservations/${selectedResId}`, {
         method: "PATCH",
@@ -327,6 +332,7 @@ export default function UsagePage() {
       const [hh, mi] = timeStr.split(":").map(Number);
       return new Date(y, mo - 1, d, hh || 0, mi || 0, 0, 0).toISOString();
     };
+    const finalPrice = originalPrice + extraPrice;
 
     try {
       setIsSubmitting(true);
@@ -341,7 +347,7 @@ export default function UsagePage() {
           coffeeCount,
           purpose: selectedPurpose || null, // 미선택이면 null(미입력)
           detail: detail.trim() || null,
-          price: currentPrice, // 캘린더/대시보드/통계에 쓰는 최종 매출액. 추가금은 usageLog.extraPrice에 기록용으로 별도 저장.
+          price: finalPrice, // 캘린더/대시보드/통계에 쓰는 최종 매출액(기본 예약금 + 추가금)
           extraPrice: extraPrice,
           isExtraPaid: isExtraPaid,
           extraPaymentMethod: extraPaymentMethod,
@@ -402,7 +408,7 @@ export default function UsagePage() {
     <span className={`flex items-center gap-1 truncate ${res.status === "CANCELLED" ? "opacity-60" : ""}`}>
       {res.status === "CANCELLED" && <span className="text-slate-500 font-bold bg-slate-100 px-1 rounded text-xs">[취소됨]</span>}
       {res.isCleanUpBad && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-600 border border-red-500 shadow-sm shadow-red-100" title="정리상태 불량">🧹불량!</span>}
-      {hasRpaIssue(res.memo) && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-300 shadow-sm shadow-yellow-100" title="RPA가 슬롯 처리 중 확실하지 않은 상황을 감지했습니다. 직접 확인해 주세요.">RPA 확인필요</span>}
+      <RpaStatusBadge memo={res.memo} createdAt={res.createdAt} updatedAt={res.updatedAt} />
       <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${res.roomName === "머무룸1" ? "bg-sky-50 text-sky-700" : res.roomName === "머무룸2" ? "bg-purple-50 text-purple-700" : "bg-slate-100 text-slate-700"}`}>{res.roomName}</span>
       <span className={res.status === "CANCELLED" ? "text-slate-500 line-through" : "text-slate-700"}>
         {formatDateLabel(res.startTime)} · {res.customerName}
@@ -756,14 +762,14 @@ export default function UsagePage() {
                 <Wallet className="w-4 h-4 text-emerald-600" />
                 최종 매출액
               </span>
-              <span className="text-xs font-medium text-slate-400">캘린더에는 이 금액만 표시됩니다. 추가금은 기록용입니다.</span>
+              <span className="text-xs font-medium text-slate-400">캘린더에는 기본 예약금 + 추가금 합계가 표시됩니다.</span>
             </label>
             
             {/* 금액 상세 내역 (원래 금액 / 추가 금액) */}
             <div className="mb-2 p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-3 text-sm shadow-inner">
               <div className="flex justify-between items-center">
                 <div className="space-y-0.5 flex flex-col">
-                  <p className="text-slate-500 font-medium text-sm">최종 매출액</p>
+                  <p className="text-slate-500 font-medium text-sm">예약 기본금액</p>
                   <div className="relative mt-1">
                     <input 
                       type="text"
@@ -774,7 +780,7 @@ export default function UsagePage() {
                         if (!/^\d*$/.test(valStr)) return;
                         const val = Number(valStr);
                         setOriginalPrice(val);
-                        setCurrentPrice(val);
+                        setCurrentPrice(val + extraPrice);
                       }}
                       className="w-32 text-left bg-white border border-slate-200 text-slate-700 font-bold text-lg p-1.5 pl-2 pr-6 rounded-lg outline-hidden focus:border-slate-400 shadow-xs transition-all"
                     />
@@ -794,6 +800,7 @@ export default function UsagePage() {
                         if (!/^\d*$/.test(valStr)) return;
                         const val = Number(valStr);
                         setExtraPrice(val);
+                        setCurrentPrice(originalPrice + val);
                       }}
                       className="w-32 text-right bg-white border-2 border-rose-200 text-rose-600 font-bold text-lg p-1.5 pr-6 rounded-lg outline-hidden focus:border-rose-400 shadow-xs transition-all"
                     />
@@ -846,7 +853,7 @@ export default function UsagePage() {
                     if (!/^\d*$/.test(valStr)) return;
                     const val = Number(valStr);
                     setCurrentPrice(val);
-                    setOriginalPrice(val);
+                    setOriginalPrice(Math.max(0, val - extraPrice));
                   }}
                   className="w-full text-lg p-3.5 pl-10 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-bold text-slate-800 bg-emerald-50/30"
                 />
