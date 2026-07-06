@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { normalizeCustomerType } from "@/lib/customer-types";
 
 export async function PATCH(
   request: Request,
@@ -8,7 +9,7 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const { customerName, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow } = body;
+    const { customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow } = body;
 
     // First check if reservation exists
     const existing = await prisma.reservation.findUnique({
@@ -24,6 +25,7 @@ export async function PATCH(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateData: any = {};
     if (customerName !== undefined) updateData.customerName = customerName;
+    if (customerType !== undefined) updateData.customerType = normalizeCustomerType(customerType);
     if (phone !== undefined) updateData.phone = phone;
     if (startTime !== undefined) updateData.startTime = new Date(startTime);
     if (endTime !== undefined) updateData.endTime = new Date(endTime);

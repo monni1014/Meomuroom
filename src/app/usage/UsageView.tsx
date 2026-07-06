@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Search, Users, Coffee, Tag, AlertCircle, Pencil, ChevronDown, Wallet, Clock } from "lucide-react";
 import { MAJOR_CATEGORIES, SUB_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
+import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "@/lib/customer-types";
 import TimeSelect from "@/components/TimeSelect";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
 
@@ -25,6 +26,7 @@ interface Reservation {
   source: string;
   roomName: string;
   customerName: string | null;
+  customerType: CustomerType;
   startTime: string;
   endTime: string;
   createdAt: string;
@@ -56,6 +58,7 @@ export default function UsagePage() {
   const [editStart, setEditStart] = useState(""); // 시작 시간 (수정)
   const [editEnd, setEditEnd] = useState("");     // 종료 시간 (수정)
   const [editRoomName, setEditRoomName] = useState(""); // 공간명 (수정)
+  const [customerType, setCustomerType] = useState<CustomerType>("UNSPECIFIED");
   const [currentPrice, setCurrentPrice] = useState(0); // 현재 표시/수정될 결제 금액
   const [memo, setMemo] = useState(""); // 관리자 비고란
   const [complaints, setComplaints] = useState(""); // 고객 불만사항
@@ -69,6 +72,17 @@ export default function UsagePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
+
+  // ISO → 날짜/시간 입력값 (로컬 기준)
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const toDateInput = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  };
+  const toTimeInput = (iso: string) => {
+    const d = new Date(iso);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
 
   const fetchReservations = async (preserveId?: string) => {
     try {
@@ -108,6 +122,7 @@ export default function UsagePage() {
           setEditStart(toTimeInput(defaultRes.startTime));
           setEditEnd(toTimeInput(defaultRes.endTime));
           setEditRoomName(defaultRes.roomName || "머무룸1");
+          setCustomerType(normalizeCustomerType(defaultRes.customerType));
           setMemo(defaultRes.memo || "");
           setComplaints(defaultRes.complaints || "");
           setIsPaid(defaultRes.isPaid ?? true);
@@ -202,6 +217,7 @@ export default function UsagePage() {
       setEditStart(toTimeInput(found.startTime));
       setEditEnd(toTimeInput(found.endTime));
       setEditRoomName(found.roomName || "머무룸1");
+      setCustomerType(normalizeCustomerType(found.customerType));
       setMemo(found.memo || "");
       setComplaints(found.complaints || "");
       setIsPaid(found.isPaid ?? true);
@@ -353,6 +369,7 @@ export default function UsagePage() {
           extraPaymentMethod: extraPaymentMethod,
           extraTime: extraTime,
           roomName: editRoomName, // 수정된 공간명
+          customerType,
           memo: memo.trim() || null, // 비고란
           complaints: complaints.trim() || null, // 고객 불만사항
           isPaid,
@@ -427,17 +444,6 @@ export default function UsagePage() {
     const hours = d.getHours().toString().padStart(2, "0");
     const mins = d.getMinutes().toString().padStart(2, "0");
     return `${months}/${dates} ${hours}:${mins}`;
-  };
-
-  // ISO → 날짜/시간 입력값 (로컬 기준)
-  const pad2 = (n: number) => String(n).padStart(2, "0");
-  const toDateInput = (iso: string) => {
-    const d = new Date(iso);
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  };
-  const toTimeInput = (iso: string) => {
-    const d = new Date(iso);
-    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   };
 
   // Last 5 modified logs for displaying recent actions safely
@@ -535,6 +541,28 @@ export default function UsagePage() {
                   </button>
                 </div>
               )}
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-500">고객구분</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(CUSTOMER_TYPE_LABELS).map(([value, label]) => {
+                    const isSelected = customerType === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setCustomerType(value as CustomerType)}
+                        className={`py-2 text-sm font-bold rounded-xl border transition ${
+                          isSelected
+                            ? "bg-slate-900 text-white border-slate-900"
+                            : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-500">이용 공간</label>
                 <div className="flex gap-2">

@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Building2, Copy, Pencil, Phone, Calendar as CalendarIcon, Star } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
+import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "@/lib/customer-types";
 import TimeSelect from "@/components/TimeSelect";
 import MultiDatePicker from "@/components/MultiDatePicker";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
@@ -27,6 +28,7 @@ interface Reservation {
   source: string;
   roomName: string;
   customerName: string | null;
+  customerType: CustomerType;
   phone: string | null;
   startTime: string;
   endTime: string;
@@ -50,19 +52,13 @@ export default function CalendarPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
+  const initialDate = (() => {
+    const parsed = dateParam ? new Date(dateParam) : null;
+    return parsed && !isNaN(parsed.getTime()) ? parsed : new Date();
+  })();
 
-  useEffect(() => {
-    if (dateParam) {
-      const parsed = new Date(dateParam);
-      if (!isNaN(parsed.getTime())) {
-        setCurrentDate(parsed);
-        setSelectedDate(parsed);
-      }
-    }
-  }, [dateParam]);
-
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [currentDate, setCurrentDate] = useState(initialDate);
+  const [selectedDate, setSelectedDate] = useState<Date>(initialDate);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -75,6 +71,7 @@ export default function CalendarPage() {
 
   const [formName, setFormName] = useState("");
   const [formPhone, setFormPhone] = useState("");
+  const [customerType, setCustomerType] = useState<CustomerType>("UNSPECIFIED");
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("온라인");
   const [isPaid, setIsPaid] = useState(true);
@@ -128,7 +125,7 @@ export default function CalendarPage() {
       } else {
         setSyncMessage(`❌ 동기화 실패: ${data.error}`);
       }
-    } catch (err) {
+    } catch {
       setSyncMessage("❌ 메일 서버 연결에 실패했습니다.");
     } finally {
       setIsSyncing(false);
@@ -164,6 +161,7 @@ export default function CalendarPage() {
         source: formSource,
         roomName: formRoom,
         customerName: formName,
+        customerType,
         phone: formPhone.trim() || null,
         startTime: `${dateStr}T${formStartTime}:00`,
         endTime: `${dateStr}T${formEndTime}:00`,
@@ -200,6 +198,7 @@ export default function CalendarPage() {
 
       setFormName("");
       setFormPhone("");
+      setCustomerType("UNSPECIFIED");
       setFormPurpose("");
       setFormDetail("");
       setDiscount(0);
@@ -225,6 +224,7 @@ export default function CalendarPage() {
     const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     setFormName(res.customerName || "");
     setFormPhone(res.phone || "");
+    setCustomerType(normalizeCustomerType(res.customerType));
     setFormSource(res.source === "spacecloud" ? "spacecloud" : "naver");
     setFormRoom(res.roomName || "머무룸1");
     setFormDates([format(s, "yyyy-MM-dd")]);
@@ -792,6 +792,19 @@ export default function CalendarPage() {
                     }}
                     className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium"
                   />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500">고객구분</label>
+                  <select
+                    value={customerType}
+                    onChange={(e) => setCustomerType(e.target.value as CustomerType)}
+                    className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium bg-white"
+                  >
+                    {Object.entries(CUSTOMER_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

@@ -11,6 +11,7 @@ model Reservation {
   source       String    // "naver", "spacecloud", "manual"
   roomName     String    @default("머무룸1")
   customerName String?
+  customerType String    @default("UNSPECIFIED") // "UNSPECIFIED" | "PERSONAL" | "CORPORATE"
   phone        String?
   startTime    DateTime
   endTime      DateTime
