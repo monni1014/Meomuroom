@@ -113,8 +113,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       createdAt: {
         gte: startOfToday,
         lte: endOfToday
-      },
-      status: { not: "CANCELLED" }
+      }
     },
     orderBy: {
       createdAt: "desc"
@@ -378,7 +377,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       {/* Today's Reservations */}
       <section className="space-y-3 pt-6">
         <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold text-slate-900">오늘 확정 예약 ({todayReservations.length}건)</h2>
+          <h2 className="text-lg font-semibold text-slate-900">오늘 접수 예약 ({todayReservations.length}건)</h2>
           <span className="text-xs text-slate-400">오늘 접수된 예약</span>
         </div>
         

@@ -204,6 +204,96 @@ async function clickVisibleText(page, text, timeout = 20_000) {
   await humanDelay(page, `after click ${text}`, 1200, 2600);
 }
 
+async function clickDeleteConfirmButton(page) {
+  const messageText = "\uc608\uc57d\uc744 \uc0ad\uc81c\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?";
+  await page.waitForFunction(
+    ({ message, confirm }) => {
+      const text = document.body?.innerText || "";
+      return text.includes(message) && text.includes(confirm);
+    },
+    { message: messageText, confirm: TEXT.confirm },
+    { timeout: 10_000 },
+  );
+
+  const box = await page.evaluate(({ message, confirm }) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden"
+        && style.display !== "none"
+        && rect.width > 0
+        && rect.height > 0
+        && rect.y >= 0
+        && rect.y <= window.innerHeight;
+    }
+
+    const modalCandidates = [...document.querySelectorAll("div,section,article")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        return { rect, text, area: rect.width * rect.height };
+      })
+      .filter((item) =>
+        item.text.includes(message)
+        && item.text.includes(confirm)
+        && item.rect.width >= 240
+        && item.rect.width <= 620
+        && item.rect.height >= 120
+        && item.rect.height <= 360
+      )
+      .sort((a, b) => a.area - b.area);
+
+    const modal = modalCandidates[0]?.rect;
+    if (!modal) return null;
+
+    const buttons = [...document.querySelectorAll("button,a,[role='button'],div,span")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text,
+          exact: text === confirm,
+          buttonLike: rect.width >= 80 && rect.height >= 34,
+          bottomRight: rect.x > modal.x + modal.width / 2 && rect.y > modal.y + modal.height / 2,
+          area: rect.width * rect.height,
+        };
+      })
+      .filter((item) =>
+        item.text.includes(confirm)
+        && item.x >= modal.x
+        && item.y >= modal.y
+        && item.x + item.width <= modal.x + modal.width
+        && item.y + item.height <= modal.y + modal.height
+      )
+      .sort((a, b) =>
+        Number(b.bottomRight) - Number(a.bottomRight)
+        || Number(b.buttonLike) - Number(a.buttonLike)
+        || Number(b.exact) - Number(a.exact)
+        || b.area - a.area
+      );
+
+    return buttons[0] || null;
+  }, { message: messageText, confirm: TEXT.confirm });
+
+  if (!box) throw new Error("Could not find SpaceCloud delete confirmation button.");
+
+  await humanDelay(page, "before SpaceCloud delete confirm click", 350, 900);
+  await humanClick(page, box.x + box.width / 2, box.y + box.height / 2, "SpaceCloud delete confirm");
+  await humanDelay(page, "after SpaceCloud delete confirm click", 900, 1800);
+
+  await page.waitForFunction(
+    (message) => !(document.body?.innerText || "").includes(message),
+    messageText,
+    { timeout: 15_000 },
+  ).catch(() => {});
+}
+
 async function clickTopRightMenu(page) {
   const box = await page.evaluate(() => {
     function visible(element) {
@@ -663,9 +753,8 @@ async function clickAddReservation(page) {
   await humanDelay(page, "after SpaceCloud add modal open", 1200, 2800);
 }
 
-async function assertModalDate(page, dateValue) {
-  const expected = formatModalDate(dateValue).replace(/\s+/g, "");
-  const actual = await page.evaluate(() => {
+async function getModalDateInputValue(page) {
+  return page.evaluate(() => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -703,8 +792,13 @@ async function assertModalDate(page, dateValue) {
           && !element.disabled
           && !["checkbox", "radio", "button", "submit", "reset", "hidden"].includes(type);
       });
-    return (inputs[0]?.value || "").replace(/\s+/g, "");
+    return inputs[0]?.value || "";
   });
+}
+
+async function assertModalDate(page, dateValue) {
+  const expected = formatModalDate(dateValue).replace(/\s+/g, "");
+  const actual = (await getModalDateInputValue(page)).replace(/\s+/g, "");
 
   if (actual !== expected) {
     await saveScreenshot(page, "spacecloud-external-date-mismatch");
@@ -759,6 +853,8 @@ async function findModalDateInputBox(page) {
 }
 
 async function openModalDatePicker(page) {
+  if (await getModalDatePickerInfo(page)) return;
+
   const box = await findModalDateInputBox(page);
   if (!box) throw new Error("Could not find SpaceCloud modal date input.");
 
@@ -875,6 +971,51 @@ async function clickModalDatePickerDay(page, dateValue) {
     const picker = pickerCandidates[0];
     if (!picker) return null;
 
+    function clickableBoxFor(element, picker) {
+      let current = element;
+      let best = null;
+
+      for (let i = 0; i < 5 && current; i += 1) {
+        const rect = current.getBoundingClientRect();
+        const text = (current.textContent || "").replace(/\s+/g, " ").trim();
+        const style = window.getComputedStyle(current);
+        const role = current.getAttribute("role") || "";
+        const tagName = current.tagName.toLowerCase();
+        const isClickish = tagName === "button"
+          || tagName === "a"
+          || role === "button"
+          || style.cursor === "pointer"
+          || typeof current.onclick === "function";
+
+        if (
+          (text === dayText || text === altDayText)
+          && rect.x >= picker.x
+          && rect.y >= picker.y
+          && rect.x + rect.width <= picker.x + picker.width
+          && rect.y + rect.height <= picker.y + picker.height
+          && rect.width >= 14
+          && rect.width <= 90
+          && rect.height >= 14
+          && rect.height <= 90
+        ) {
+          best = {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            text,
+            isClickish,
+            area: rect.width * rect.height,
+          };
+        }
+
+        if (current.parentElement && current.parentElement.contains(picker.element)) break;
+        current = current.parentElement;
+      }
+
+      return best;
+    }
+
     const candidates = [...document.querySelectorAll("body *")]
       .filter(visible)
       .map((element) => {
@@ -883,13 +1024,17 @@ async function clickModalDatePickerDay(page, dateValue) {
         const style = window.getComputedStyle(element);
         const color = style.color.match(/\d+/g)?.map(Number) || [];
         const isDimmed = color.length >= 3 && color[0] > 150 && color[1] > 150 && color[2] > 150;
+        const clickBox = clickableBoxFor(element, picker);
         return {
+          tagName: element.tagName,
+          role: element.getAttribute("role") || "",
           x: rect.x,
           y: rect.y,
           width: rect.width,
           height: rect.height,
           text,
           isDimmed,
+          clickBox,
           area: rect.width * rect.height,
         };
       })
@@ -905,7 +1050,11 @@ async function clickModalDatePickerDay(page, dateValue) {
         && item.height >= 12
         && item.height <= 70
       )
-      .sort((a, b) => a.area - b.area);
+      .map((item) => item.clickBox || item)
+      .sort((a, b) =>
+        Number(b.isClickish) - Number(a.isClickish)
+        || b.area - a.area
+      );
 
     return candidates[0] || null;
   }, { dayText, altDayText });
@@ -915,12 +1064,181 @@ async function clickModalDatePickerDay(page, dateValue) {
   await humanDelay(page, `before modal date picker day ${dayText} click`, 700, 1700);
   await humanClick(page, dayBox.x + dayBox.width / 2, dayBox.y + dayBox.height / 2, `modal date picker day ${dayText}`);
   await humanDelay(page, "after modal date picker day click", 900, 2000);
+
+  const expected = formatModalDate(dateValue).replace(/\s+/g, "");
+  for (const [offsetX, offsetY] of [[0, 0], [-5, 0], [5, 0], [0, -5], [0, 5]]) {
+    const selected = (await getModalDateInputValue(page)).replace(/\s+/g, "") === expected;
+    if (selected) return;
+
+    await page.mouse.click(
+      dayBox.x + dayBox.width / 2 + offsetX,
+      dayBox.y + dayBox.height / 2 + offsetY,
+      { delay: 90 },
+    );
+    await humanDelay(page, `after precise modal day ${dayText} click`, 220, 520);
+  }
+
+  const clickedByDom = await page.evaluate(({ dayText, altDayText }) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    const pickerCandidates = [...document.querySelectorAll("div,section,article")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        const monthMatch = text.match(/\b(20\d{2})\.(\d{1,2})\b/);
+        return { element, rect, text, monthMatch, area: rect.width * rect.height };
+      })
+      .filter((item) =>
+        item.monthMatch
+        && item.text.includes("\uc624\ub298")
+        && item.text.includes("\uc120\ud0dd")
+        && item.rect.width >= 260
+        && item.rect.width <= 640
+        && item.rect.height >= 220
+        && item.rect.height <= 560
+      )
+      .sort((a, b) => a.area - b.area);
+
+    const picker = pickerCandidates[0];
+    if (!picker) return false;
+
+    const candidates = [...document.querySelectorAll("body *")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        const style = window.getComputedStyle(element);
+        const color = style.color.match(/\d+/g)?.map(Number) || [];
+        const isDimmed = color.length >= 3 && color[0] > 150 && color[1] > 150 && color[2] > 150;
+        return { element, rect, text, isDimmed, area: rect.width * rect.height };
+      })
+      .filter((item) =>
+        (item.text === dayText || item.text === altDayText)
+        && !item.isDimmed
+        && item.rect.x >= picker.rect.x
+        && item.rect.y >= picker.rect.y
+        && item.rect.x + item.rect.width <= picker.rect.x + picker.rect.width
+        && item.rect.y + item.rect.height <= picker.rect.y + picker.rect.height
+        && item.rect.width >= 8
+        && item.rect.width <= 80
+        && item.rect.height >= 8
+        && item.rect.height <= 80
+      )
+      .sort((a, b) => b.area - a.area);
+
+    const target = candidates[0]?.element;
+    if (!target) return false;
+
+    let clickable = target;
+    for (let i = 0; i < 4 && clickable.parentElement; i += 1) {
+      const parent = clickable.parentElement;
+      const parentRect = parent.getBoundingClientRect();
+      const parentText = (parent.textContent || "").replace(/\s+/g, " ").trim();
+      if (
+        (parentText === dayText || parentText === altDayText)
+        && parentRect.x >= picker.rect.x
+        && parentRect.y >= picker.rect.y
+        && parentRect.x + parentRect.width <= picker.rect.x + picker.rect.width
+        && parentRect.y + parentRect.height <= picker.rect.y + picker.rect.height
+        && parentRect.width <= 90
+        && parentRect.height <= 90
+      ) {
+        clickable = parent;
+      }
+    }
+
+    clickable.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));
+    clickable.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    clickable.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+    clickable.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    return true;
+  }, { dayText, altDayText });
+
+  if (!clickedByDom) throw new Error(`Could not DOM-click SpaceCloud modal date picker day: ${dayText}`);
+  await humanDelay(page, "after modal date picker DOM day click", 500, 1200);
+}
+
+async function setModalDateDirectly(page, dateValue) {
+  const formatted = formatModalDate(dateValue);
+  const ok = await page.evaluate((value) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    function modalBounds() {
+      const elements = [...document.querySelectorAll("div,section,article,form")].filter(visible);
+      const candidates = elements
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+          return { element, rect, text, area: rect.width * rect.height };
+        })
+        .filter((item) =>
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
+          && item.text.includes("\uc608\uc57d\uc2dc\uac04")
+        )
+        .sort((a, b) => a.area - b.area);
+      return candidates[0]?.element || null;
+    }
+
+    const modal = modalBounds();
+    if (!modal) return false;
+    const inputs = [...modal.querySelectorAll("input")]
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        const type = (element.getAttribute("type") || "text").toLowerCase();
+        return style.visibility !== "hidden"
+          && style.display !== "none"
+          && rect.width > 0
+          && rect.height > 0
+          && !element.disabled
+          && !["checkbox", "radio", "button", "submit", "reset", "hidden"].includes(type);
+      });
+
+    const input = inputs[0];
+    if (!input) return false;
+    const proto = Object.getPrototypeOf(input);
+    const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+    if (descriptor?.set) {
+      descriptor.set.call(input, value);
+    } else {
+      input.value = value;
+    }
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    input.dispatchEvent(new Event("blur", { bubbles: true }));
+    return true;
+  }, formatted);
+
+  if (!ok) throw new Error("Could not set SpaceCloud modal date input directly.");
+  await humanDelay(page, "after direct modal date set", 350, 900);
 }
 
 async function typeModalDate(page, dateValue) {
-  await openModalDatePicker(page);
-  await navigateModalDatePickerToMonth(page, dateValue);
-  await clickModalDatePickerDay(page, dateValue);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await openModalDatePicker(page);
+    await navigateModalDatePickerToMonth(page, dateValue);
+    await clickModalDatePickerDay(page, dateValue);
+
+    const current = (await getModalDateInputValue(page)).replace(/\s+/g, "");
+    const expected = formatModalDate(dateValue).replace(/\s+/g, "");
+    if (current === expected) return;
+
+    await saveScreenshot(page, `spacecloud-external-date-retry-${attempt}`);
+    await page.keyboard.press("Escape").catch(() => {});
+    await humanDelay(page, `retry modal date select ${attempt}`, 500, 1200);
+  }
+
+  await setModalDateDirectly(page, dateValue);
 }
 
 async function clickModalTextButton(page, text, timeout = 20_000) {
@@ -1187,21 +1505,23 @@ async function ensureNotFullDay(page) {
   await humanDelay(page, "after full-day safety check", 220, 520);
 }
 
-async function addExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply }) {
-  const alreadyAdded = await findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker });
-  if (alreadyAdded) {
-    await saveScreenshot(page, "spacecloud-external-already-added");
-    await page.keyboard.press("Escape").catch(() => {});
-    await humanDelay(page, "after already-added popup escape", 700, 1600);
-    console.log("Matching SpaceCloud external reservation already exists. Skip duplicate add.");
-    return { ok: true, alreadyClosed: true, dryRun: !apply };
-  }
+async function addExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply, skipCalendarPrecheck = false }) {
+  if (!skipCalendarPrecheck) {
+    const alreadyAdded = await findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone });
+    if (alreadyAdded) {
+      await saveScreenshot(page, "spacecloud-external-already-added");
+      await page.keyboard.press("Escape").catch(() => {});
+      await humanDelay(page, "after already-added popup escape", 700, 1600);
+      console.log("Matching SpaceCloud external reservation already exists. Skip duplicate add.");
+      return { ok: true, alreadyClosed: true, dryRun: !apply };
+    }
 
-  const alreadyBlocked = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
-  if (alreadyBlocked) {
-    await saveScreenshot(page, "spacecloud-external-already-blocked");
-    console.log("SpaceCloud target period already appears blocked. Treat close as success.");
-    return { ok: true, alreadyClosed: true, manualOrExistingBlock: true, dryRun: !apply };
+    const alreadyBlocked = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
+    if (alreadyBlocked) {
+      await saveScreenshot(page, "spacecloud-external-already-blocked");
+      console.log("SpaceCloud target period already appears blocked. Treat close as success.");
+      return { ok: true, alreadyClosed: true, manualOrExistingBlock: true, dryRun: !apply };
+    }
   }
 
   await clickAddReservation(page);
@@ -1244,7 +1564,7 @@ async function addExternalReservation(page, { dateValue, startHour, endHour, mar
   return { ok: true, dryRun: false };
 }
 
-async function findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker }) {
+async function findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone }) {
   const { day } = parseDateValue(dateValue);
   const dayText = String(day).padStart(2, "0");
   const altDayText = String(day);
@@ -1291,27 +1611,30 @@ async function findAndOpenExternalReservation(page, { dateValue, startHour, endH
         && entry.width < 220
         && entry.height < 80
       )
-      .sort((a, b) => (a.width * a.height) - (b.width * b.height));
+      .sort((a, b) => {
+        const aExact = a.text.startsWith(timeText) ? 0 : 1;
+        const bExact = b.text.startsWith(timeText) ? 0 : 1;
+        return aExact - bExact || (a.width * a.height) - (b.width * b.height);
+      });
 
     return entries.slice(0, 8);
   }, { dayText, altDayText, timeText });
 
   for (const candidate of candidates) {
     await humanDelay(page, "before SpaceCloud external item click", 900, 2200);
-    await humanClick(page, candidate.x + candidate.width / 2, candidate.y + candidate.height / 2, "SpaceCloud external item");
+    const clickX = candidate.x + Math.min(Math.max(candidate.width * 0.45, 18), candidate.width - 4);
+    await humanClick(page, clickX, candidate.y + candidate.height / 2, "SpaceCloud external item");
     await humanDelay(page, "after SpaceCloud external item click", 1400, 3200);
 
     const popupText = await page.locator("body").innerText({ timeout: 10_000 }).catch(() => "");
-    const dateMatches = popupText.includes(formatDetailDate(dateValue)) || popupText.includes(formatLooseDetailDate(dateValue));
-    const timeMatches = popupText.includes(`${startHour}:00~${endHour}:00`)
-      || popupText.includes(`${String(startHour).padStart(2, "0")}:00~${String(endHour).padStart(2, "0")}:00`);
-    if (
-      popupText.includes(TEXT.directAdded)
-      && popupText.includes(marker)
-      && dateMatches
-      && timeMatches
-    ) {
+    if (matchesExternalReservationPopup(popupText, { dateValue, startHour, endHour, marker, customerName, phone })) {
       return true;
+    }
+
+    if (popupText.includes(TEXT.directAdded) || popupText.includes(TEXT.deleteReservation)) {
+      await saveScreenshot(page, "spacecloud-external-unmatched-detail-popup");
+      console.log("SpaceCloud external popup did not match target:");
+      console.log(popupText.replace(/\s+/g, " ").slice(0, 1200));
     }
 
     await page.keyboard.press("Escape").catch(() => {});
@@ -1319,6 +1642,30 @@ async function findAndOpenExternalReservation(page, { dateValue, startHour, endH
   }
 
   return false;
+}
+
+function matchesExternalReservationPopup(popupText, { dateValue, startHour, endHour, marker, customerName, phone }) {
+  const compactText = popupText.replace(/\s+/g, "");
+  const compactMarker = marker.replace(/\s+/g, "");
+  const compactPhone = phone.replace(/\D/g, "");
+  const compactDigits = compactText.replace(/\D/g, "");
+  const detailDate = formatDetailDate(dateValue).replace(/\s+/g, "");
+  const looseDetailDate = formatLooseDetailDate(dateValue).replace(/\s+/g, "");
+  const directAdded = TEXT.directAdded.replace(/\s+/g, "");
+
+  const dateMatches = compactText.includes(detailDate) || compactText.includes(looseDetailDate);
+  const timeMatches = compactText.includes(`${startHour}:00~${endHour}:00`)
+    || compactText.includes(`${String(startHour).padStart(2, "0")}:00~${String(endHour).padStart(2, "0")}:00`)
+    || compactText.includes(`${startHour}~${endHour}`);
+  const identityMatches = compactText.includes(compactMarker)
+    || popupText.includes(marker)
+    || (customerName ? popupText.includes(customerName) : false)
+    || (compactPhone ? compactDigits.includes(compactPhone) : false);
+
+  return compactText.includes(directAdded)
+    && identityMatches
+    && dateMatches
+    && timeMatches;
 }
 
 async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
@@ -1379,8 +1726,25 @@ async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
   }, { dayText, altDayText, startHour, endHour });
 }
 
-async function deleteExternalReservation(page, { dateValue, startHour, endHour, marker, apply }) {
-  const opened = await findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker });
+async function deleteExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply }) {
+  let opened = await findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone });
+
+  if (!opened) {
+    const stillBlocked = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
+    if (stillBlocked) {
+      await humanDelay(page, "before SpaceCloud fallback block click", 700, 1400);
+      await humanClick(
+        page,
+        stillBlocked.x + stillBlocked.width / 2,
+        stillBlocked.y + stillBlocked.height / 2,
+        "SpaceCloud fallback block",
+      );
+      await humanDelay(page, "after SpaceCloud fallback block click", 1200, 2600);
+
+      const popupText = await page.locator("body").innerText({ timeout: 10_000 }).catch(() => "");
+      opened = matchesExternalReservationPopup(popupText, { dateValue, startHour, endHour, marker, customerName, phone });
+    }
+  }
 
   if (!opened) {
     const stillBlocked = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
@@ -1413,14 +1777,20 @@ async function deleteExternalReservation(page, { dateValue, startHour, endHour, 
   await humanDelay(page, "after SpaceCloud delete click", 800, 1800);
 
   if (!dialogAccepted) {
-    const confirmVisible = await page.getByText(TEXT.confirm, { exact: false }).last().isVisible().catch(() => false);
-    if (confirmVisible) {
-      await clickVisibleText(page, TEXT.confirm, 10_000);
-    }
+    await clickDeleteConfirmButton(page);
   }
 
   await humanDelay(page, "after SpaceCloud external delete", 900, 2200);
   await saveScreenshot(page, "spacecloud-external-after-delete");
+
+  const stillBlockedAfterDelete = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
+  if (stillBlockedAfterDelete) {
+    await saveScreenshot(page, "spacecloud-external-delete-still-blocked");
+    throw new Error(
+      `SpaceCloud external reservation open failed: target slot is still blocked after delete ${dateValue} ${startHour}:00-${endHour}:00.`,
+    );
+  }
+
   return { ok: true, alreadyOpen: false, dryRun: false };
 }
 
@@ -1449,7 +1819,8 @@ async function main() {
     throw new Error("SpaceCloud login session is missing. Run `npm run rpa:spacecloud-login` first.");
   }
 
-  const marker = markerForBooking(bookingNumber);
+  const rawMarker = markerForBooking(bookingNumber);
+  const marker = rawMarker.includes("?") ? `\ub124\uc774\ubc84 \uc608\uc57d\ubc88\ud638: ${bookingNumber}` : rawMarker;
   const browser = await launchRpaBrowser({ headless: false });
   let page;
 
@@ -1487,14 +1858,28 @@ async function main() {
     await openCalendarView(page);
     await assertCalendarView(page, "product selection");
     await selectProduct(page, room);
-    await assertCalendarView(page, "month navigation");
-    await navigateToMonth(page, dateValue);
-    await assertCalendarView(page, "date selection");
+
+    if (mode === "open") {
+      await assertCalendarView(page, "month navigation");
+      await navigateToMonth(page, dateValue);
+      await assertCalendarView(page, "date selection");
+    } else {
+      await assertCalendarView(page, "add reservation");
+    }
     await saveScreenshot(page, "spacecloud-external-02-calendar");
 
     const result = mode === "close"
-      ? await addExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply })
-      : await deleteExternalReservation(page, { dateValue, startHour, endHour, marker, apply });
+      ? await addExternalReservation(page, {
+        dateValue,
+        startHour,
+        endHour,
+        marker,
+        customerName,
+        phone,
+        apply,
+        skipCalendarPrecheck: true,
+      })
+      : await deleteExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply });
 
     console.log(JSON.stringify({
       ...result,

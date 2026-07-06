@@ -7,6 +7,13 @@ import { clearRpaPendingForReservation } from "./rpa-reservation-state";
 const execFileAsync = promisify(execFile);
 const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
 
+const FAST_NAVER_SLOT_RPA_ENV = {
+  RPA_DELAY_MULTIPLIER: "0.5",
+  RPA_MIN_RANDOM_DELAY_FLOOR_MS: "350",
+  RPA_LOCK_RETRY_MIN_MS: "300",
+  RPA_LOCK_RETRY_MAX_MS: "700",
+};
+
 const NAVER_ROOM_PRODUCT_URL: Record<string, string> = {
   "1": "https://partner.booking.naver.com/bizes/1473933/biz-items/6982316/detail",
   "2": "https://partner.booking.naver.com/bizes/1473933/biz-items/7007523/detail",
@@ -133,10 +140,10 @@ function parseJsonFromStdout(stdout: string) {
   return JSON.parse(stdout.slice(start, end + 1)) as SpaceCloudDetailResult;
 }
 
-async function runNodeScript(args: string[], timeout = 180_000) {
+async function runNodeScript(args: string[], timeout = 180_000, envOverrides: Record<string, string> = {}) {
   const result = await execFileAsync(process.execPath, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: { ...process.env, ...envOverrides },
     timeout,
     maxBuffer: 1024 * 1024 * 5,
   });
@@ -181,7 +188,7 @@ async function setNaverSlotForSpaceCloud(item: ReturnType<typeof mergeDetail>, m
       `--mode=${mode}`,
       `--product-url=${NAVER_ROOM_PRODUCT_URL[room]}`,
       "--apply",
-    ], 240_000);
+    ], 240_000, FAST_NAVER_SLOT_RPA_ENV);
 
     await clearRpaCheckRequired(
       reservationId,
@@ -196,7 +203,7 @@ async function setNaverSlotForSpaceCloud(item: ReturnType<typeof mergeDetail>, m
 }
 
 async function markRpaCheckRequired(reservationId: string, reason: string) {
-  const clippedReason = reason.replace(/\s+/g, " ").trim().slice(0, 300);
+  const clippedReason = reason.replace(/\s+/g, " ").trim().slice(0, 1200);
   const current = await prisma.reservation.findUnique({
     where: { id: reservationId },
     select: { memo: true },
@@ -370,7 +377,7 @@ export async function processSpaceCloudEmailWithRpa({
     if (slot.ok && !detailCheckReason) await clearRpaCheckRequired(updated.id);
     await clearRpaPendingForReservation(updated.id);
 
-    return { changed: true, skipped: false, created: false };
+    return { changed: true, skipped: false, created: false, reservationId: updated.id };
   }
 
   const created = await prisma.reservation.create({
@@ -416,5 +423,5 @@ export async function processSpaceCloudEmailWithRpa({
   if (slot.ok && !detailCheckReason) await clearRpaCheckRequired(created.id);
   await clearRpaPendingForReservation(created.id);
 
-  return { changed: true, skipped: false, created: true };
+  return { changed: true, skipped: false, created: true, reservationId: created.id };
 }

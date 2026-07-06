@@ -210,6 +210,7 @@ export default function CalendarPage() {
       setFormSource("naver");
       setIsModalOpen(false);
       fetchReservations();
+      alert("저장되었습니다.");
     } catch (error) {
       console.error("Save error:", error);
       alert("예약 저장에 실패했습니다.");

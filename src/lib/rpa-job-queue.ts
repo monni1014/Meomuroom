@@ -1,5 +1,9 @@
 import type { ParsedReservation } from "./email-parser";
-import { processNaverEmailWithRpa, recheckNaverSlotRpaIssues } from "./naver-rpa-sync";
+import {
+  processNaverEmailWithRpa,
+  reconcileNaverReservationsWithoutCancelEmail,
+  recheckNaverSlotRpaIssues,
+} from "./naver-rpa-sync";
 import { prisma } from "./prisma";
 import { markRpaJobCheckRequired } from "./rpa-reservation-state";
 import { processSpaceCloudEmailWithRpa } from "./spacecloud-rpa-sync";
@@ -24,6 +28,8 @@ type RpaQueueState = {
   running: boolean;
   slotRecheckRunning: boolean;
   lastSlotRecheckAt: number;
+  naverStatusReconcileRunning: boolean;
+  lastNaverStatusReconcileAt: number;
 };
 
 type RpaQueueGlobal = typeof globalThis & {
@@ -33,6 +39,82 @@ type RpaQueueGlobal = typeof globalThis & {
 const FAILED_RETRY_COOLDOWNS_MS = [60 * 1000, 2 * 60 * 1000] as const;
 const MAX_AUTO_FAILURES = 3;
 const SLOT_RECHECK_COOLDOWN_MS = 10 * 60 * 1000;
+
+function isCancellationJob(job: RpaEmailJob) {
+  return Boolean(job.parsedReservation.isCancelled);
+}
+
+function extractJobBookingKey(job: RpaEmailJob) {
+  const combined = `${job.subject}\n${job.text}\n${job.html || ""}`;
+
+  if (job.source === "naver") {
+    const match = combined.match(/booking-list-view\/bookings\/(\d{9,12})/);
+    return match ? `naver:${match[1]}` : null;
+  }
+
+  const normalized = combined.replace(/&amp;/g, "&");
+  const match = normalized.match(/partner\.spacecloud\.kr\/reservation\/(\d+)\/?/i);
+  return match ? `spacecloud:${match[1]}` : null;
+}
+
+function isSameReservationWindow(a: RpaEmailJob, b: RpaEmailJob) {
+  return a.source === b.source
+    && a.parsedReservation.roomName === b.parsedReservation.roomName
+    && a.parsedReservation.startTime.getTime() === b.parsedReservation.startTime.getTime()
+    && a.parsedReservation.endTime.getTime() === b.parsedReservation.endTime.getTime();
+}
+
+function isSameQueuedReservation(a: RpaEmailJob, b: RpaEmailJob) {
+  if (a.source !== b.source) return false;
+
+  const aBookingKey = extractJobBookingKey(a);
+  const bBookingKey = extractJobBookingKey(b);
+  if (aBookingKey || bBookingKey) {
+    return Boolean(aBookingKey && bBookingKey && aBookingKey === bBookingKey);
+  }
+
+  return isSameReservationWindow(a, b);
+}
+
+function removeQueuedConfirmationForCancellation(state: RpaQueueState, cancelJob: RpaEmailJob) {
+  if (!isCancellationJob(cancelJob)) return;
+
+  const removedMessageIds: string[] = [];
+  state.queue = state.queue.filter((queuedJob) => {
+    const remove = !isCancellationJob(queuedJob) && isSameQueuedReservation(queuedJob, cancelJob);
+    if (remove) removedMessageIds.push(queuedJob.messageId);
+    return !remove;
+  });
+
+  for (const messageId of removedMessageIds) {
+    state.activeIds.delete(messageId);
+    state.failedUntil.delete(messageId);
+    state.failureCounts.delete(messageId);
+    clearRetryTimer(state, messageId);
+  }
+
+  if (removedMessageIds.length > 0) {
+    console.log(
+      `[RPAQueue] Removed queued confirmation jobs because cancellation arrived: ${removedMessageIds.join(", ")}`,
+    );
+  }
+}
+
+function pushJobByPriority(state: RpaQueueState, job: RpaEmailJob) {
+  if (isCancellationJob(job)) {
+    removeQueuedConfirmationForCancellation(state, job);
+    state.queue.push(job);
+    console.log(`[RPAQueue] Queued cancellation job after pending confirmations: ${job.messageId}`);
+    return;
+  }
+
+  const firstCancellationIndex = state.queue.findIndex(isCancellationJob);
+  if (firstCancellationIndex === -1) {
+    state.queue.push(job);
+  } else {
+    state.queue.splice(firstCancellationIndex, 0, job);
+  }
+}
 
 function getState() {
   const g = globalThis as RpaQueueGlobal;
@@ -46,6 +128,8 @@ function getState() {
     running: false,
     slotRecheckRunning: false,
     lastSlotRecheckAt: 0,
+    naverStatusReconcileRunning: false,
+    lastNaverStatusReconcileAt: 0,
   };
   return g.__memoroomRpaQueue;
 }
@@ -80,7 +164,7 @@ function scheduleRetry(state: RpaQueueState, job: RpaEmailJob, retryDelay: numbe
 
     if (state.manualCheckIds.has(job.messageId) || state.activeIds.has(job.messageId)) return;
 
-    state.queue.push(job);
+    pushJobByPriority(state, job);
     state.activeIds.add(job.messageId);
     void drainRpaEmailQueue();
   }, retryDelay);
@@ -102,7 +186,7 @@ export function enqueueRpaEmailJob(job: RpaEmailJob) {
   const state = getState();
   if (isRpaEmailJobActive(job.messageId)) return false;
 
-  state.queue.push(job);
+  pushJobByPriority(state, job);
   state.activeIds.add(job.messageId);
   void drainRpaEmailQueue();
   return true;
@@ -120,12 +204,13 @@ async function drainRpaEmailQueue() {
 
       try {
         console.log(`[RPAQueue] Start ${job.source} job: ${job.messageId}`);
+        let result: { reservationId?: string | null } | undefined;
         if (job.source === "naver") {
-          await processNaverEmailWithRpa(job);
+          result = await processNaverEmailWithRpa(job);
         } else {
-          await processSpaceCloudEmailWithRpa(job);
+          result = await processSpaceCloudEmailWithRpa(job);
         }
-        await markEmailProcessed(job.messageId, job.source);
+        await markEmailProcessed(job.messageId, job.source, result?.reservationId);
         state.failedUntil.delete(job.messageId);
         state.failureCounts.delete(job.messageId);
         state.manualCheckIds.delete(job.messageId);
@@ -192,6 +277,33 @@ export function enqueueRpaSlotRecheck() {
   return true;
 }
 
+export function enqueueNaverStatusReconcile() {
+  const state = getState();
+  const now = Date.now();
+  const cooldownMs = 12 * 60 * 60 * 1000;
+  if (state.naverStatusReconcileRunning) return false;
+  if (now - state.lastNaverStatusReconcileAt < cooldownMs) return false;
+
+  state.naverStatusReconcileRunning = true;
+  state.lastNaverStatusReconcileAt = now;
+  void (async () => {
+    try {
+      const result = await reconcileNaverReservationsWithoutCancelEmail(10);
+      if (result.checked > 0 || result.cancelled > 0) {
+        console.log(
+          `[RPAQueue] Naver status reconcile done: checked ${result.checked}, cancelled ${result.cancelled}`,
+        );
+      }
+    } catch (error) {
+      console.error("[RPAQueue] Naver status reconcile failed:", error);
+    } finally {
+      state.naverStatusReconcileRunning = false;
+    }
+  })();
+
+  return true;
+}
+
 export function getRpaQueueStatus() {
   const state = getState();
   return {
@@ -199,5 +311,6 @@ export function getRpaQueueStatus() {
     activeOrCoolingDown: state.activeIds.size + state.failedUntil.size + state.manualCheckIds.size + state.retryTimers.size,
     running: state.running,
     slotRecheckRunning: state.slotRecheckRunning,
+    naverStatusReconcileRunning: state.naverStatusReconcileRunning,
   };
 }

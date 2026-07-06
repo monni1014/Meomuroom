@@ -26,7 +26,7 @@ function pendingReason(source: string) {
 }
 
 function rpaCheckReason(reason: string) {
-  const clipped = reason.replace(/\s+/g, " ").trim().slice(0, 300);
+  const clipped = reason.replace(/\s+/g, " ").trim().slice(0, 1200);
   return `${RPA_CHECK_MARKER} ${clipped}`;
 }
 

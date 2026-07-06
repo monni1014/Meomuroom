@@ -20,7 +20,8 @@ function bezier(p0, p1, p2, p3, t) {
 
 export function randomDelayMs(minMs, maxMs) {
   const multiplier = Number(optionalEnv("RPA_DELAY_MULTIPLIER", "2.0")) || 2.0;
-  const min = Math.max(1200, Math.round(Number(minMs) * multiplier));
+  const floor = Number(optionalEnv("RPA_MIN_RANDOM_DELAY_FLOOR_MS", "1200")) || 1200;
+  const min = Math.max(floor, Math.round(Number(minMs) * multiplier));
   const max = Math.max(min + 250, Math.round(Number(maxMs) * multiplier));
   return randomInt(min, max);
 }

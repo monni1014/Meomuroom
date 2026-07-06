@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev --port=3000 --hostname=0.0.0.0",
     "build": "prisma generate && next build",
-    "start": "node server.ts",
+    "start": "next start --port=3000 --hostname=0.0.0.0",
     "lint": "eslint",
     "rpa:test-proxy": "node rpa/test-proxy.mjs",
     "rpa:naver-login": "node rpa/naver-login.mjs",

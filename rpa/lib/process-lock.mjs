@@ -52,8 +52,10 @@ export async function acquireProcessLock(lockPath, {
         throw new Error(`${label} lock timeout. Another RPA task is still running: ${lockPath}`);
       }
 
+      const retryMin = Number(process.env.RPA_LOCK_RETRY_MIN_MS || "1200") || 1200;
+      const retryMax = Number(process.env.RPA_LOCK_RETRY_MAX_MS || "2400") || 2400;
       console.log(`${label} lock exists. Wait before retry.`);
-      await sleep(randomInt(1200, 2400));
+      await sleep(randomInt(retryMin, Math.max(retryMin, retryMax)));
     }
   }
 }

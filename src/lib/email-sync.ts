@@ -177,6 +177,7 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
       const parsedMail = await simpleParser(mail.source);
       const subject = parsedMail.subject || "";
       const text = parsedMail.text || "";
+      const reservationData = parseEmail(subject, text, messageId);
 
       const stalePendingReservation = await prisma.reservation.findFirst({
         where: {
@@ -188,8 +189,17 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
 
       const processedEmail = await prisma.processedEmail.findUnique({ where: { messageId } });
       if (processedEmail && !stalePendingReservation) {
-        console.log(`[EmailSync] Already processed email ignored: ${messageId}`);
-        continue;
+        const shouldRetryProcessedCancellation =
+          !processedEmail.reservationId
+          && Boolean(reservationData?.isCancelled)
+          && (reservationData?.source === "naver" || reservationData?.source === "spacecloud");
+
+        if (!shouldRetryProcessedCancellation) {
+          console.log(`[EmailSync] Already processed email ignored: ${messageId}`);
+          continue;
+        }
+
+        console.log(`[EmailSync] Reprocess processed cancellation without reservation link: ${messageId}`);
       }
       if (processedEmail && stalePendingReservation) {
         console.log(`[EmailSync] Requeue stale RPA pending email: ${messageId}, reservation=${stalePendingReservation.id}`);
@@ -206,7 +216,6 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
         continue;
       }
 
-      const reservationData = parseEmail(subject, text, messageId);
       if (!reservationData) {
         console.log(`[EmailSync] Not a reservation email: ${subject}`);
         continue;

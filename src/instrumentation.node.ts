@@ -5,10 +5,12 @@ export async function registerNodeInstrumentation() {
 
   const { schedule } = await import("node-cron");
   const { syncEmails } = await import("@/lib/email-sync");
+  const { enqueueNaverStatusReconcile } = await import("@/lib/rpa-job-queue");
   const { checkIproyalTrafficAndAlert } = await import("@/lib/iproyal-traffic");
 
   let running = false;
   let proxyTrafficRunning = false;
+  let naverStatusReconcileRunning = false;
 
   async function runEmailSync(label: string) {
     if (running) {
@@ -48,6 +50,23 @@ export async function registerNodeInstrumentation() {
     }
   }
 
+  async function runNaverStatusReconcile(label: string) {
+    if (naverStatusReconcileRunning) {
+      console.log(`[Cron] Previous Naver status reconcile is still running. Skipping ${label}.`);
+      return;
+    }
+
+    naverStatusReconcileRunning = true;
+    try {
+      const queued = enqueueNaverStatusReconcile();
+      console.log(`[Cron] Naver status reconcile ${queued ? "queued" : "skipped"} (${label})`);
+    } catch (error) {
+      console.error(`[Cron] Naver status reconcile failed (${label}):`, error);
+    } finally {
+      naverStatusReconcileRunning = false;
+    }
+  }
+
   setTimeout(() => {
     void runEmailSync("startup");
   }, 0);
@@ -64,6 +83,13 @@ export async function registerNodeInstrumentation() {
     await runProxyTrafficCheck("cron");
   });
 
+  schedule("0 10,22 * * *", async () => {
+    await runNaverStatusReconcile("cron");
+  }, {
+    timezone: "Asia/Seoul",
+  });
+
   console.log("[Cron] Email auto sync started (30 second interval)");
   console.log("[Cron] IPRoyal traffic monitor started (10 minute interval)");
+  console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
 }

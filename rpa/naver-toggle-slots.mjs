@@ -234,6 +234,40 @@ async function closeSlotPanelIfOpen(page) {
   await humanDelay(page, "after escape existing panel", 900, 2200);
 }
 
+async function findVisibleScheduleDayHeader(page, targetMonthDay) {
+  return page.evaluate((target) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden"
+        && style.display !== "none"
+        && rect.width > 0
+        && rect.height > 0;
+    }
+
+    const headers = [...document.querySelectorAll("body *")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          text: (element.textContent || "").replace(/\s+/g, "").trim(),
+          rect,
+        };
+      })
+      .filter(({ text, rect }) =>
+        /^\d{1,2}\.\d{1,2}\([^)]+\)$/.test(text)
+        && text.startsWith(`${target}(`)
+        && rect.y > 300
+        && rect.y < 390
+        && rect.x > 300
+        && rect.x < 950
+        && rect.width < 120
+      );
+
+    return headers[0]?.text || null;
+  }, targetMonthDay);
+}
+
 async function navigateToDate(page, dateValue) {
   const targetLabel = formatKoreanDateLabel(dateValue);
   const targetMonthDay = formatShortMonthDay(dateValue);
@@ -246,9 +280,7 @@ async function navigateToDate(page, dateValue) {
 
   for (let i = 0; i < 12; i += 1) {
     const visibleText = await page.locator("body").innerText({ timeout: 5_000 });
-    const visibleDayHeaders = [...visibleText.matchAll(/\b\d{1,2}\.\d{1,2}\s*\([^)]+\)/g)]
-      .map((match) => match[0].replace(/\s+/g, ""));
-    const actualVisibleHeader = visibleDayHeaders.find((header) => header.startsWith(`${targetMonthDay}(`));
+    const actualVisibleHeader = await findVisibleScheduleDayHeader(page, targetMonthDay);
 
     if (actualVisibleHeader) {
       console.log(`Target day is visible as ${actualVisibleHeader}; no week arrow click.`);
@@ -455,7 +487,7 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour
     if (!clickPoint) continue;
 
     await humanClick(page, clickPoint.x, clickPoint.y, `open ${targetLabel} slot panel`);
-    await humanDelay(page, "after day slot click", 900, 2200);
+    await humanDelay(page, "after day slot click", 650, 1500);
 
     const panelTitleVisible = await page.getByText(expectedPanelTitle, { exact: false })
       .first()
@@ -602,9 +634,9 @@ async function clickHourToggle(page, hour, mode) {
     return false;
   }
 
-  await quickSlotDelay(page, `before ${label} toggle`, 160, 420);
+  await quickSlotDelay(page, `before ${label} toggle`, 80, 240);
   await humanClick(page, toggle.x, toggle.y, `${label} toggle`);
-  await quickSlotDelay(page, `after ${label} toggle`, 280, 720);
+  await quickSlotDelay(page, `after ${label} toggle`, 120, 360);
   console.log(`${label}: changed to ${mode}`);
   return true;
 }
@@ -695,7 +727,7 @@ async function assertHourToggleState(page, hour, mode) {
     }, label);
 
     if (actualState === mode) return;
-    await quickSlotDelay(page, `wait for ${label} ${mode} state`, 220, 520);
+    await quickSlotDelay(page, `wait for ${label} ${mode} state`, 120, 320);
   }
 
   if (actualState !== mode) {
@@ -756,9 +788,9 @@ async function clickSlotPanelSave(page) {
     throw new Error("Could not find slot panel save button.");
   }
 
-  await humanDelay(page, "before save button", 900, 2200);
+  await quickSlotDelay(page, "before save button", 220, 520);
   await humanClickElement(page, buttonElement, "slot panel save");
-  await humanDelay(page, "after save button", 1800, 4000);
+  await quickSlotDelay(page, "after save button", 700, 1500);
   console.log("Slot panel saved.");
 }
 

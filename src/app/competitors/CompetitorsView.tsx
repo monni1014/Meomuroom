@@ -138,6 +138,7 @@ export default function CompetitorsView() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchManualCells(currentYear, currentMonth);
   }, [currentYear, currentMonth]);
 
@@ -196,7 +197,7 @@ export default function CompetitorsView() {
     <div className="p-4 md:p-8 space-y-6 pb-24 max-w-[1600px] mx-auto w-full">
       <header className="pt-8 pb-2 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">경쟁사 월간표</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">경쟁사 현황</h1>
           <p className="text-sm text-slate-500 mt-1">경쟁사별 예약 상태를 월간 시간표 형식으로 확인합니다.</p>
         </div>
 
@@ -267,7 +268,7 @@ export default function CompetitorsView() {
           </div>
 
           <div className="space-y-1.5">
-            <p className="text-xs font-black text-slate-400 uppercase">경쟁사</p>
+            <p className="text-xs font-black text-slate-400 uppercase">경쟁사 현황</p>
             <div className="grid grid-cols-2 gap-1.5">
               {(["all", ...COMPETITORS.map((competitor) => competitor.id)] as const).map((id) => {
                 const competitor = COMPETITORS.find((item) => item.id === id);
@@ -306,17 +307,17 @@ export default function CompetitorsView() {
                 {competitor.displayName}
               </div>
               <div className="overflow-x-auto">
-                <table className="min-w-[1380px] w-full table-fixed border-collapse text-[12px]">
+                <table className="min-w-[1380px] w-full table-fixed border-collapse text-[11px]">
                   <thead>
-                    <tr className="bg-emerald-50 text-slate-900">
-                      <th className="sticky left-0 z-20 w-[92px] border border-slate-300 bg-emerald-50 px-2 py-1.5">날짜</th>
-                      <th className="sticky left-[92px] z-20 w-[76px] border border-slate-300 bg-emerald-50 px-2 py-1.5">확인</th>
+                    <tr className="h-6 bg-emerald-50 text-slate-900">
+                      <th className="sticky left-0 z-20 w-[92px] border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle">날짜</th>
+                      <th className="sticky left-[92px] z-20 w-[76px] border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle">확인</th>
                       {HOURS.map((hour) => (
-                        <th key={hour} className="w-[64px] border border-slate-300 px-2 py-1.5 text-right">
+                        <th key={hour} className="w-[64px] border border-slate-300 px-1 py-0.5 text-center align-middle">
                           {hour}
                         </th>
                       ))}
-                      <th className="sticky right-0 z-20 w-[120px] border border-slate-300 bg-emerald-50 px-2 py-1.5 text-left">비고</th>
+                      <th className="sticky right-0 z-20 w-[120px] border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle">비고</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -325,11 +326,11 @@ export default function CompetitorsView() {
                       const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 
                       return (
-                        <tr key={`${competitor.id}-${day.toISOString()}`} className="group hover:bg-slate-50">
-                          <td className={cn("sticky left-0 z-10 border border-slate-300 bg-white px-2 py-1.5 text-center font-semibold group-hover:bg-slate-50", isWeekend && "text-red-500")}>
+                        <tr key={`${competitor.id}-${day.toISOString()}`} className="group h-6 hover:bg-slate-50">
+                          <td className={cn("sticky left-0 z-10 border border-slate-300 bg-white px-1 py-0.5 text-center align-middle font-semibold group-hover:bg-slate-50", isWeekend && "text-red-500")}>
                             {format(day, "MM월 dd일")}
                           </td>
-                          <td className="sticky left-[92px] z-10 border border-slate-300 bg-white px-2 py-1.5 text-center font-bold text-slate-500 group-hover:bg-slate-50">
+                          <td className="sticky left-[92px] z-10 border border-slate-300 bg-white px-1 py-0.5 text-center align-middle font-bold text-slate-500 group-hover:bg-slate-50">
                             {snapshot?.checkedAt ? format(new Date(snapshot.checkedAt), "HH:mm") : "-"}
                           </td>
                           {HOURS.map((hour) => {
@@ -348,15 +349,15 @@ export default function CompetitorsView() {
                                   }
                                 }}
                                 className={cn(
-                                  "h-7 border border-slate-300 px-1.5 py-1 text-center align-middle font-semibold",
+                                  "h-6 border border-slate-300 p-0 text-center align-middle font-semibold",
                                   manualClass || slotClass(state),
                                   paintSelection !== null && "cursor-crosshair"
                                 )}
                               >
-                                <span className="block truncate">{slotLabel(state)}</span>
                                 <EditableTableCellInput
                                   ariaLabel={`${competitor.displayName} ${format(day, "MM월 dd일")} ${hour}시 수동 입력`}
                                   value={manualCell.value}
+                                  placeholder={slotLabel(state)}
                                   disabled={paintSelection !== null}
                                   onChange={(value) => updateManualCell(competitor.id, day, editableKey, { value })}
                                   onCommit={(value) =>
@@ -370,7 +371,7 @@ export default function CompetitorsView() {
                               </td>
                             );
                           })}
-                          <td className="sticky right-0 z-10 border border-slate-300 bg-white px-2 py-1.5 font-semibold text-slate-600 group-hover:bg-slate-50">
+                          <td className="sticky right-0 z-10 border border-slate-300 bg-white px-1 py-0.5 text-center align-middle font-semibold text-slate-600 group-hover:bg-slate-50">
                             {snapshot?.memo || "-"}
                           </td>
                         </tr>
@@ -379,14 +380,14 @@ export default function CompetitorsView() {
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100 font-black text-slate-900">
-                      <td className="sticky left-0 z-20 border border-slate-400 bg-slate-100 px-2 py-1.5 text-center">월 총합</td>
-                      <td className="sticky left-[92px] z-20 border border-slate-400 bg-slate-100 px-2 py-1.5 text-center">
+                      <td className="sticky left-0 z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle">월 총합</td>
+                      <td className="sticky left-[92px] z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle">
                         {checkedDays}일
                       </td>
-                      <td className="border border-slate-400 bg-slate-100 px-2 py-1.5 text-left" colSpan={HOURS.length}>
+                      <td className="border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle" colSpan={HOURS.length}>
                         확인 필요
                       </td>
-                      <td className="sticky right-0 z-20 border border-slate-400 bg-slate-100 px-2 py-1.5 text-right">
+                      <td className="sticky right-0 z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle">
                         {needCheckCount}건
                       </td>
                     </tr>
