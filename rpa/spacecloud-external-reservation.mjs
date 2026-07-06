@@ -1007,9 +1007,9 @@ async function clickModalTextButton(page, text, timeout = 20_000) {
 
   if (!box) throw new Error(`Could not find SpaceCloud modal button: ${text}`);
 
-  await humanDelay(page, `before modal ${text} click`, 700, 1700);
+  await humanDelay(page, `before modal ${text} click`, 350, 900);
   await humanClick(page, box.x + box.width / 2, box.y + box.height / 2, `modal ${text}`);
-  await humanDelay(page, `after modal ${text} click`, 900, 2200);
+  await humanDelay(page, `after modal ${text} click`, 500, 1200);
 }
 
 async function fillInputByIndex(page, index, value) {
@@ -1073,9 +1073,9 @@ async function fillInputByIndex(page, index, value) {
   const box = await element.boundingBox();
   if (!box) throw new Error(`Could not locate SpaceCloud modal input index ${index}.`);
   await humanClick(page, box.x + box.width / 2, box.y + box.height / 2, `modal input ${index}`);
-  await humanDelay(page, `after input ${index} click`, 300, 900);
+  await humanDelay(page, `after input ${index} click`, 180, 420);
   await element.fill(value, { timeout: 10_000 });
-  await humanDelay(page, `after input ${index} fill`, 500, 1200);
+  await humanDelay(page, `after input ${index} fill`, 240, 620);
 }
 
 async function chooseTimeSelect(page, selectIndex, hour) {
@@ -1105,7 +1105,7 @@ async function chooseTimeSelect(page, selectIndex, hour) {
   }, { selectIndex, label, hour });
 
   if (nativeSelected) {
-    await humanDelay(page, `after native time select ${label}`, 700, 1700);
+    await humanDelay(page, `after native time select ${label}`, 320, 800);
     return;
   }
 
@@ -1144,15 +1144,15 @@ async function chooseTimeSelect(page, selectIndex, hour) {
 
   if (!box) throw new Error(`Could not find SpaceCloud time dropdown index ${selectIndex}.`);
 
-  await humanDelay(page, `before custom time dropdown ${selectIndex}`, 700, 1700);
+  await humanDelay(page, `before custom time dropdown ${selectIndex}`, 320, 800);
   await humanClick(page, box.x + box.width - 28, box.y + box.height / 2, `time dropdown ${selectIndex}`);
-  await humanDelay(page, `after custom time dropdown ${selectIndex}`, 700, 1700);
+  await humanDelay(page, `after custom time dropdown ${selectIndex}`, 320, 800);
 
   const option = page.getByText(new RegExp(`${hour}\\s*\\uc2dc`)).last();
   await option.waitFor({ state: "visible", timeout: 15_000 });
-  await humanDelay(page, `before custom time option ${label}`, 700, 1700);
+  await humanDelay(page, `before custom time option ${label}`, 320, 800);
   await humanClickElement(page, option, `time option ${label}`);
-  await humanDelay(page, `after custom time option ${label}`, 800, 1900);
+  await humanDelay(page, `after custom time option ${label}`, 420, 1000);
 }
 
 async function ensureNotFullDay(page) {
@@ -1184,7 +1184,7 @@ async function ensureNotFullDay(page) {
       input.click();
     }
   }, TEXT.fullDay);
-  await humanDelay(page, "after full-day safety check", 400, 1000);
+  await humanDelay(page, "after full-day safety check", 220, 520);
 }
 
 async function addExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply }) {
@@ -1238,7 +1238,7 @@ async function addExternalReservation(page, { dateValue, startHour, endHour, mar
     }
     throw error;
   }
-  await humanDelay(page, "after SpaceCloud external save", 2200, 5200);
+  await humanDelay(page, "after SpaceCloud external save", 900, 2200);
   await saveScreenshot(page, "spacecloud-external-after-add");
 
   return { ok: true, dryRun: false };
@@ -1405,12 +1405,12 @@ async function deleteExternalReservation(page, { dateValue, startHour, endHour, 
   let dialogAccepted = false;
   page.once("dialog", async (dialog) => {
     dialogAccepted = true;
-    await humanDelay(page, "before SpaceCloud delete dialog accept", 700, 1600);
+    await humanDelay(page, "before SpaceCloud delete dialog accept", 350, 900);
     await dialog.accept();
   });
 
   await clickVisibleText(page, TEXT.deleteReservation, 20_000);
-  await humanDelay(page, "after SpaceCloud delete click", 1600, 3600);
+  await humanDelay(page, "after SpaceCloud delete click", 800, 1800);
 
   if (!dialogAccepted) {
     const confirmVisible = await page.getByText(TEXT.confirm, { exact: false }).last().isVisible().catch(() => false);
@@ -1419,7 +1419,7 @@ async function deleteExternalReservation(page, { dateValue, startHour, endHour, 
     }
   }
 
-  await humanDelay(page, "after SpaceCloud external delete", 2200, 5200);
+  await humanDelay(page, "after SpaceCloud external delete", 900, 2200);
   await saveScreenshot(page, "spacecloud-external-after-delete");
   return { ok: true, alreadyOpen: false, dryRun: false };
 }

@@ -35,6 +35,16 @@ const ROOM_PRODUCT_NAMES = {
   "2": TEXT.product2,
 };
 
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function quickSlotDelay(page, label, minMs = 180, maxMs = 520) {
+  const delay = randomInt(minMs, maxMs);
+  console.log(`${label}: quick wait ${delay}ms`);
+  await page.waitForTimeout(delay);
+}
+
 function usage() {
   return [
     "Usage:",
@@ -490,7 +500,7 @@ async function clickHourToggle(page, hour, mode) {
   }, label);
 
   if (scrolled) {
-    await humanDelay(page, `after panel scroll to ${label}`, 350, 900);
+    await quickSlotDelay(page, `after panel scroll to ${label}`, 160, 420);
   }
 
   const toggle = await page.evaluate((targetLabel) => {
@@ -592,9 +602,9 @@ async function clickHourToggle(page, hour, mode) {
     return false;
   }
 
-  await humanDelay(page, `before ${label} toggle`, 500, 1200);
+  await quickSlotDelay(page, `before ${label} toggle`, 160, 420);
   await humanClick(page, toggle.x, toggle.y, `${label} toggle`);
-  await humanDelay(page, `after ${label} toggle`, 500, 1400);
+  await quickSlotDelay(page, `after ${label} toggle`, 280, 720);
   console.log(`${label}: changed to ${mode}`);
   return true;
 }
@@ -685,7 +695,7 @@ async function assertHourToggleState(page, hour, mode) {
     }, label);
 
     if (actualState === mode) return;
-    await humanDelay(page, `wait for ${label} ${mode} state`, 350, 800);
+    await quickSlotDelay(page, `wait for ${label} ${mode} state`, 220, 520);
   }
 
   if (actualState !== mode) {

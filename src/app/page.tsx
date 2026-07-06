@@ -1,4 +1,4 @@
-import { Calendar, Users, TrendingUp, Clock } from "lucide-react";
+import { AlertTriangle, Calendar, Users, TrendingUp, Clock } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import EmailSyncButton from "./EmailSyncButton";
 import AutoRefresh from "./AutoRefresh";
@@ -101,6 +101,11 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
     ? maxDate(new Date(reservationBounds._max.startTime.getFullYear(), reservationBounds._max.startTime.getMonth(), 1), currentMonthStart)
     : currentMonthStart;
   const monthOptions = buildMonthOptions(firstDataMonth, lastDataMonth, selectedMonthStart);
+  const activeAlerts = await prisma.adminAlert.findMany({
+    where: { resolved: false },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+  });
 
   // Fetch today's reservations (오늘 들어온 예약 — 메일 자동연동 + 수동 예약 모두 포함)
   const todayReservations = await prisma.reservation.findMany({
@@ -236,6 +241,23 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
         </div>
         <EmailSyncButton />
       </header>
+
+      {activeAlerts.length > 0 && (
+        <section className="space-y-2">
+          {activeAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              className="flex gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-950"
+            >
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
+              <div className="min-w-0">
+                <p className="text-sm font-black">{alert.title}</p>
+                <p className="mt-1 text-xs font-semibold text-rose-800">{alert.message}</p>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* Summary Cards (Top) */}
       <section className="space-y-6">

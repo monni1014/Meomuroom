@@ -72,3 +72,30 @@ model ManualTableCell {
   @@unique([tableId, sectionId, year, month, day, cellKey])
   @@index([tableId, sectionId, year, month])
 }
+
+model AdminAlert {
+  id        String   @id @default(cuid())
+  type      String
+  severity  String   @default("WARNING")
+  title     String
+  message   String
+  dedupeKey String?  @unique
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resolved, createdAt])
+  @@index([type, createdAt])
+}
+
+model ProxyTrafficCheck {
+  id          String   @id @default(cuid())
+  provider    String   @default("iproyal")
+  availableGb Float
+  warningGb   Float
+  criticalGb  Float
+  rawPayload   String?
+  checkedAt   DateTime @default(now())
+
+  @@index([provider, checkedAt])
+}
