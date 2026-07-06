@@ -4,6 +4,7 @@ import { parseArgs, parseHour, parseRoom, requiredArg } from "./lib/cli.mjs";
 import { optionalEnv } from "./lib/env.mjs";
 import { humanClick, humanClickElement, humanDelay } from "./lib/human.mjs";
 import { naverStorageStatePath } from "./lib/paths.mjs";
+import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
 
 const BIZ_ITEMS_URL = "https://partner.booking.naver.com/bizes/1473933/biz-items";
@@ -66,12 +67,18 @@ function formatShortMonthDay(dateValue) {
   return `${date.getMonth() + 1}.${date.getDate()}`;
 }
 
+function toScheduleUrl(productUrl) {
+  const url = new URL(productUrl);
+  url.pathname = url.pathname.replace(/\/detail\/?$/, "/schedules");
+  return url.toString();
+}
+
 function toKstDateOnlyMs(dateValue) {
   return new Date(`${dateValue}T00:00:00+09:00`).getTime();
 }
 
 function parseVisibleWeekRange(text) {
-  const match = text.match(/(20\d{2})\.(\d{1,2})\.(\d{1,2})\s*~\s*(?:(20\d{2})\.)?(\d{1,2})\.(\d{1,2})/);
+  const match = text.match(/(20\d{2})\.(\d{1,2})\.(\d{1,2})\s*[~∼～]\s*(?:(20\d{2})\.)?(\d{1,2})\.(\d{1,2})/);
   if (!match) return null;
 
   const startYear = Number(match[1]);
@@ -101,18 +108,94 @@ async function clickTextIfVisible(page, text, timeout = 15_000) {
   await humanDelay(page, "after text click", 700, 1600);
 }
 
+async function isScheduleLoaded(page) {
+  return page.evaluate(() => {
+    const text = document.body?.innerText || "";
+    const hasRange = /20\d{2}\.\d{1,2}\.\d{1,2}\s*[~∼～]\s*\d{1,2}\.\d{1,2}/.test(text);
+    const dayHeaders = [...text.matchAll(/\b\d{1,2}\.\d{1,2}\s*\([^)]+\)/g)];
+    return hasRange || (dayHeaders.length >= 5 && text.includes("1시간 당") && text.includes("00:00"));
+  });
+}
+
+async function waitForScheduleLoaded(page, timeout = 30_000) {
+  try {
+    await page.waitForFunction(() => {
+      const text = document.body?.innerText || "";
+      const hasRange = /20\d{2}\.\d{1,2}\.\d{1,2}\s*[~∼～]\s*\d{1,2}\.\d{1,2}/.test(text);
+      const dayHeaders = [...text.matchAll(/\b\d{1,2}\.\d{1,2}\s*\([^)]+\)/g)];
+      return hasRange || (dayHeaders.length >= 5 && text.includes("1시간 당") && text.includes("00:00"));
+    }, null, { timeout });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isProductDetailVisible(page, url) {
+  return page.evaluate(
+    ({ expectedPath, scheduleText }) => {
+      const text = document.body?.innerText || "";
+      return window.location.pathname === expectedPath && text.includes(scheduleText);
+    },
+    { expectedPath: new URL(url).pathname, scheduleText: TEXT.schedule }
+  );
+}
+
+async function isProductListVisible(page) {
+  return page.evaluate(
+    ({ product1, product2 }) => {
+      const text = document.body?.innerText || "";
+      return text.includes(product1)
+        && text.includes(product2)
+        && !/20\d{2}\.\d{1,2}\.\d{1,2}\s*~/.test(text);
+    },
+    { product1: TEXT.product1, product2: TEXT.product2 }
+  );
+}
+
+async function waitForProductDetail(page, url, productName) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (await isProductDetailVisible(page, url)) return;
+
+    console.log(`Product detail is not ready. Reopen exact product URL. attempt=${attempt}`);
+    await page.goto(url, { timeout: 60_000, waitUntil: "domcontentloaded" });
+    await humanDelay(page, "after product detail retry", 1400, 3200);
+
+    if (await isProductDetailVisible(page, url)) return;
+  }
+
+  throw new Error(`Could not open exact Naver product detail page for ${productName}.`);
+}
+
 async function openProduct(page, productName) {
   throw new Error(
     `Blocked unsafe product-list click for ${productName}. Pass --product-url with the exact product edit URL instead.`
   );
 }
 
-async function openScheduleTab(page) {
-  await clickTextIfVisible(page, TEXT.schedule, 20_000);
-  await humanDelay(page, "after schedule tab", 900, 2200);
-  await closeSlotPanelIfOpen(page);
-  await page.keyboard.press("Escape");
-  await humanDelay(page, "after safety escape", 700, 1600);
+async function openScheduleTab(page, { url, productName }) {
+  const scheduleUrl = toScheduleUrl(url);
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    console.log(`Open exact schedule URL. attempt=${attempt}`);
+    await page.goto(scheduleUrl, { timeout: 60_000, waitUntil: "domcontentloaded" });
+    await humanDelay(page, "after schedule URL open", 1600, 3600);
+    await closeSlotPanelIfOpen(page);
+    await page.keyboard.press("Escape");
+    await humanDelay(page, "after safety escape", 700, 1600);
+
+    if (await waitForScheduleLoaded(page, 30_000)) return;
+
+    if (await isProductListVisible(page)) {
+      console.log(`Naver bounced to product list after schedule URL. Retry. attempt=${attempt}`);
+    } else {
+      console.log(`Schedule range is not loaded after schedule URL. Retry. attempt=${attempt}`);
+    }
+
+    await saveScreenshot(page, `naver-slots-schedule-retry-${attempt}`);
+  }
+
+  throw new Error(`Could not open Naver schedule tab for ${productName}.`);
 }
 
 async function closeSlotPanelIfOpen(page) {
@@ -146,9 +229,10 @@ async function navigateToDate(page, dateValue) {
   const targetMonthDay = formatShortMonthDay(dateValue);
   const targetMs = toKstDateOnlyMs(dateValue);
 
-  await page.waitForFunction(() => /20\d{2}\.\d{1,2}\.\d{1,2}\s*~/.test(document.body?.innerText || ""), null, {
-    timeout: 30_000,
-  });
+  const loaded = await waitForScheduleLoaded(page, 30_000);
+  if (!loaded) {
+    throw new Error("Naver schedule grid did not load.");
+  }
 
   for (let i = 0; i < 12; i += 1) {
     const visibleText = await page.locator("body").innerText({ timeout: 5_000 });
@@ -505,13 +589,14 @@ async function clickHourToggle(page, hour, mode) {
 
   if (isOn === shouldBeOn) {
     console.log(`${label}: already ${mode}`);
-    return;
+    return false;
   }
 
   await humanDelay(page, `before ${label} toggle`, 500, 1200);
   await humanClick(page, toggle.x, toggle.y, `${label} toggle`);
   await humanDelay(page, `after ${label} toggle`, 500, 1400);
   console.log(`${label}: changed to ${mode}`);
+  return true;
 }
 
 async function assertHourToggleState(page, hour, mode) {
@@ -609,10 +694,13 @@ async function assertHourToggleState(page, hour, mode) {
 }
 
 async function assertSlotPanelState(page, startHour, endHour, mode) {
+  let changedCount = 0;
   for (let hour = startHour; hour < endHour; hour += 1) {
-    await clickHourToggle(page, hour, mode);
+    const changed = await clickHourToggle(page, hour, mode);
+    if (changed) changedCount += 1;
     await assertHourToggleState(page, hour, mode);
   }
+  return changedCount;
 }
 
 async function clickSlotPanelSave(page) {
@@ -700,10 +788,14 @@ async function main() {
 
   const url = productUrl;
   const productName = ROOM_PRODUCT_NAMES[room];
-  const browser = await launchRpaBrowser({ headless: false });
+  const releaseLock = await acquireProcessLock("rpa/.locks/naver-toggle-slots.lock", {
+    label: `Naver slot RPA room=${room} ${dateValue} ${args.start}-${args.end} mode=${mode}`,
+  });
+  let browser;
   let page;
 
   try {
+    browser = await launchRpaBrowser({ headless: false });
     const context = await newRpaContext(browser, {
       storageState: naverStorageStatePath,
     });
@@ -715,7 +807,7 @@ async function main() {
     await saveScreenshot(page, "naver-slots-01-product-url");
 
     console.log("Open schedule tab");
-    await openScheduleTab(page);
+    await openScheduleTab(page, { url, productName });
     await saveScreenshot(page, "naver-slots-03-schedule");
 
     const targetLabel = await navigateToDate(page, dateValue);
@@ -730,17 +822,23 @@ async function main() {
       return;
     }
 
-    await assertSlotPanelState(page, startHour, endHour, mode);
+    const changedCount = await assertSlotPanelState(page, startHour, endHour, mode);
 
-    await clickSlotPanelSave(page);
-    await saveScreenshot(page, "naver-slots-06-after-toggle");
+    if (changedCount > 0) {
+      await clickSlotPanelSave(page);
+      await saveScreenshot(page, "naver-slots-06-after-toggle");
+    } else {
+      console.log(`All target slots are already ${mode}. Skip save.`);
+      await saveScreenshot(page, "naver-slots-06-already-target-state");
+    }
     console.log(`\nDone: room ${room}, ${dateValue}, ${args.start}-${args.end}, mode=${mode}`);
   } catch (error) {
     console.error("Naver slot RPA failed:", error instanceof Error ? error.message : error);
     await page?.screenshot?.({ path: `rpa/screenshots/naver-slots-error-${Date.now()}.png`, fullPage: true }).catch(() => {});
     throw error;
   } finally {
-    await browser.close();
+    await browser?.close();
+    await releaseLock();
   }
 }
 

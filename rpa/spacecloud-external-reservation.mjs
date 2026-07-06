@@ -712,11 +712,8 @@ async function assertModalDate(page, dateValue) {
   }
 }
 
-async function typeModalDate(page, dateValue) {
-  const { day } = parseDateValue(dateValue);
-  const dayText = String(day).padStart(2, "0");
-  const altDayText = String(day);
-  const box = await page.evaluate(() => {
+async function findModalDateInputBox(page) {
+  return page.evaluate(() => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -759,12 +756,95 @@ async function typeModalDate(page, dateValue) {
     const rect = input.getBoundingClientRect();
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
   });
+}
 
+async function openModalDatePicker(page) {
+  const box = await findModalDateInputBox(page);
   if (!box) throw new Error("Could not find SpaceCloud modal date input.");
 
-  await humanDelay(page, "before modal date input click", 700, 1700);
-  await humanClick(page, box.x + box.width / 2, box.y + box.height / 2, "modal date input");
+  await humanDelay(page, "before modal date picker icon click", 700, 1700);
+  await humanClick(page, box.x + box.width - 28, box.y + box.height / 2, "modal date picker icon");
   await humanDelay(page, "after modal date picker open", 900, 2000);
+}
+
+async function getModalDatePickerInfo(page) {
+  return page.evaluate(() => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    const candidates = [...document.querySelectorAll("div,section,article")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        const monthMatch = text.match(/\b(20\d{2})\.(\d{1,2})\b/);
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, text, monthMatch, area: rect.width * rect.height };
+      })
+      .filter((item) =>
+        item.monthMatch
+        && item.text.includes("\uc624\ub298")
+        && item.text.includes("\uc120\ud0dd")
+        && item.width >= 260
+        && item.width <= 640
+        && item.height >= 220
+        && item.height <= 560
+      )
+      .sort((a, b) => a.area - b.area);
+
+    const picker = candidates[0];
+    if (!picker || !picker.monthMatch) return null;
+
+    return {
+      x: picker.x,
+      y: picker.y,
+      width: picker.width,
+      height: picker.height,
+      year: Number(picker.monthMatch[1]),
+      month: Number(picker.monthMatch[2]),
+    };
+  });
+}
+
+async function clickModalDatePickerMonthArrow(page, direction) {
+  const picker = await getModalDatePickerInfo(page);
+  if (!picker) throw new Error("Could not find SpaceCloud modal date picker.");
+
+  const x = direction === "previous" ? picker.x + 28 : picker.x + picker.width - 28;
+  const y = picker.y + 34;
+  await humanDelay(page, `before modal date picker ${direction} month click`, 700, 1700);
+  await humanClick(page, x, y, `modal date picker ${direction} month`);
+  await humanDelay(page, `after modal date picker ${direction} month click`, 900, 2000);
+}
+
+async function navigateModalDatePickerToMonth(page, dateValue) {
+  const target = parseDateValue(dateValue);
+  const targetIndex = monthIndex(target.year, target.month);
+  const targetKey = monthKey(dateValue);
+
+  for (let attempt = 0; attempt < 18; attempt += 1) {
+    const picker = await getModalDatePickerInfo(page);
+    if (!picker) {
+      await humanDelay(page, "wait for modal date picker", 800, 1800);
+      continue;
+    }
+
+    const currentKey = `${picker.year}.${picker.month}`;
+    if (currentKey === targetKey) return;
+
+    const currentIndex = monthIndex(picker.year, picker.month);
+    await clickModalDatePickerMonthArrow(page, targetIndex < currentIndex ? "previous" : "next");
+  }
+
+  throw new Error(`Could not navigate SpaceCloud modal date picker to ${targetKey}.`);
+}
+
+async function clickModalDatePickerDay(page, dateValue) {
+  const { day } = parseDateValue(dateValue);
+  const dayText = String(day).padStart(2, "0");
+  const altDayText = String(day);
 
   const dayBox = await page.evaluate(({ dayText, altDayText }) => {
     function visible(element) {
@@ -773,28 +853,57 @@ async function typeModalDate(page, dateValue) {
       return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
     }
 
+    const pickerCandidates = [...document.querySelectorAll("div,section,article")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        const monthMatch = text.match(/\b(20\d{2})\.(\d{1,2})\b/);
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, text, monthMatch, area: rect.width * rect.height };
+      })
+      .filter((item) =>
+        item.monthMatch
+        && item.text.includes("\uc624\ub298")
+        && item.text.includes("\uc120\ud0dd")
+        && item.width >= 260
+        && item.width <= 640
+        && item.height >= 220
+        && item.height <= 560
+      )
+      .sort((a, b) => a.area - b.area);
+
+    const picker = pickerCandidates[0];
+    if (!picker) return null;
+
     const candidates = [...document.querySelectorAll("body *")]
       .filter(visible)
       .map((element) => {
         const rect = element.getBoundingClientRect();
         const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        const style = window.getComputedStyle(element);
+        const color = style.color.match(/\d+/g)?.map(Number) || [];
+        const isDimmed = color.length >= 3 && color[0] > 150 && color[1] > 150 && color[2] > 150;
         return {
           x: rect.x,
           y: rect.y,
           width: rect.width,
           height: rect.height,
           text,
+          isDimmed,
           area: rect.width * rect.height,
         };
       })
       .filter((item) =>
         (item.text === dayText || item.text === altDayText)
+        && !item.isDimmed
+        && item.x >= picker.x
+        && item.y >= picker.y
+        && item.x + item.width <= picker.x + picker.width
+        && item.y + item.height <= picker.y + picker.height
         && item.width >= 12
         && item.width <= 70
         && item.height >= 12
         && item.height <= 70
-        && item.y >= 230
-        && item.y <= 540
       )
       .sort((a, b) => a.area - b.area);
 
@@ -806,6 +915,12 @@ async function typeModalDate(page, dateValue) {
   await humanDelay(page, `before modal date picker day ${dayText} click`, 700, 1700);
   await humanClick(page, dayBox.x + dayBox.width / 2, dayBox.y + dayBox.height / 2, `modal date picker day ${dayText}`);
   await humanDelay(page, "after modal date picker day click", 900, 2000);
+}
+
+async function typeModalDate(page, dateValue) {
+  await openModalDatePicker(page);
+  await navigateModalDatePickerToMonth(page, dateValue);
+  await clickModalDatePickerDay(page, dateValue);
 }
 
 async function clickModalTextButton(page, text, timeout = 20_000) {
@@ -1082,6 +1197,13 @@ async function addExternalReservation(page, { dateValue, startHour, endHour, mar
     return { ok: true, alreadyClosed: true, dryRun: !apply };
   }
 
+  const alreadyBlocked = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
+  if (alreadyBlocked) {
+    await saveScreenshot(page, "spacecloud-external-already-blocked");
+    console.log("SpaceCloud target period already appears blocked. Treat close as success.");
+    return { ok: true, alreadyClosed: true, manualOrExistingBlock: true, dryRun: !apply };
+  }
+
   await clickAddReservation(page);
   await saveScreenshot(page, "spacecloud-external-add-modal");
   await typeModalDate(page, dateValue);
@@ -1199,10 +1321,76 @@ async function findAndOpenExternalReservation(page, { dateValue, startHour, endH
   return false;
 }
 
+async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
+  const { day } = parseDateValue(dateValue);
+  const dayText = String(day).padStart(2, "0");
+  const altDayText = String(day);
+
+  return page.evaluate(({ dayText, altDayText, startHour, endHour }) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    function cellFor(element) {
+      let current = element;
+      for (let i = 0; i < 8 && current; i += 1) {
+        const rect = current.getBoundingClientRect();
+        const text = (current.textContent || "").replace(/\s+/g, " ").trim();
+        const hasDay = new RegExp(`^\\s*(${dayText}|${altDayText})(?!\\d)`).test(text);
+        if (hasDay && rect.width > 120 && rect.height > 80 && rect.y > 420) return current;
+        current = current.parentElement;
+      }
+      return null;
+    }
+
+    const startPattern = String(startHour).padStart(1, "0");
+    const endPattern = String(endHour).padStart(1, "0");
+    const timePattern = new RegExp(`(^|[^0-9])0?${startPattern}\\s*~\\s*0?${endPattern}([^0-9]|$)`);
+
+    const entries = [...document.querySelectorAll("body *")]
+      .filter(visible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        const compactText = text.replace(/\s+/g, "");
+        const cell = cellFor(element);
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text,
+          compactText,
+          inTargetCell: Boolean(cell),
+        };
+      })
+      .filter((entry) =>
+        entry.inTargetCell
+        && timePattern.test(entry.compactText)
+        && entry.y > 420
+        && entry.width < 260
+        && entry.height < 90
+      )
+      .sort((a, b) => (a.width * a.height) - (b.width * b.height));
+
+    return entries[0] || null;
+  }, { dayText, altDayText, startHour, endHour });
+}
+
 async function deleteExternalReservation(page, { dateValue, startHour, endHour, marker, apply }) {
   const opened = await findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker });
 
   if (!opened) {
+    const stillBlocked = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
+    if (stillBlocked) {
+      await saveScreenshot(page, "spacecloud-external-unknown-block-still-exists");
+      throw new Error(
+        `SpaceCloud target period is blocked by an unknown/manual reservation: ${dateValue} ${startHour}:00-${endHour}:00. Not deleting without marker.`,
+      );
+    }
+
     console.log("No matching SpaceCloud external reservation was found. Treat as already open.");
     return { ok: true, alreadyOpen: true, dryRun: !apply };
   }
@@ -1302,9 +1490,6 @@ async function main() {
     await assertCalendarView(page, "month navigation");
     await navigateToMonth(page, dateValue);
     await assertCalendarView(page, "date selection");
-    if (mode === "close") {
-      await selectCalendarDay(page, dateValue);
-    }
     await saveScreenshot(page, "spacecloud-external-02-calendar");
 
     const result = mode === "close"

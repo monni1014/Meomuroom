@@ -47,6 +47,12 @@ type NormalizedNaverReservation = {
   isPaid: boolean;
 };
 
+type SlotActionResult = {
+  ok: boolean;
+  skipped: boolean;
+  reason: string | null;
+};
+
 type RpaRecheckGlobal = typeof globalThis & {
   __naverSlotRpaIssueRecheckedAt?: Map<string, number>;
 };
@@ -590,6 +596,50 @@ async function setSpaceCloudExternalReservation(
   }
 }
 
+function settledSlotResult(result: PromiseSettledResult<SlotActionResult>) {
+  if (result.status === "fulfilled") return result.value;
+  const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+  return { ok: false, skipped: false, reason };
+}
+
+async function syncNaverAndSpaceCloudSlots(
+  item: NormalizedNaverReservation,
+  mode: "close" | "open",
+  reservationId: string,
+  bookingLabel: string,
+) {
+  console.log(`[NaverRPA] Start parallel slot ${mode}: ${bookingLabel}`);
+  const [naverResult, spaceCloudResult] = await Promise.allSettled([
+    setNaverSlot(item, mode),
+    setSpaceCloudExternalReservation(item, mode),
+  ]);
+
+  const naverSlot = settledSlotResult(naverResult);
+  const spaceCloudSlot = settledSlotResult(spaceCloudResult);
+
+  if (naverSlot.ok) {
+    await clearRpaCheckRequired(reservationId, isNaverSlotCheckLine);
+  } else {
+    await markRpaCheckRequired(reservationId, `Naver slot ${mode} failed: ${naverSlot.reason}`);
+  }
+
+  if (spaceCloudSlot.ok) {
+    await clearRpaCheckRequired(reservationId, isSpaceCloudExternalCheckLine);
+  } else {
+    await markRpaCheckRequired(
+      reservationId,
+      `SpaceCloud external reservation ${mode} failed: ${spaceCloudSlot.reason}`,
+    );
+  }
+
+  console.log(`[NaverRPA] Slot ${mode} result for ${bookingLabel}: ${naverSlot.ok ? "ok" : naverSlot.reason}`);
+  console.log(
+    `[NaverRPA] SpaceCloud external ${mode} result for ${bookingLabel}: ${spaceCloudSlot.ok ? "ok" : spaceCloudSlot.reason}`,
+  );
+
+  return { naverSlot, spaceCloudSlot };
+}
+
 export async function recheckNaverSlotRpaIssues(limit = 1) {
   const cooldownMs = 10 * 60 * 1000;
   const now = Date.now();
@@ -679,11 +729,11 @@ export async function processNaverEmailWithRpa({
 
     const result = await cancelNaverReservation(normalized, messageId, parsedReservation.refundFee ?? 0, receivedAt);
     if (result.changed) {
-      const slot = await setNaverSlot(normalized, "open", result.reservation.id);
-      console.log(`[NaverRPA] Slot open result for ${bookingId || normalized.bookingNumber}: ${slot.ok ? "ok" : slot.reason}`);
-      const spaceCloudSlot = await setSpaceCloudExternalReservation(normalized, "open", result.reservation.id);
-      console.log(
-        `[NaverRPA] SpaceCloud external open result for ${bookingId || normalized.bookingNumber}: ${spaceCloudSlot.ok ? "ok" : spaceCloudSlot.reason}`,
+      await syncNaverAndSpaceCloudSlots(
+        normalized,
+        "open",
+        result.reservation.id,
+        bookingId || normalized.bookingNumber,
       );
     } else {
       console.log(`[NaverRPA] Reservation already cancelled. Skip slot open: ${result.reservation.id}`);
@@ -705,10 +755,7 @@ export async function processNaverEmailWithRpa({
   const result = await upsertNaverReservation(normalized, messageId, receivedAt);
 
   if (normalized.status === "CONFIRMED") {
-    const slot = await setNaverSlot(normalized, "close", result.reservation.id);
-    console.log(`[NaverRPA] Slot close result for ${bookingId}: ${slot.ok ? "ok" : slot.reason}`);
-    const spaceCloudSlot = await setSpaceCloudExternalReservation(normalized, "close", result.reservation.id);
-    console.log(`[NaverRPA] SpaceCloud external close result for ${bookingId}: ${spaceCloudSlot.ok ? "ok" : spaceCloudSlot.reason}`);
+    await syncNaverAndSpaceCloudSlots(normalized, "close", result.reservation.id, bookingId!);
   }
 
   return { changed: true, skipped: false, created: result.created };

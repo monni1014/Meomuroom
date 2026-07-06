@@ -25,3 +25,6 @@ fetch-naver-email.js
 rpa/.auth/
 rpa/screenshots/
 
+# Local agent/runtime metadata
+.agents/
+

@@ -55,3 +55,20 @@ model UsageLog {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 }
+
+model ManualTableCell {
+  id        String   @id @default(cuid())
+  tableId   String
+  sectionId String
+  year      Int
+  month     Int
+  day       Int
+  cellKey   String
+  value     String
+  color     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tableId, sectionId, year, month, day, cellKey])
+  @@index([tableId, sectionId, year, month])
+}
