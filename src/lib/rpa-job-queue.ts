@@ -16,6 +16,7 @@ type RpaEmailJob = {
   html?: string | false;
   parsedReservation: ParsedReservation;
   receivedAt?: Date;
+  supersededConfirmationJobs?: RpaEmailJob[];
 };
 
 type RpaQueueState = {
@@ -25,7 +26,10 @@ type RpaQueueState = {
   failureCounts: Map<string, number>;
   manualCheckIds: Set<string>;
   retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+  retryJobs: Map<string, RpaEmailJob>;
+  supersededConfirmationIds: Set<string>;
   running: boolean;
+  currentJob?: RpaEmailJob;
   slotRecheckRunning: boolean;
   lastSlotRecheckAt: number;
   naverStatusReconcileRunning: boolean;
@@ -76,28 +80,63 @@ function isSameQueuedReservation(a: RpaEmailJob, b: RpaEmailJob) {
   return isSameReservationWindow(a, b);
 }
 
-function removeQueuedConfirmationForCancellation(state: RpaQueueState, cancelJob: RpaEmailJob) {
-  if (!isCancellationJob(cancelJob)) return;
+function attachSupersededConfirmationJob(state: RpaQueueState, cancelJob: RpaEmailJob, confirmationJob: RpaEmailJob) {
+  cancelJob.supersededConfirmationJobs ??= [];
+  if (!cancelJob.supersededConfirmationJobs.some((job) => job.messageId === confirmationJob.messageId)) {
+    cancelJob.supersededConfirmationJobs.push(confirmationJob);
+  }
 
-  const removedMessageIds: string[] = [];
+  state.supersededConfirmationIds.add(confirmationJob.messageId);
+  state.activeIds.delete(confirmationJob.messageId);
+  state.failedUntil.delete(confirmationJob.messageId);
+  state.failureCounts.delete(confirmationJob.messageId);
+  clearRetryTimer(state, confirmationJob.messageId);
+}
+
+function removeQueuedConfirmationForCancellation(state: RpaQueueState, cancelJob: RpaEmailJob) {
+  if (!isCancellationJob(cancelJob)) return [];
+
+  const removedMessageIds = new Set<string>();
   state.queue = state.queue.filter((queuedJob) => {
     const remove = !isCancellationJob(queuedJob) && isSameQueuedReservation(queuedJob, cancelJob);
-    if (remove) removedMessageIds.push(queuedJob.messageId);
+    if (remove) {
+      removedMessageIds.add(queuedJob.messageId);
+      attachSupersededConfirmationJob(state, cancelJob, queuedJob);
+    }
     return !remove;
   });
 
-  for (const messageId of removedMessageIds) {
-    state.activeIds.delete(messageId);
-    state.failedUntil.delete(messageId);
-    state.failureCounts.delete(messageId);
-    clearRetryTimer(state, messageId);
+  for (const retryJob of [...state.retryJobs.values()]) {
+    const remove = !isCancellationJob(retryJob) && isSameQueuedReservation(retryJob, cancelJob);
+    if (remove) {
+      removedMessageIds.add(retryJob.messageId);
+      attachSupersededConfirmationJob(state, cancelJob, retryJob);
+    }
   }
 
-  if (removedMessageIds.length > 0) {
+  if (removedMessageIds.size > 0) {
     console.log(
-      `[RPAQueue] Removed queued confirmation jobs because cancellation arrived: ${removedMessageIds.join(", ")}`,
+      `[RPAQueue] Removed queued confirmation jobs because cancellation arrived: ${[...removedMessageIds].join(", ")}`,
     );
   }
+
+  return [...removedMessageIds];
+}
+
+function findCancellationToOwnConfirmation(state: RpaQueueState, confirmationJob: RpaEmailJob) {
+  if (isCancellationJob(confirmationJob)) return null;
+
+  if (
+    state.currentJob
+    && isCancellationJob(state.currentJob)
+    && isSameQueuedReservation(state.currentJob, confirmationJob)
+  ) {
+    return state.currentJob;
+  }
+
+  return state.queue.find((queuedJob) =>
+    isCancellationJob(queuedJob) && isSameQueuedReservation(queuedJob, confirmationJob)
+  ) || null;
 }
 
 function pushJobByPriority(state: RpaQueueState, job: RpaEmailJob) {
@@ -105,7 +144,16 @@ function pushJobByPriority(state: RpaQueueState, job: RpaEmailJob) {
     removeQueuedConfirmationForCancellation(state, job);
     state.queue.push(job);
     console.log(`[RPAQueue] Queued cancellation job after pending confirmations: ${job.messageId}`);
-    return;
+    return true;
+  }
+
+  const matchingCancellation = findCancellationToOwnConfirmation(state, job);
+  if (matchingCancellation) {
+    attachSupersededConfirmationJob(state, matchingCancellation, job);
+    console.log(
+      `[RPAQueue] Confirmation job superseded by pending cancellation: ${job.messageId} -> ${matchingCancellation.messageId}`,
+    );
+    return false;
   }
 
   const firstCancellationIndex = state.queue.findIndex(isCancellationJob);
@@ -114,6 +162,8 @@ function pushJobByPriority(state: RpaQueueState, job: RpaEmailJob) {
   } else {
     state.queue.splice(firstCancellationIndex, 0, job);
   }
+
+  return true;
 }
 
 function getState() {
@@ -125,6 +175,8 @@ function getState() {
     failureCounts: new Map<string, number>(),
     manualCheckIds: new Set<string>(),
     retryTimers: new Map<string, ReturnType<typeof setTimeout>>(),
+    retryJobs: new Map<string, RpaEmailJob>(),
+    supersededConfirmationIds: new Set<string>(),
     running: false,
     slotRecheckRunning: false,
     lastSlotRecheckAt: 0,
@@ -153,6 +205,7 @@ function clearRetryTimer(state: RpaQueueState, messageId: string) {
   const timer = state.retryTimers.get(messageId);
   if (timer) clearTimeout(timer);
   state.retryTimers.delete(messageId);
+  state.retryJobs.delete(messageId);
 }
 
 function scheduleRetry(state: RpaQueueState, job: RpaEmailJob, retryDelay: number) {
@@ -164,17 +217,19 @@ function scheduleRetry(state: RpaQueueState, job: RpaEmailJob, retryDelay: numbe
 
     if (state.manualCheckIds.has(job.messageId) || state.activeIds.has(job.messageId)) return;
 
-    pushJobByPriority(state, job);
-    state.activeIds.add(job.messageId);
+    const queued = pushJobByPriority(state, job);
+    if (queued) state.activeIds.add(job.messageId);
     void drainRpaEmailQueue();
   }, retryDelay);
 
   state.retryTimers.set(job.messageId, timer);
+  state.retryJobs.set(job.messageId, job);
 }
 
 export function isRpaEmailJobActive(messageId: string) {
   const state = getState();
   if (state.manualCheckIds.has(messageId)) return true;
+  if (state.supersededConfirmationIds.has(messageId)) return true;
   if (state.retryTimers.has(messageId)) return true;
   const retryAt = state.failedUntil.get(messageId);
   if (retryAt && retryAt > Date.now()) return true;
@@ -186,8 +241,8 @@ export function enqueueRpaEmailJob(job: RpaEmailJob) {
   const state = getState();
   if (isRpaEmailJobActive(job.messageId)) return false;
 
-  pushJobByPriority(state, job);
-  state.activeIds.add(job.messageId);
+  const queued = pushJobByPriority(state, job);
+  if (queued) state.activeIds.add(job.messageId);
   void drainRpaEmailQueue();
   return true;
 }
@@ -201,6 +256,7 @@ async function drainRpaEmailQueue() {
     while (state.queue.length > 0) {
       const job = state.queue.shift();
       if (!job) continue;
+      state.currentJob = job;
 
       try {
         console.log(`[RPAQueue] Start ${job.source} job: ${job.messageId}`);
@@ -211,6 +267,13 @@ async function drainRpaEmailQueue() {
           result = await processSpaceCloudEmailWithRpa(job);
         }
         await markEmailProcessed(job.messageId, job.source, result?.reservationId);
+        for (const supersededJob of job.supersededConfirmationJobs ?? []) {
+          await markEmailProcessed(supersededJob.messageId, supersededJob.source, result?.reservationId);
+          state.supersededConfirmationIds.delete(supersededJob.messageId);
+          console.log(
+            `[RPAQueue] Marked superseded confirmation as processed after cancellation: ${supersededJob.messageId}`,
+          );
+        }
         state.failedUntil.delete(job.messageId);
         state.failureCounts.delete(job.messageId);
         state.manualCheckIds.delete(job.messageId);
@@ -246,6 +309,7 @@ async function drainRpaEmailQueue() {
         }
       } finally {
         state.activeIds.delete(job.messageId);
+        state.currentJob = undefined;
       }
     }
   } finally {
@@ -308,7 +372,12 @@ export function getRpaQueueStatus() {
   const state = getState();
   return {
     queued: state.queue.length,
-    activeOrCoolingDown: state.activeIds.size + state.failedUntil.size + state.manualCheckIds.size + state.retryTimers.size,
+    activeOrCoolingDown:
+      state.activeIds.size
+      + state.failedUntil.size
+      + state.manualCheckIds.size
+      + state.retryTimers.size
+      + state.supersededConfirmationIds.size,
     running: state.running,
     slotRecheckRunning: state.slotRecheckRunning,
     naverStatusReconcileRunning: state.naverStatusReconcileRunning,
