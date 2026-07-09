@@ -40,6 +40,23 @@ export async function PATCH(
     if (status !== undefined) updateData.status = status; // CONFIRMED ↔ CANCELLED (취소 되살리기 등)
     if (isNoShow !== undefined) updateData.isNoShow = Boolean(isNoShow); // 노쇼 표기 (취소의 하위 구분)
 
+    const notificationRelevantChanged =
+      customerName !== undefined ||
+      phone !== undefined ||
+      startTime !== undefined ||
+      endTime !== undefined ||
+      roomName !== undefined;
+    const nextStartTime = startTime !== undefined ? new Date(startTime) : existing.startTime;
+    const nextStatus = status !== undefined ? status : existing.status;
+
+    if (notificationRelevantChanged && nextStatus === "CONFIRMED" && nextStartTime.getTime() > Date.now()) {
+      updateData.notified = false;
+      updateData.notifiedAt = null;
+      updateData.notificationStatus = "PENDING";
+      updateData.notificationChannel = null;
+      updateData.notificationError = null;
+    }
+
     // Prepare usage data update
     if (headCount !== undefined || reservedHeadCount !== undefined || coffeeCount !== undefined || purpose !== undefined || detail !== undefined || extraPrice !== undefined || isExtraPaid !== undefined || extraPaymentMethod !== undefined || extraTime !== undefined) {
       if (existing.usageLog) {

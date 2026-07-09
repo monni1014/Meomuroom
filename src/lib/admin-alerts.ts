@@ -76,3 +76,10 @@ export async function resolveAdminAlertsByType(type: string) {
     data: { resolved: true },
   });
 }
+
+export async function resolveAdminAlertByDedupeKey(dedupeKey: string) {
+  await prisma.adminAlert.updateMany({
+    where: { dedupeKey, resolved: false },
+    data: { resolved: true },
+  });
+}

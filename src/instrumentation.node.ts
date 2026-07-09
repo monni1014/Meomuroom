@@ -7,10 +7,12 @@ export async function registerNodeInstrumentation() {
   const { syncEmails } = await import("@/lib/email-sync");
   const { enqueueNaverStatusReconcile } = await import("@/lib/rpa-job-queue");
   const { checkIproyalTrafficAndAlert } = await import("@/lib/iproyal-traffic");
+  const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
 
   let running = false;
   let proxyTrafficRunning = false;
   let naverStatusReconcileRunning = false;
+  let notificationRunning = false;
 
   async function runEmailSync(label: string) {
     if (running) {
@@ -67,6 +69,27 @@ export async function registerNodeInstrumentation() {
     }
   }
 
+  async function runReservationNotifications(label: string) {
+    if (notificationRunning) {
+      console.log(`[Cron] Previous reservation notification check is still running. Skipping ${label}.`);
+      return;
+    }
+
+    notificationRunning = true;
+    try {
+      const result = await sendDueReservationReminders();
+      if (result.checkedCount > 0) {
+        console.log(
+          `[Cron] Reservation notifications done (${label}): checked ${result.checkedCount}, sent ${result.sentCount}, dry-run ${result.dryRunCount}, failed ${result.failedCount}`,
+        );
+      }
+    } catch (error) {
+      console.error(`[Cron] Reservation notification check failed (${label}):`, error);
+    } finally {
+      notificationRunning = false;
+    }
+  }
+
   setTimeout(() => {
     void runEmailSync("startup");
   }, 0);
@@ -74,6 +97,10 @@ export async function registerNodeInstrumentation() {
   setTimeout(() => {
     void runProxyTrafficCheck("startup");
   }, 10_000);
+
+  setTimeout(() => {
+    void runReservationNotifications("startup");
+  }, 15_000);
 
   schedule("*/30 * * * * *", async () => {
     await runEmailSync("cron");
@@ -83,6 +110,10 @@ export async function registerNodeInstrumentation() {
     await runProxyTrafficCheck("cron");
   });
 
+  schedule("* * * * *", async () => {
+    await runReservationNotifications("cron");
+  });
+
   schedule("0 10,22 * * *", async () => {
     await runNaverStatusReconcile("cron");
   }, {
@@ -90,6 +121,7 @@ export async function registerNodeInstrumentation() {
   });
 
   console.log("[Cron] Email auto sync started (30 second interval)");
+  console.log("[Cron] Reservation notification monitor started (1 minute interval)");
   console.log("[Cron] IPRoyal traffic monitor started (10 minute interval)");
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
 }

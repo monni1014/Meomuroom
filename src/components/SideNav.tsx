@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Calendar, Home, ClipboardList, BarChart3, Building2, Table2, Radar, Wifi } from "lucide-react";
+import { Calendar, Home, ClipboardList, BarChart3, Building2, Table2, Radar, Wifi, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { name: "월간표", href: "/monthly-table", icon: Table2 },
   { name: "경쟁사 현황", href: "/competitors", icon: Radar },
   { name: "통계", href: "/analytics", icon: BarChart3 },
+  { name: "설정", href: "/settings", icon: Settings },
 ];
 
 interface ProxyTrafficStatus {

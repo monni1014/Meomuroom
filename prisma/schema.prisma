@@ -17,6 +17,10 @@ model Reservation {
   endTime      DateTime
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+  notifiedAt   DateTime?
+  notificationStatus String @default("PENDING") // "PENDING" | "SENT" | "FAILED" | "DRY_RUN"
+  notificationChannel String?
+  notificationError String?
   notified     Boolean   @default(false) // 예약 2시간 전 알림 발송 여부
   price        Int       @default(0)     // 최종 매출액 (쿠폰 할인 적용 후)
   discount     Int       @default(0)     // 사용한 쿠폰/할인 금액 (원가 - 최종가)
@@ -72,6 +76,15 @@ model ManualTableCell {
 
   @@unique([tableId, sectionId, year, month, day, cellKey])
   @@index([tableId, sectionId, year, month])
+}
+
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  roomName  String   @unique
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model AdminAlert {

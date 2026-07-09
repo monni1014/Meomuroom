@@ -83,8 +83,23 @@ function countsAsTime(reservation: Reservation) {
   return reservation.status !== "CANCELLED" || reservation.isNoShow;
 }
 
+function displayPriority(reservation: Reservation) {
+  if (reservation.status !== "CANCELLED") return 0;
+  if (reservation.isNoShow) return 1;
+  if (reservation.price > 0) return 2;
+  return 3;
+}
+
 function overlappingReservations(reservations: Reservation[], hour: number) {
   return reservations.filter((reservation) => startHour(reservation) < hour + 1 && endHour(reservation) > hour);
+}
+
+function overlappingReservationsForCell(reservations: Reservation[], hour: number) {
+  return overlappingReservations(reservations, hour).sort((a, b) => {
+    const priority = displayPriority(a) - displayPriority(b);
+    if (priority !== 0) return priority;
+    return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+  });
 }
 
 function reservationSlots(reservation: Reservation) {
@@ -161,6 +176,24 @@ function cellStyle(reservation: Reservation, isWeekend: boolean) {
 
 function formatNumber(value: number) {
   return value > 0 ? value.toLocaleString() : "-";
+}
+
+function reservationStatusLabel(reservation: Reservation) {
+  if (reservation.status !== "CANCELLED") return "확정";
+  return reservation.isNoShow ? "노쇼" : "취소";
+}
+
+function reservationTooltipLabel(reservation: Reservation) {
+  const status = reservationStatusLabel(reservation);
+  const time = `${format(new Date(reservation.startTime), "HH:mm")}-${format(new Date(reservation.endTime), "HH:mm")}`;
+  const price = reservation.price > 0 ? ` ${reservation.price.toLocaleString()}원` : "";
+  return `[${status}] ${reservation.customerName || "이름 없음"} ${time}${price}`;
+}
+
+function revenueTooltip(reservations: Reservation[]) {
+  const paidItems = reservations.filter((reservation) => reservation.price > 0);
+  if (paidItems.length === 0) return "";
+  return paidItems.map(reservationTooltipLabel).join("\n");
 }
 
 function buildYearOptions(currentYear: number, reservations: Reservation[]) {
@@ -453,6 +486,7 @@ export default function MonthlyTableView() {
                           .filter(countsAsTime)
                           .reduce((sum, reservation) => sum + durationHours(reservation), 0);
                         const dayRevenue = dayReservations.reduce((sum, reservation) => sum + reservation.price, 0);
+                        const dayRevenueTitle = revenueTooltip(dayReservations);
                         const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 
                         return (
@@ -464,7 +498,7 @@ export default function MonthlyTableView() {
                               {dayHours > 0 ? Number(dayHours.toFixed(1)) : "-"}
                             </td>
                             {HOURS.map((hour) => {
-                              const cellReservations = overlappingReservations(dayReservations, hour);
+                              const cellReservations = overlappingReservationsForCell(dayReservations, hour);
                               const primary = cellReservations[0];
                               const label = primary ? cellLabel(primary, hour) : "";
                               const editableKey = `hour-${hour}`;
@@ -499,9 +533,9 @@ export default function MonthlyTableView() {
                                   title={
                                     primary
                                       ? cellReservations
-                                          .map((reservation) => `${reservation.customerName || ""} ${format(new Date(reservation.startTime), "HH:mm")}-${format(new Date(reservation.endTime), "HH:mm")}`)
+                                          .map(reservationTooltipLabel)
                                           .join(" / ")
-                                    : ""
+                                      : ""
                                   }
                                 >
                                   <EditableTableCellInput
@@ -528,7 +562,10 @@ export default function MonthlyTableView() {
                                 </td>
                               );
                             })}
-                            <td className="sticky right-0 z-10 border border-slate-300 border-l-4 border-l-slate-700 bg-white px-1 py-0.5 text-center align-middle font-bold text-slate-900 group-hover:bg-slate-50">
+                            <td
+                              className="sticky right-0 z-10 border border-slate-300 border-l-4 border-l-slate-700 bg-white px-1 py-0.5 text-center align-middle font-bold text-slate-900 group-hover:bg-slate-50"
+                              title={dayRevenueTitle}
+                            >
                               {formatNumber(dayRevenue)}
                             </td>
                           </tr>
