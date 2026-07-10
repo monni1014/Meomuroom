@@ -7,9 +7,18 @@ import { MANUAL_CELL_COLORS, PaintSelection } from "@/lib/manual-table-colors";
 interface TablePaintToolbarProps {
   selected: PaintSelection;
   onSelect: (selection: PaintSelection) => void;
+  clearLabel?: string;
+  clearTitle?: string;
+  showColorLabels?: boolean;
 }
 
-export function TablePaintToolbar({ selected, onSelect }: TablePaintToolbarProps) {
+export function TablePaintToolbar({
+  selected,
+  onSelect,
+  clearLabel = "색 지우기",
+  clearTitle,
+  showColorLabels = false,
+}: TablePaintToolbarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <button
@@ -29,6 +38,7 @@ export function TablePaintToolbar({ selected, onSelect }: TablePaintToolbarProps
       <button
         type="button"
         data-paint-tool="clear"
+        title={clearTitle}
         onClick={() => onSelect("clear")}
         className={cn(
           "inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-black transition active:scale-95",
@@ -38,7 +48,7 @@ export function TablePaintToolbar({ selected, onSelect }: TablePaintToolbarProps
         )}
       >
         <Eraser className="h-3.5 w-3.5" />
-        색 지우기
+        {clearLabel}
       </button>
       <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-1.5">
         {MANUAL_CELL_COLORS.map((color) => (
@@ -50,11 +60,14 @@ export function TablePaintToolbar({ selected, onSelect }: TablePaintToolbarProps
             title={color.label}
             onClick={() => onSelect(color.key)}
             className={cn(
-              "h-6 w-6 rounded-lg border border-slate-300 transition active:scale-95",
+              "inline-flex h-7 items-center rounded-md border border-slate-300 transition active:scale-95",
+              showColorLabels ? "gap-1.5 px-2 text-[11px] font-bold text-slate-700" : "w-7 justify-center",
               color.swatchClass,
               selected === color.key && "ring-2 ring-slate-900 ring-offset-2"
             )}
-          />
+          >
+            {showColorLabels && color.label}
+          </button>
         ))}
       </div>
     </div>

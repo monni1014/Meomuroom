@@ -20,7 +20,10 @@ export type SolapiServiceStatus = {
   configured: boolean;
   senderNumber: string | null;
   balance: number | null;
+  balanceOnly: number | null;
+  deposit: number | null;
   point: number | null;
+  totalBalance: number | null;
   minimumCash: number | null;
   lowBalanceAlert: unknown | null;
   sender: SolapiSenderStatus | null;
@@ -51,6 +54,16 @@ function env(name: string) {
 
 function normalizePhone(value: string | null | undefined) {
   return (value || "").replace(/\D/g, "");
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function sumKnown(...values: Array<number | null>) {
+  const known = values.filter((value): value is number => value !== null);
+  if (known.length === 0) return null;
+  return known.reduce((sum, value) => sum + value, 0);
 }
 
 function buildSolapiAuthHeader(apiKey: string, apiSecret: string) {
@@ -107,7 +120,10 @@ export async function getSolapiServiceStatus(): Promise<SolapiServiceStatus> {
       configured: false,
       senderNumber,
       balance: null,
+      balanceOnly: null,
+      deposit: null,
       point: null,
+      totalBalance: null,
       minimumCash: null,
       lowBalanceAlert: null,
       sender: null,
@@ -129,12 +145,22 @@ export async function getSolapiServiceStatus(): Promise<SolapiServiceStatus> {
       ?.map(toSenderStatus)
       .filter((item): item is SolapiSenderStatus => item !== null) || [];
     const sender = senderList.find((item) => item.phoneNumber === normalizedSender) || senderList[0] || null;
+    const balanceOnly = finiteNumber(balance.balanceOnly);
+    const deposit = finiteNumber(balance.deposit);
+    const point = finiteNumber(balance.point);
+    const apiBalance = finiteNumber(balance.balance);
+    const totalBalance = balanceOnly !== null || deposit !== null
+      ? sumKnown(balanceOnly, deposit, point)
+      : sumKnown(apiBalance, point);
 
     return {
       configured: true,
       senderNumber,
-      balance: Number.isFinite(balance.balance) ? balance.balance : null,
-      point: Number.isFinite(balance.point) ? balance.point : null,
+      balance: apiBalance,
+      balanceOnly,
+      deposit,
+      point,
+      totalBalance,
       minimumCash: typeof balance.minimumCash === "number" ? balance.minimumCash : null,
       lowBalanceAlert: balance.lowBalanceAlert || null,
       sender,
@@ -147,7 +173,10 @@ export async function getSolapiServiceStatus(): Promise<SolapiServiceStatus> {
       configured: true,
       senderNumber,
       balance: null,
+      balanceOnly: null,
+      deposit: null,
       point: null,
+      totalBalance: null,
       minimumCash: null,
       lowBalanceAlert: null,
       sender: null,

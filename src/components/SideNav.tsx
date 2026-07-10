@@ -127,7 +127,7 @@ export function SideNav() {
                 strokeWidth={isActive ? 2.5 : 2}
               />
               <span className={cn(
-                "text-[10px] md:text-sm",
+                "whitespace-nowrap text-[9px] sm:text-[10px] md:text-sm",
                 isActive ? "font-semibold" : "font-medium"
               )}>
                 {item.name}

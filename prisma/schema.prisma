@@ -7,33 +7,33 @@ datasource db {
 }
 
 model Reservation {
-  id           String    @id @default(cuid())
-  source       String    // "naver", "spacecloud", "manual"
-  roomName     String    @default("머무룸1")
-  customerName String?
-  customerType String    @default("UNSPECIFIED") // "UNSPECIFIED" | "PERSONAL" | "CORPORATE"
-  phone        String?
-  startTime    DateTime
-  endTime      DateTime
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  notifiedAt   DateTime?
-  notificationStatus String @default("PENDING") // "PENDING" | "SENT" | "FAILED" | "DRY_RUN"
+  id                  String    @id @default(cuid())
+  source              String // "naver", "spacecloud", "manual"
+  roomName            String    @default("머무룸1")
+  customerName        String?
+  customerType        String    @default("UNSPECIFIED") // "UNSPECIFIED" | "PERSONAL" | "CORPORATE"
+  phone               String?
+  startTime           DateTime
+  endTime             DateTime
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  notifiedAt          DateTime?
+  notificationStatus  String    @default("PENDING") // "PENDING" | "SENT" | "FAILED" | "DRY_RUN"
   notificationChannel String?
-  notificationError String?
-  notified     Boolean   @default(false) // 예약 2시간 전 알림 발송 여부
-  price        Int       @default(0)     // 최종 매출액 (쿠폰 할인 적용 후)
-  discount     Int       @default(0)     // 사용한 쿠폰/할인 금액 (원가 - 최종가)
-  status       String    @default("CONFIRMED") // "CONFIRMED" | "CANCELLED"
-  isNoShow     Boolean   @default(false)        // 취소 중에서도 노쇼인 경우 (수수료/집계는 취소와 동일, 표기만 구분)
-  paymentMethod String?  @default("온라인")     // "현장카드" | "계좌이체" | "온라인"
-  isPaid        Boolean  @default(true)         // 결제 완료 여부 (이체 등 미결제는 false)
-  emailId      String?   @unique
-  memo         String?   // 자유 기입 비고란
-  complaints   String?   // 고객 불만사항 (CS 관리용 별도 항목)
-  isCleanUpBad Boolean  @default(false)   // 정리 상태 불량 여부 (블랙리스트 기능)
+  notificationError   String?
+  notified            Boolean   @default(false) // 예약 2시간 전 알림 발송 여부
+  price               Int       @default(0) // 최종 매출액 (쿠폰 할인 적용 후)
+  discount            Int       @default(0) // 사용한 쿠폰/할인 금액 (원가 - 최종가)
+  status              String    @default("CONFIRMED") // "CONFIRMED" | "CANCELLED"
+  isNoShow            Boolean   @default(false) // 취소 중에서도 노쇼인 경우 (수수료/집계는 취소와 동일, 표기만 구분)
+  paymentMethod       String?   @default("온라인") // "현장카드" | "계좌이체" | "온라인"
+  isPaid              Boolean   @default(true) // 결제 완료 여부 (이체 등 미결제는 false)
+  emailId             String?   @unique
+  memo                String? // 자유 기입 비고란
+  complaints          String? // 고객 불만사항 (CS 관리용 별도 항목)
+  isCleanUpBad        Boolean   @default(false) // 정리 상태 불량 여부 (블랙리스트 기능)
 
-  usageLog     UsageLog?
+  usageLog UsageLog?
 }
 
 model ProcessedEmail {
@@ -45,20 +45,20 @@ model ProcessedEmail {
 }
 
 model UsageLog {
-  id            String      @id @default(cuid())
-  reservationId String      @unique
-  reservation   Reservation @relation(fields: [reservationId], references: [id])
-  headCount         Int     @default(0)   // 실제 이용인원 (CCTV 관찰 기준, 분석의 기준값)
-  reservedHeadCount Int     @default(0)   // 예약 이용인원 (메일 자동, 플랫폼 최소인원 영향)
-  coffeeCount   Int         @default(0)
-  purpose       String?     // 대분류(고정): 교육/보드게임/사적모임/촬영/회사회의/기타 (null=미입력)
-  detail        String?     // 세부내용(자유입력): "보험교육", "유튜브 촬영" 등
-  extraTime     Int         @default(0)   // 추가된 시간 (시간 단위)
-  extraPrice    Int?        // 확정된 추가 결제 금액
-  isExtraPaid   Boolean     @default(false) // 추가 금액 결제 여부
+  id                 String      @id @default(cuid())
+  reservationId      String      @unique
+  reservation        Reservation @relation(fields: [reservationId], references: [id])
+  headCount          Int         @default(0) // 실제 이용인원 (CCTV 관찰 기준, 분석의 기준값)
+  reservedHeadCount  Int         @default(0) // 예약 이용인원 (메일 자동, 플랫폼 최소인원 영향)
+  coffeeCount        Int         @default(0)
+  purpose            String? // 대분류(고정): 교육/보드게임/사적모임/촬영/회사회의/기타 (null=미입력)
+  detail             String? // 세부내용(자유입력): "보험교육", "유튜브 촬영" 등
+  extraTime          Int         @default(0) // 추가된 시간 (시간 단위)
+  extraPrice         Int? // 확정된 추가 결제 금액
+  isExtraPaid        Boolean     @default(false) // 추가 금액 결제 여부
   extraPaymentMethod String? // 추가 금액 결제 수단 (예: 계좌이체, 카드결제)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 }
 
 model ManualTableCell {
@@ -108,8 +108,79 @@ model ProxyTrafficCheck {
   availableGb Float
   warningGb   Float
   criticalGb  Float
-  rawPayload   String?
+  rawPayload  String?
   checkedAt   DateTime @default(now())
 
   @@index([provider, checkedAt])
+}
+
+model CompetitorScan {
+  id             String    @id @default(cuid())
+  mode           String
+  status         String    @default("RUNNING") // RUNNING | COMPLETED | PARTIAL | FAILED
+  targetStartKey String
+  targetEndKey   String
+  checkedSlots   Int       @default(0)
+  changedSlots   Int       @default(0)
+  error          String?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+
+  @@index([status, startedAt])
+  @@index([mode, startedAt])
+}
+
+model CompetitorSlot {
+  id                   String    @id @default(cuid())
+  competitorId         String
+  dateKey              String
+  hour                 Int
+  state                String // AVAILABLE | BOOKED | POLICY_CLOSED | UNKNOWN | NOT_OFFERED
+  observedState        String
+  firstObservedAt      DateTime  @default(now())
+  lastCheckedAt        DateTime  @default(now())
+  lastChangedAt        DateTime  @default(now())
+  lastBookedAt         DateTime?
+  lastReleasedAt       DateTime?
+  lastScanId           String?
+  pendingState         String?
+  pendingCount         Int       @default(0)
+  pendingSince         DateTime?
+  opportunityLostRooms String?
+
+  @@unique([competitorId, dateKey, hour])
+  @@index([competitorId, dateKey])
+  @@index([dateKey, state])
+}
+
+model CompetitorSlotObservation {
+  id             String   @id @default(cuid())
+  scanId         String
+  competitorId   String
+  dateKey        String
+  hour           Int
+  observedState  String
+  effectiveState String
+  reason         String?
+  checkedAt      DateTime @default(now())
+
+  @@index([scanId])
+  @@index([competitorId, dateKey, checkedAt])
+}
+
+model CompetitorSlotEvent {
+  id                   String   @id @default(cuid())
+  scanId               String
+  competitorId         String
+  dateKey              String
+  hour                 Int
+  eventType            String // BOOKED | CANCELLED
+  previousState        String?
+  newState             String
+  cancellationFeeRate  Int?
+  opportunityLostRooms String?
+  occurredAt           DateTime @default(now())
+
+  @@index([competitorId, dateKey, occurredAt])
+  @@index([eventType, occurredAt])
 }

@@ -688,11 +688,11 @@ export default function UsagePage() {
             </div>
           </div>
 
-          {/* 제공된 커피 */}
+          {/* 구매한 커피 */}
           <div className="space-y-3">
             <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
               <Coffee className="w-4 h-4 text-amber-500" />
-              제공된 커피
+              구매한 커피
             </label>
             <div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-200">
               <button
@@ -999,7 +999,7 @@ export default function UsagePage() {
                         const r = log.usageLog?.reservedHeadCount ?? 0;
                         const h = log.usageLog?.headCount ?? 0;
                         return r > 0 && r !== h ? <span className="text-slate-400 font-medium"> (예약 {r})</span> : null;
-                      })()} · 커피{" "}
+                      })()} · 구매 커피{" "}
                       <span className="text-slate-800">{log.usageLog?.coffeeCount || 0}잔</span> · 목적{" "}
                       <span className="text-indigo-600 font-bold">#{log.usageLog?.purpose || UNCATEGORIZED_LABEL}</span>
                       {log.usageLog?.detail && (

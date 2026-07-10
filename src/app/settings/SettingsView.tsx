@@ -274,9 +274,9 @@ export default function SettingsView({
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-bold text-slate-500">솔라피 잔액</p>
+                  <p className="text-sm font-bold text-slate-500">솔라피 총 보유액</p>
                   <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
-                    {formatWon(solapiStatus.balance)}
+                    {formatWon(solapiStatus.totalBalance)}
                   </p>
                 </div>
                 <div className="rounded-full bg-emerald-50 p-3 text-emerald-600">
@@ -284,8 +284,10 @@ export default function SettingsView({
                 </div>
               </div>
               <div className="mt-5 space-y-1 text-sm">
+                <InfoRow label="잔액" value={formatWon(solapiStatus.balanceOnly ?? solapiStatus.balance)} />
+                <InfoRow label="예치금" value={formatWon(solapiStatus.deposit)} />
                 <InfoRow label="포인트" value={formatWon(solapiStatus.point)} />
-                <InfoRow label="최소 캐시" value={formatWon(solapiStatus.minimumCash)} />
+                <InfoRow label="자동충전 기준" value={formatWon(solapiStatus.minimumCash)} />
               </div>
             </div>
 
@@ -431,6 +433,7 @@ export default function SettingsView({
               <p className="rounded-lg bg-slate-50 px-3 py-3">네이버 예약 확정: 상세정보 확인 후 슬롯 차단</p>
               <p className="rounded-lg bg-slate-50 px-3 py-3">네이버 예약 취소: 취소 처리 후 슬롯 오픈</p>
               <p className="rounded-lg bg-slate-50 px-3 py-3">스클 예약 확정: 상세정보 확인 후 네이버 슬롯 차단</p>
+              <p className="rounded-lg bg-slate-50 px-3 py-3">스클 예약 취소: 호스트센터에서 수수료 확인 후 네이버 슬롯 오픈</p>
               <p className="rounded-lg bg-slate-50 px-3 py-3">실패/불확실 상태: 조작 중단 후 확인필요 알림</p>
             </div>
           </section>

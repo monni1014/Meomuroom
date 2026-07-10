@@ -10,7 +10,7 @@ async function main() {
   console.log(`Testing proxy: ${proxyProtocol}://${proxyHost}:${proxyPort}`);
   console.log(`Headless: ${headless ? "yes" : "no"}`);
 
-  const browser = await launchRpaBrowser({ headless });
+  const browser = await launchRpaBrowser({ headless, forceProxy: true });
 
   try {
     const page = await browser.newPage();

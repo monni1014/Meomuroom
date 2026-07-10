@@ -208,8 +208,8 @@ async function openScheduleTab(page, { url, productName }) {
   throw new Error(`Could not open Naver schedule tab for ${productName}.`);
 }
 
-async function closeSlotPanelIfOpen(page) {
-  const hasOpenPanel = await page.evaluate(() => {
+async function isSlotPanelOpen(page) {
+  return page.evaluate(() => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -225,6 +225,10 @@ async function closeSlotPanelIfOpen(page) {
         && rect.y < 120;
     });
   });
+}
+
+async function closeSlotPanelIfOpen(page) {
+  const hasOpenPanel = await isSlotPanelOpen(page);
 
   if (!hasOpenPanel) return;
 
@@ -641,6 +645,123 @@ async function clickHourToggle(page, hour, mode) {
   return true;
 }
 
+async function readHourToggleState(page, hour) {
+  const label = `${String(hour).padStart(2, "0")}:00`;
+  const scrolled = await page.evaluate((targetLabel) => {
+    const candidates = [...document.querySelectorAll("body *")]
+      .map((element) => ({
+        element,
+        text: (element.textContent || "").replace(/\s+/g, " ").trim(),
+        rect: element.getBoundingClientRect(),
+      }))
+      .filter(({ text, rect }) =>
+        text === targetLabel
+        && rect.x > window.innerWidth * 0.35
+        && rect.x < window.innerWidth * 0.9
+      )
+      .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+
+    const target = candidates[0]?.element;
+    if (!target) return false;
+
+    target.scrollIntoView({ block: "center", inline: "nearest" });
+    return true;
+  }, label);
+
+  if (scrolled) {
+    await quickSlotDelay(page, `after verify scroll to ${label}`, 120, 320);
+  }
+
+  return page.evaluate((targetLabel) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden"
+        && style.display !== "none"
+        && rect.width > 0
+        && rect.height > 0
+        && rect.y >= 0
+        && rect.y <= window.innerHeight;
+    }
+
+    function parseRgb(color) {
+      const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (!match) return null;
+      return {
+        r: Number(match[1]),
+        g: Number(match[2]),
+        b: Number(match[3]),
+      };
+    }
+
+    function elementColorState(element) {
+      const rect = element.getBoundingClientRect();
+      const candidates = [element, ...element.querySelectorAll("*")]
+        .map((candidate) => {
+          const candidateRect = candidate.getBoundingClientRect();
+          const style = window.getComputedStyle(candidate);
+          const rgb = parseRgb(style.backgroundColor);
+          return { rect: candidateRect, rgb };
+        })
+        .filter(({ rect: candidateRect, rgb }) => {
+          if (!rgb) return false;
+          if (candidateRect.width < 28 || candidateRect.width > 90) return false;
+          if (candidateRect.height < 16 || candidateRect.height > 48) return false;
+          const sameCenterY = Math.abs((candidateRect.y + candidateRect.height / 2) - (rect.y + rect.height / 2)) < 4;
+          return sameCenterY;
+        })
+        .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height));
+
+      const target = candidates[0];
+      if (!target) return null;
+
+      const { rgb } = target;
+      if (rgb.g > 130 && rgb.r < 100 && rgb.b < 140) return "open";
+      if (Math.abs(rgb.r - rgb.g) < 35 && Math.abs(rgb.g - rgb.b) < 35 && rgb.r > 110 && rgb.r < 230) {
+        return "close";
+      }
+
+      return null;
+    }
+
+    const elements = [...document.querySelectorAll("body *")].filter(visible);
+    const labels = elements
+      .filter((element) => (element.textContent || "").trim() === targetLabel)
+      .map((element) => element.getBoundingClientRect())
+      .filter((rect) => rect.x > window.innerWidth * 0.35 && rect.x < window.innerWidth * 0.9)
+      .sort((a, b) => (a.width * a.height) - (b.width * b.height));
+
+    const timeRect = labels[0];
+    if (!timeRect) return null;
+
+    const rowCenterY = timeRect.y + timeRect.height / 2;
+    const toggles = elements
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const state = elementColorState(element);
+        return { rect, state };
+      })
+      .filter(({ rect, state }) => {
+        const sameRow = Math.abs((rect.y + rect.height / 2) - rowCenterY) < 18;
+        const rightSide = rect.x > timeRect.x + timeRect.width;
+        const switchSize = rect.width >= 32 && rect.width <= 90 && rect.height >= 18 && rect.height <= 48;
+        return sameRow && rightSide && switchSize && state;
+      })
+      .sort((a, b) => a.rect.x - b.rect.x);
+
+    return toggles[0]?.state || null;
+  }, label);
+}
+
+async function assertPanelHoursReadOnly(page, startHour, endHour, mode) {
+  for (let hour = startHour; hour < endHour; hour += 1) {
+    const actualState = await readHourToggleState(page, hour);
+    if (actualState !== mode) {
+      throw new Error(`Post-save verification failed: ${String(hour).padStart(2, "0")}:00 is ${actualState || "unknown"}, expected ${mode}.`);
+    }
+  }
+}
+
 async function assertHourToggleState(page, hour, mode) {
   const label = `${String(hour).padStart(2, "0")}:00`;
   let actualState = null;
@@ -788,10 +909,45 @@ async function clickSlotPanelSave(page) {
     throw new Error("Could not find slot panel save button.");
   }
 
+  await buttonElement.scrollIntoViewIfNeeded();
   await quickSlotDelay(page, "before save button", 220, 520);
   await humanClickElement(page, buttonElement, "slot panel save");
   await quickSlotDelay(page, "after save button", 700, 1500);
+
+  const closed = await page.waitForFunction(() => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    return ![...document.querySelectorAll("body *")].some((element) => {
+      const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+      const rect = element.getBoundingClientRect();
+      return visible(element)
+        && /^\d{2}\.\d{1,2}\.\d{1,2}\([^)]+\)$/.test(text)
+        && rect.x > window.innerWidth * 0.25
+        && rect.y < 120;
+    });
+  }, null, { timeout: 8_000 }).then(() => true).catch(() => false);
+
+  if (!closed) {
+    await saveScreenshot(page, "naver-slots-save-not-closed");
+    throw new Error("Slot save did not close the panel. Refusing to mark the slot operation as successful.");
+  }
+
   console.log("Slot panel saved.");
+}
+
+async function verifySavedSlotState(page, { url, productName, dateValue, startHour, endHour, mode }) {
+  console.log("Verify saved slot state from fresh schedule view.");
+  await openScheduleTab(page, { url, productName });
+  const targetLabel = await navigateToDate(page, dateValue);
+  await openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour);
+  await saveScreenshot(page, "naver-slots-07-verify-panel");
+  await assertPanelHoursReadOnly(page, startHour, endHour, mode);
+  await page.keyboard.press("Escape");
+  await quickSlotDelay(page, "after verification escape", 250, 600);
 }
 
 async function main() {
@@ -873,6 +1029,8 @@ async function main() {
       console.log(`All target slots are already ${mode}. Skip save.`);
       await saveScreenshot(page, "naver-slots-06-already-target-state");
     }
+
+    await verifySavedSlotState(page, { url, productName, dateValue, startHour, endHour, mode });
     console.log(`\nDone: room ${room}, ${dateValue}, ${args.start}-${args.end}, mode=${mode}`);
   } catch (error) {
     console.error("Naver slot RPA failed:", error instanceof Error ? error.message : error);

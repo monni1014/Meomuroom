@@ -4,6 +4,7 @@ import { parseArgs, parseHour, parseRoom, requiredArg } from "./lib/cli.mjs";
 import { optionalEnv } from "./lib/env.mjs";
 import { humanClick, humanClickElement, humanDelay } from "./lib/human.mjs";
 import { spaceCloudStorageStatePath } from "./lib/paths.mjs";
+import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
 
 const TEXT = {
@@ -52,6 +53,7 @@ function usage() {
     "  --booking-number=NaverBookingNumber",
     "  --customer-name=Name  optional, used as SpaceCloud external reservation name",
     "  --phone=010-0000-0000 optional, used as SpaceCloud external reservation contact",
+    "  --allow-still-blocked-after-delete optional, treat open as success when another reservation still blocks the slot",
     "  --apply       actually add/delete the SpaceCloud external reservation.",
   ].join("\n");
 }
@@ -97,10 +99,6 @@ function formatLooseDetailDate(dateValue) {
 
 function hourLabel(hour) {
   return `${hour}\uc2dc`;
-}
-
-function shortTimeLabel(startHour, endHour) {
-  return `\ucd94 ${startHour}~${endHour}`;
 }
 
 function parseVisibleMonth(text) {
@@ -382,7 +380,7 @@ async function openReservationList(page) {
 }
 
 async function openCalendarView(page) {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     if (await isCalendarView(page)) {
       await humanDelay(page, "after SpaceCloud calendar view open", 1600, 3600);
       return;
@@ -402,7 +400,13 @@ async function openCalendarView(page) {
       continue;
     }
 
-    await humanDelay(page, "wait for SpaceCloud reservation list/calendar", 1200, 3000);
+    if (attempt === 3) {
+      await page.reload({ timeout: 60_000, waitUntil: "domcontentloaded" });
+      await humanDelay(page, "after SpaceCloud calendar recovery reload", 1600, 3400);
+      await assertLoggedIn(page);
+    } else {
+      await humanDelay(page, "wait for SpaceCloud reservation list/calendar", 1200, 3000);
+    }
   }
 
   throw new Error("Could not open SpaceCloud calendar view.");
@@ -411,11 +415,11 @@ async function openCalendarView(page) {
 async function isCalendarView(page) {
   return page.evaluate((addReservationText) => {
     const text = document.body?.innerText || "";
+    const weekdayCount = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"]
+      .filter((weekday) => text.includes(weekday)).length;
     return text.includes(addReservationText)
       && /\b20\d{2}\.\d{1,2}\b/.test(text)
-      && text.includes("\uc77c\uc694\uc77c")
-      && text.includes("\uc6d4\uc694\uc77c")
-      && text.includes("\ud654\uc694\uc77c");
+      && weekdayCount >= 2;
   }, TEXT.addReservation).catch(() => false);
 }
 
@@ -691,6 +695,40 @@ async function navigateToMonth(page, dateValue) {
   }
 
   throw new Error(`Could not navigate SpaceCloud calendar to ${targetKey}.`);
+}
+
+async function isCalendarDayVisible(page, dateValue) {
+  const { day } = parseDateValue(dateValue);
+  const dayText = String(day).padStart(2, "0");
+  const altDayText = String(day);
+
+  return page.evaluate(({ dayText, altDayText }) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    return [...document.querySelectorAll("body *")]
+      .filter(visible)
+      .some((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        const hasDay = new RegExp(`^\\s*(${dayText}|${altDayText})(?!\\d)`).test(text);
+        return hasDay && rect.width >= 120 && rect.height >= 80 && rect.y > 420;
+      });
+  }, { dayText, altDayText }).catch(() => false);
+}
+
+async function waitForCalendarDay(page, dateValue, contextLabel) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    if (await isCalendarDayVisible(page, dateValue)) return;
+    await humanDelay(page, `wait for SpaceCloud ${contextLabel} calendar data`, 650, 1100);
+  }
+
+  await saveScreenshot(page, `spacecloud-external-${contextLabel}-calendar-not-ready`);
+  throw new Error(`SpaceCloud calendar data did not load for ${dateValue} before ${contextLabel}.`);
 }
 
 async function selectCalendarDay(page, dateValue) {
@@ -1505,7 +1543,130 @@ async function ensureNotFullDay(page) {
   await humanDelay(page, "after full-day safety check", 220, 520);
 }
 
-async function addExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply, skipCalendarPrecheck = false }) {
+async function reopenCalendarForVerification(page, { room, dateValue, contextLabel }) {
+  await page.reload({ timeout: 60_000, waitUntil: "domcontentloaded" });
+  await humanDelay(page, `after SpaceCloud reload for ${contextLabel}`, 1200, 2800);
+  await assertLoggedIn(page);
+  await openCalendarView(page);
+  await assertCalendarView(page, contextLabel);
+  await selectProduct(page, room);
+  await assertCalendarView(page, `${contextLabel} month navigation`);
+  await navigateToMonth(page, dateValue);
+  await waitForCalendarDay(page, dateValue, contextLabel);
+}
+
+async function waitForCalendarTimeEntry(page, { dateValue, startHour, endHour }, contextLabel) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const entry = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
+    if (entry) return entry;
+    await humanDelay(page, `wait for SpaceCloud ${contextLabel} time entry`, 650, 1100);
+  }
+
+  return null;
+}
+
+async function waitForExternalReservation(page, options, contextLabel) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const opened = await findAndOpenExternalReservation(page, options);
+    if (opened) return true;
+    await humanDelay(page, `wait for SpaceCloud ${contextLabel} external reservation`, 650, 1100);
+  }
+
+  return false;
+}
+
+async function verifyExternalReservationAdded(page, {
+  room,
+  dateValue,
+  startHour,
+  endHour,
+  marker,
+  customerName,
+  phone,
+}) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await reopenCalendarForVerification(page, {
+      room,
+      dateValue,
+      contextLabel: `external reservation add verification ${attempt}`,
+    });
+
+    const opened = await waitForExternalReservation(page, {
+      dateValue,
+      startHour,
+      endHour,
+      marker,
+      customerName,
+      phone,
+      strictIdentity: true,
+    }, `add verification ${attempt}`);
+
+    if (opened) {
+      await saveScreenshot(page, "spacecloud-external-add-verified");
+      await page.keyboard.press("Escape").catch(() => {});
+      await humanDelay(page, "after verified SpaceCloud external popup escape", 500, 1200);
+      console.log("SpaceCloud external reservation was verified from a freshly loaded calendar.");
+      return;
+    }
+
+    await saveScreenshot(page, `spacecloud-external-add-verification-retry-${attempt}`);
+    if (attempt < 3) {
+      await humanDelay(page, `wait before SpaceCloud add verification retry ${attempt}`, 900, 2000);
+    }
+  }
+
+  await saveScreenshot(page, "spacecloud-external-add-verification-failed");
+  throw new Error(
+    `SpaceCloud external reservation save verification failed: matching reservation was not found after fresh reload ${dateValue} ${startHour}:00-${endHour}:00.`,
+  );
+}
+
+async function verifyTargetPeriodBlocked(page, {
+  room,
+  dateValue,
+  startHour,
+  endHour,
+  marker,
+  customerName,
+  phone,
+}) {
+  await reopenCalendarForVerification(page, {
+    room,
+    dateValue,
+    contextLabel: "existing SpaceCloud block verification",
+  });
+
+  const matchingExternalReservation = await waitForExternalReservation(page, {
+    dateValue,
+    startHour,
+    endHour,
+    marker,
+    customerName,
+    phone,
+    strictIdentity: true,
+  }, "existing block identity verification");
+  if (matchingExternalReservation) {
+    await saveScreenshot(page, "spacecloud-external-existing-block-verified");
+    await page.keyboard.press("Escape").catch(() => {});
+    console.log("SpaceCloud existing target block was verified from a freshly loaded calendar.");
+    return;
+  }
+
+  const blocked = await waitForCalendarTimeEntry(page, { dateValue, startHour, endHour }, "existing block verification");
+  if (!blocked) {
+    await saveScreenshot(page, "spacecloud-external-existing-block-verification-failed");
+    throw new Error(
+      `SpaceCloud reported an existing reservation, but the target period was not blocked after fresh reload ${dateValue} ${startHour}:00-${endHour}:00.`,
+    );
+  }
+
+  await saveScreenshot(page, "spacecloud-external-existing-block-verified");
+  console.log("SpaceCloud existing target block was verified from a freshly loaded calendar.");
+}
+
+async function addExternalReservation(page, { room, dateValue, startHour, endHour, marker, customerName, phone, apply, skipCalendarPrecheck = false }) {
   if (!skipCalendarPrecheck) {
     const alreadyAdded = await findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone });
     if (alreadyAdded) {
@@ -1552,8 +1713,18 @@ async function addExternalReservation(page, { dateValue, startHour, endHour, mar
   } catch (error) {
     const lastErrorBody = page.__spaceCloudLastErrorBody || "";
     if (lastErrorBody.includes("\ud574\ub2f9 \uae30\uac04\uc5d0 \uc774\ubbf8 \uc608\uc57d\uc774 \uc788\uc2b5\ub2c8\ub2e4")) {
-      console.log("SpaceCloud says the target period is already reserved. Treat close as success.");
+      console.log("SpaceCloud says the target period is already reserved. Verify the calendar before treating close as success.");
       await saveScreenshot(page, "spacecloud-external-already-reserved");
+      await page.keyboard.press("Escape").catch(() => {});
+      await verifyTargetPeriodBlocked(page, {
+        room,
+        dateValue,
+        startHour,
+        endHour,
+        marker,
+        customerName,
+        phone,
+      });
       return { ok: true, alreadyClosed: true, dryRun: false };
     }
     throw error;
@@ -1561,16 +1732,33 @@ async function addExternalReservation(page, { dateValue, startHour, endHour, mar
   await humanDelay(page, "after SpaceCloud external save", 900, 2200);
   await saveScreenshot(page, "spacecloud-external-after-add");
 
+  await verifyExternalReservationAdded(page, {
+    room,
+    dateValue,
+    startHour,
+    endHour,
+    marker,
+    customerName,
+    phone,
+  });
+
   return { ok: true, dryRun: false };
 }
 
-async function findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone }) {
+async function findAndOpenExternalReservation(page, {
+  dateValue,
+  startHour,
+  endHour,
+  marker,
+  customerName,
+  phone,
+  strictIdentity = false,
+}) {
   const { day } = parseDateValue(dateValue);
   const dayText = String(day).padStart(2, "0");
   const altDayText = String(day);
-  const timeText = shortTimeLabel(startHour, endHour);
 
-  const candidates = await page.evaluate(({ dayText, altDayText, timeText }) => {
+  const candidates = await page.evaluate(({ dayText, altDayText, startHour, endHour }) => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -1589,6 +1777,12 @@ async function findAndOpenExternalReservation(page, { dateValue, startHour, endH
       return null;
     }
 
+    function matchesTargetTime(text) {
+      const compactText = text.replace(/\s+/g, "");
+      const matches = [...compactText.matchAll(/(?:^|[^0-9])0?(\d{1,2})~0?(\d{1,2})(?:[^0-9]|$)/g)];
+      return matches.some((match) => Number(match[1]) === startHour && Number(match[2]) === endHour);
+    }
+
     const entries = [...document.querySelectorAll("body *")]
       .filter(visible)
       .map((element) => {
@@ -1605,20 +1799,21 @@ async function findAndOpenExternalReservation(page, { dateValue, startHour, endH
         };
       })
       .filter((entry) =>
-        entry.text.includes(timeText)
+        matchesTargetTime(entry.text)
         && entry.inTargetCell
         && entry.y > 420
         && entry.width < 220
         && entry.height < 80
       )
       .sort((a, b) => {
-        const aExact = a.text.startsWith(timeText) ? 0 : 1;
-        const bExact = b.text.startsWith(timeText) ? 0 : 1;
+        const compactTarget = `${startHour}~${endHour}`;
+        const aExact = a.text.replace(/\s+/g, "").includes(compactTarget) ? 0 : 1;
+        const bExact = b.text.replace(/\s+/g, "").includes(compactTarget) ? 0 : 1;
         return aExact - bExact || (a.width * a.height) - (b.width * b.height);
       });
 
     return entries.slice(0, 8);
-  }, { dayText, altDayText, timeText });
+  }, { dayText, altDayText, startHour, endHour });
 
   for (const candidate of candidates) {
     await humanDelay(page, "before SpaceCloud external item click", 900, 2200);
@@ -1627,7 +1822,15 @@ async function findAndOpenExternalReservation(page, { dateValue, startHour, endH
     await humanDelay(page, "after SpaceCloud external item click", 1400, 3200);
 
     const popupText = await page.locator("body").innerText({ timeout: 10_000 }).catch(() => "");
-    if (matchesExternalReservationPopup(popupText, { dateValue, startHour, endHour, marker, customerName, phone })) {
+    if (matchesExternalReservationPopup(popupText, {
+      dateValue,
+      startHour,
+      endHour,
+      marker,
+      customerName,
+      phone,
+      strictIdentity,
+    })) {
       return true;
     }
 
@@ -1644,7 +1847,15 @@ async function findAndOpenExternalReservation(page, { dateValue, startHour, endH
   return false;
 }
 
-function matchesExternalReservationPopup(popupText, { dateValue, startHour, endHour, marker, customerName, phone }) {
+function matchesExternalReservationPopup(popupText, {
+  dateValue,
+  startHour,
+  endHour,
+  marker,
+  customerName,
+  phone,
+  strictIdentity = false,
+}) {
   const compactText = popupText.replace(/\s+/g, "");
   const compactMarker = marker.replace(/\s+/g, "");
   const compactPhone = phone.replace(/\D/g, "");
@@ -1657,10 +1868,14 @@ function matchesExternalReservationPopup(popupText, { dateValue, startHour, endH
   const timeMatches = compactText.includes(`${startHour}:00~${endHour}:00`)
     || compactText.includes(`${String(startHour).padStart(2, "0")}:00~${String(endHour).padStart(2, "0")}:00`)
     || compactText.includes(`${startHour}~${endHour}`);
-  const identityMatches = compactText.includes(compactMarker)
-    || popupText.includes(marker)
-    || (customerName ? popupText.includes(customerName) : false)
-    || (compactPhone ? compactDigits.includes(compactPhone) : false);
+  const markerMatches = compactText.includes(compactMarker) || popupText.includes(marker);
+  const customerMatches = !customerName || popupText.includes(customerName);
+  const phoneMatches = !compactPhone || compactDigits.includes(compactPhone);
+  const identityMatches = strictIdentity
+    ? markerMatches && customerMatches && phoneMatches
+    : markerMatches
+      || (customerName ? customerMatches : false)
+      || (compactPhone ? phoneMatches : false);
 
   return compactText.includes(directAdded)
     && identityMatches
@@ -1692,9 +1907,17 @@ async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
       return null;
     }
 
-    const startPattern = String(startHour).padStart(1, "0");
-    const endPattern = String(endHour).padStart(1, "0");
-    const timePattern = new RegExp(`(^|[^0-9])0?${startPattern}\\s*~\\s*0?${endPattern}([^0-9]|$)`);
+    function overlapsTargetTime(compactText) {
+      const matches = [...compactText.matchAll(/(\d{1,2})\s*~\s*(\d{1,2})/g)];
+      return matches.some((match) => {
+        const entryStart = Number(match[1]);
+        const entryEnd = Number(match[2]);
+        return Number.isFinite(entryStart)
+          && Number.isFinite(entryEnd)
+          && entryStart < endHour
+          && entryEnd > startHour;
+      });
+    }
 
     const entries = [...document.querySelectorAll("body *")]
       .filter(visible)
@@ -1715,7 +1938,7 @@ async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
       })
       .filter((entry) =>
         entry.inTargetCell
-        && timePattern.test(entry.compactText)
+        && overlapsTargetTime(entry.compactText)
         && entry.y > 420
         && entry.width < 260
         && entry.height < 90
@@ -1726,8 +1949,26 @@ async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
   }, { dayText, altDayText, startHour, endHour });
 }
 
-async function deleteExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply }) {
-  let opened = await findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone });
+async function deleteExternalReservation(page, {
+  room,
+  dateValue,
+  startHour,
+  endHour,
+  marker,
+  customerName,
+  phone,
+  apply,
+  allowStillBlockedAfterDelete = false,
+}) {
+  let opened = await findAndOpenExternalReservation(page, {
+    dateValue,
+    startHour,
+    endHour,
+    marker,
+    customerName,
+    phone,
+    strictIdentity: true,
+  });
 
   if (!opened) {
     const stillBlocked = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
@@ -1742,7 +1983,15 @@ async function deleteExternalReservation(page, { dateValue, startHour, endHour, 
       await humanDelay(page, "after SpaceCloud fallback block click", 1200, 2600);
 
       const popupText = await page.locator("body").innerText({ timeout: 10_000 }).catch(() => "");
-      opened = matchesExternalReservationPopup(popupText, { dateValue, startHour, endHour, marker, customerName, phone });
+      opened = matchesExternalReservationPopup(popupText, {
+        dateValue,
+        startHour,
+        endHour,
+        marker,
+        customerName,
+        phone,
+        strictIdentity: true,
+      });
     }
   }
 
@@ -1783,15 +2032,54 @@ async function deleteExternalReservation(page, { dateValue, startHour, endHour, 
   await humanDelay(page, "after SpaceCloud external delete", 900, 2200);
   await saveScreenshot(page, "spacecloud-external-after-delete");
 
-  const stillBlockedAfterDelete = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
-  if (stillBlockedAfterDelete) {
-    await saveScreenshot(page, "spacecloud-external-delete-still-blocked");
-    throw new Error(
-      `SpaceCloud external reservation open failed: target slot is still blocked after delete ${dateValue} ${startHour}:00-${endHour}:00.`,
-    );
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await reopenCalendarForVerification(page, {
+      room,
+      dateValue,
+      contextLabel: `external reservation delete verification ${attempt}`,
+    });
+    await humanDelay(page, `wait for SpaceCloud delete verification data ${attempt}`, 1200, 2200);
+
+    const deletedReservationStillExists = await findAndOpenExternalReservation(page, {
+      dateValue,
+      startHour,
+      endHour,
+      marker,
+      customerName,
+      phone,
+      strictIdentity: true,
+    });
+
+    if (deletedReservationStillExists) {
+      await saveScreenshot(page, `spacecloud-external-delete-verification-retry-${attempt}`);
+      await page.keyboard.press("Escape").catch(() => {});
+      if (attempt < 3) {
+        await humanDelay(page, `wait before SpaceCloud delete verification retry ${attempt}`, 900, 2000);
+        continue;
+      }
+      throw new Error(
+        `SpaceCloud external reservation delete verification failed: matching reservation still exists after fresh reload ${dateValue} ${startHour}:00-${endHour}:00.`,
+      );
+    }
+
+    const stillBlockedAfterDelete = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
+    if (stillBlockedAfterDelete) {
+      await saveScreenshot(page, "spacecloud-external-delete-still-blocked");
+      if (allowStillBlockedAfterDelete) {
+        console.log("SpaceCloud target slot is still blocked after delete. Treat as success because another active reservation should keep it closed.");
+        return { ok: true, alreadyOpen: false, stillBlockedAfterDelete: true, dryRun: false };
+      }
+      throw new Error(
+        `SpaceCloud external reservation open failed: target slot is still blocked after delete ${dateValue} ${startHour}:00-${endHour}:00.`,
+      );
+    }
+
+    await saveScreenshot(page, "spacecloud-external-delete-verified");
+    console.log("SpaceCloud external reservation deletion was verified from a freshly loaded calendar.");
+    return { ok: true, alreadyOpen: false, dryRun: false };
   }
 
-  return { ok: true, alreadyOpen: false, dryRun: false };
+  throw new Error("SpaceCloud external reservation delete verification ended unexpectedly.");
 }
 
 async function main() {
@@ -1810,6 +2098,7 @@ async function main() {
   const customerName = args["customer-name"] || "";
   const phone = args.phone || "";
   const apply = args.apply === "true";
+  const allowStillBlockedAfterDelete = args["allow-still-blocked-after-delete"] === "true";
 
   if (mode !== "close" && mode !== "open") throw new Error("--mode must be close or open");
   if (endHour <= startHour) throw new Error("--end must be after --start");
@@ -1821,6 +2110,11 @@ async function main() {
 
   const rawMarker = markerForBooking(bookingNumber);
   const marker = rawMarker.includes("?") ? `\ub124\uc774\ubc84 \uc608\uc57d\ubc88\ud638: ${bookingNumber}` : rawMarker;
+  const releaseLock = await acquireProcessLock("rpa/.locks/spacecloud-external-reservation.lock", {
+    label: "SpaceCloud external reservation RPA",
+    timeoutMs: 12 * 60 * 1000,
+    staleMs: 15 * 60 * 1000,
+  });
   const browser = await launchRpaBrowser({ headless: false });
   let page;
 
@@ -1862,6 +2156,7 @@ async function main() {
     if (mode === "open") {
       await assertCalendarView(page, "month navigation");
       await navigateToMonth(page, dateValue);
+      await waitForCalendarDay(page, dateValue, "delete target");
       await assertCalendarView(page, "date selection");
     } else {
       await assertCalendarView(page, "add reservation");
@@ -1870,6 +2165,7 @@ async function main() {
 
     const result = mode === "close"
       ? await addExternalReservation(page, {
+        room,
         dateValue,
         startHour,
         endHour,
@@ -1879,7 +2175,17 @@ async function main() {
         apply,
         skipCalendarPrecheck: true,
       })
-      : await deleteExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone, apply });
+      : await deleteExternalReservation(page, {
+        room,
+        dateValue,
+        startHour,
+        endHour,
+        marker,
+        customerName,
+        phone,
+        apply,
+        allowStillBlockedAfterDelete,
+      });
 
     console.log(JSON.stringify({
       ...result,
@@ -1896,6 +2202,7 @@ async function main() {
     throw error;
   } finally {
     await browser.close();
+    await releaseLock();
   }
 }
 

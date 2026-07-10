@@ -14,10 +14,17 @@ IPROYAL_PROXY_PORT="port from IPRoyal"
 IPROYAL_PROXY_PROTOCOL="http"
 IPROYAL_PROXY_USER="username from IPRoyal"
 IPROYAL_PROXY_PASS="password from IPRoyal"
+RPA_USE_PROXY="true"
+RPA_PROXY_DIRECT_FALLBACK="true"
+IPROYAL_PROXY_DIRECT_FALLBACK_GB="0.01"
 RPA_HEADLESS="false"
 RPA_MIN_DELAY_MS="900"
 RPA_MAX_DELAY_MS="2200"
 ```
+
+Set `RPA_USE_PROXY="false"` to run every RPA job through the machine's current IP.
+When proxy mode is enabled, the browser automatically uses the current IP if the
+remaining IPRoyal traffic is at or below `IPROYAL_PROXY_DIRECT_FALLBACK_GB`.
 
 Run:
 

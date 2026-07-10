@@ -68,6 +68,11 @@ type SlotActionResult = {
   reason: string | null;
 };
 
+type SlotSegment = {
+  startTime: Date;
+  endTime: Date;
+};
+
 type RpaRecheckGlobal = typeof globalThis & {
   __naverSlotRpaIssueRecheckedAt?: Map<string, number>;
   __naverStatusCheckedAt?: Map<string, number>;
@@ -477,6 +482,83 @@ function canSetSlot(item: NormalizedNaverReservation) {
     && toKstDateValue(item.startTime) === toKstDateValue(item.endTime);
 }
 
+function cloneSlotItem(item: NormalizedNaverReservation, segment: SlotSegment): NormalizedNaverReservation {
+  return {
+    ...item,
+    startTime: segment.startTime,
+    endTime: segment.endTime,
+    dateValue: toKstDateValue(segment.startTime),
+    startClock: toClock(segment.startTime),
+    endClock: toClock(segment.endTime),
+  };
+}
+
+function getHourlySlotSegments(item: NormalizedNaverReservation) {
+  const segments: SlotSegment[] = [];
+  const hourMs = 60 * 60 * 1000;
+  let cursor = item.startTime.getTime();
+  const end = item.endTime.getTime();
+
+  while (cursor < end) {
+    const next = Math.min(cursor + hourMs, end);
+    segments.push({
+      startTime: new Date(cursor),
+      endTime: new Date(next),
+    });
+    cursor = next;
+  }
+
+  return segments;
+}
+
+function mergeAdjacentSegments(segments: SlotSegment[]) {
+  const sorted = [...segments].sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+  const merged: SlotSegment[] = [];
+
+  for (const segment of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && last.endTime.getTime() === segment.startTime.getTime()) {
+      last.endTime = segment.endTime;
+    } else {
+      merged.push({ ...segment });
+    }
+  }
+
+  return merged;
+}
+
+async function findConfirmedSlotOverlaps(item: NormalizedNaverReservation, reservationId: string) {
+  return prisma.reservation.findMany({
+    where: {
+      id: { not: reservationId },
+      roomName: item.roomName,
+      status: "CONFIRMED",
+      startTime: { lt: item.endTime },
+      endTime: { gt: item.startTime },
+    },
+    include: { usageLog: true },
+    orderBy: { startTime: "asc" },
+  });
+}
+
+async function getOpenableSlotSegments(item: NormalizedNaverReservation, reservationId: string) {
+  const confirmedOverlaps = await findConfirmedSlotOverlaps(item, reservationId);
+  const segments = getHourlySlotSegments(item);
+  return segments.filter((segment) =>
+    !confirmedOverlaps.some((reservation) =>
+      reservation.startTime.getTime() < segment.endTime.getTime()
+      && reservation.endTime.getTime() > segment.startTime.getTime()
+    )
+  );
+}
+
+async function buildNaverSlotItems(item: NormalizedNaverReservation, mode: "close" | "open", reservationId: string) {
+  if (mode === "close") return [item];
+
+  const openableSegments = await getOpenableSlotSegments(item, reservationId);
+  return mergeAdjacentSegments(openableSegments).map((segment) => cloneSlotItem(item, segment));
+}
+
 function isSlotRpaIssueMemo(memo?: string | null) {
   if (!memo?.includes(RPA_CHECK_MARKER)) return false;
   return memo
@@ -608,6 +690,7 @@ async function setSpaceCloudExternalReservation(
   item: NormalizedNaverReservation,
   mode: "close" | "open",
   reservationId?: string,
+  options: { allowStillBlockedAfterDelete?: boolean } = {},
 ) {
   if (!canSetSlot(item)) {
     const reason = `Unsupported SpaceCloud external reservation time ${item.dateValue} ${item.startClock}-${item.endClock}`;
@@ -628,6 +711,7 @@ async function setSpaceCloudExternalReservation(
       `--booking-number=${bookingNumber}`,
       "--apply",
     ];
+    if (options.allowStillBlockedAfterDelete) args.push("--allow-still-blocked-after-delete");
     if (item.customerName) args.push(`--customer-name=${item.customerName}`);
     if (item.phone) args.push(`--phone=${item.phone}`);
 
@@ -644,6 +728,67 @@ async function setSpaceCloudExternalReservation(
   }
 }
 
+async function runSpaceCloudSlotAction(
+  item: NormalizedNaverReservation,
+  mode: "close" | "open",
+  reservationId: string,
+): Promise<SlotActionResult> {
+  if (mode === "close") {
+    return setSpaceCloudExternalReservation(item, mode, reservationId);
+  }
+
+  const overlaps = await findConfirmedSlotOverlaps(item, reservationId);
+  const openResult = await setSpaceCloudExternalReservation(item, mode, reservationId, {
+    allowStillBlockedAfterDelete: overlaps.length > 0,
+  });
+  if (!openResult.ok) return openResult;
+  if (overlaps.length === 0) return openResult;
+
+  const repairFailures: string[] = [];
+  for (const overlap of overlaps) {
+    const overlapItem = normalizeReservationForSlotRecheck(overlap);
+    const repairResult = await setSpaceCloudExternalReservation(overlapItem, "close", overlap.id);
+    if (!repairResult.ok) {
+      repairFailures.push(`${overlap.customerName || overlap.id}: ${repairResult.reason || "Unknown failure"}`);
+    }
+  }
+
+  if (repairFailures.length > 0) {
+    return {
+      ok: false,
+      skipped: false,
+      reason: `SpaceCloud overlap repair failed after open: ${repairFailures.join(" / ")}`,
+    };
+  }
+
+  return openResult;
+}
+
+async function runSlotItemBatch(
+  items: NormalizedNaverReservation[],
+  action: (item: NormalizedNaverReservation) => Promise<SlotActionResult>,
+  label: string,
+): Promise<SlotActionResult> {
+  if (items.length === 0) {
+    return { ok: true, skipped: true, reason: `${label} skipped because active overlapping reservation keeps slot closed.` };
+  }
+
+  const failures: string[] = [];
+  let skipped = true;
+
+  for (const item of items) {
+    const result = await action(item);
+    skipped = skipped && result.skipped;
+    if (!result.ok) failures.push(result.reason || "Unknown failure");
+  }
+
+  if (failures.length > 0) {
+    return { ok: false, skipped, reason: failures.join(" / ") };
+  }
+
+  return { ok: true, skipped, reason: null };
+}
+
 function settledSlotResult(result: PromiseSettledResult<SlotActionResult>) {
   if (result.status === "fulfilled") return result.value;
   const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
@@ -657,9 +802,12 @@ async function syncNaverAndSpaceCloudSlots(
   bookingLabel: string,
 ) {
   console.log(`[NaverRPA] Start parallel slot ${mode}: ${bookingLabel}`);
+  const naverItems = await buildNaverSlotItems(item, mode, reservationId);
+  const spaceCloudItems = [item];
+
   const [naverResult, spaceCloudResult] = await Promise.allSettled([
-    setNaverSlot(item, mode),
-    setSpaceCloudExternalReservation(item, mode),
+    runSlotItemBatch(naverItems, (slotItem) => setNaverSlot(slotItem, mode), "Naver slot"),
+    runSlotItemBatch(spaceCloudItems, (slotItem) => runSpaceCloudSlotAction(slotItem, mode, reservationId), "SpaceCloud external reservation"),
   ]);
 
   const naverSlot = settledSlotResult(naverResult);

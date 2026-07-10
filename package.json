@@ -18,7 +18,8 @@
     "rpa:spacecloud-login": "node rpa/spacecloud-login.mjs",
     "rpa:spacecloud-login-local": "node rpa/spacecloud-login.mjs --no-proxy",
     "rpa:spacecloud-read-detail": "node rpa/spacecloud-read-reservation-detail.mjs",
-    "rpa:spacecloud-external": "node rpa/spacecloud-external-reservation.mjs"
+    "rpa:spacecloud-external": "node rpa/spacecloud-external-reservation.mjs",
+    "rpa:competitors": "node rpa/competitor-scan.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",

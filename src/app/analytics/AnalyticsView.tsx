@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
-import { Loader2 } from "lucide-react";
+import { CalendarDays, Loader2 } from "lucide-react";
 import { UNCATEGORIZED_LABEL } from "@/lib/categories";
 
 interface UsageLog {
@@ -30,11 +30,26 @@ interface Reservation {
 }
 
 const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#f43f5e", "#8b5cf6", "#64748b"];
+const SERVICE_START_YEAR = 2025;
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
+
+function getKstDateParts(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  const kstDate = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return {
+    year: kstDate.getUTCFullYear(),
+    month: kstDate.getUTCMonth() + 1,
+    day: kstDate.getUTCDate(),
+  };
+}
 
 export default function AnalyticsPage() {
+  const currentPeriod = getKstDateParts(new Date());
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isMounted, setIsMounted] = useState(false);
+  const [selectedYear, setSelectedYear] = useState(currentPeriod.year);
+  const [selectedMonth, setSelectedMonth] = useState(currentPeriod.month);
 
   useEffect(() => {
     setTimeout(() => {
@@ -56,16 +71,25 @@ export default function AnalyticsPage() {
     fetchReservations();
   }, []);
 
-  const now = new Date();
-  const thisMonthReservations = reservations.filter(res => {
-    const d = new Date(res.startTime);
-    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  const latestDataYear = reservations.reduce((latest, reservation) => {
+    return Math.max(latest, getKstDateParts(reservation.startTime).year);
+  }, currentPeriod.year);
+  const lastYear = Math.max(currentPeriod.year, latestDataYear, SERVICE_START_YEAR);
+  const yearOptions = Array.from(
+    { length: lastYear - SERVICE_START_YEAR + 1 },
+    (_, index) => SERVICE_START_YEAR + index,
+  );
+  const selectedPeriodLabel = `${selectedYear}년 ${selectedMonth}월`;
+
+  const selectedMonthReservations = reservations.filter((res) => {
+    const date = getKstDateParts(res.startTime);
+    return date.year === selectedYear && date.month === selectedMonth;
   });
 
   // 1. Calculate PIE_DATA based on actual purposes (취소 건은 실제 이용이 아니므로 제외)
   const purposeRevenue: Record<string, number> = {};
   let totalPurposeRevenue = 0;
-  thisMonthReservations
+  selectedMonthReservations
     .filter((res) => res.status !== "CANCELLED")
     .forEach((res) => {
       const purpose = res.usageLog?.purpose || UNCATEGORIZED_LABEL;
@@ -74,7 +98,8 @@ export default function AnalyticsPage() {
       totalPurposeRevenue += price;
     });
 
-  const pieData = Object.keys(purposeRevenue).length > 0
+  const hasPurposeData = Object.keys(purposeRevenue).length > 0;
+  const pieData = hasPurposeData
     ? Object.entries(purposeRevenue)
         .sort((a, b) => b[1] - a[1]) // 매출 높은 순 정렬
         .map(([name, value]) => ({ 
@@ -82,15 +107,12 @@ export default function AnalyticsPage() {
           value, 
           percentage: totalPurposeRevenue > 0 ? Math.round((value / totalPurposeRevenue) * 100) : 0 
         }))
-    : [
-        { name: "데이터 없음", value: 1, percentage: 100 }
-      ];
+    : [];
 
   // 2. Calculate BAR_DATA (Weekly sales for current booking months)
   const weekRevenue = [0, 0, 0, 0]; // 1, 2, 3, 4th weeks
-  thisMonthReservations.forEach((res) => {
-    const date = new Date(res.startTime);
-    const day = date.getDate();
+  selectedMonthReservations.forEach((res) => {
+    const day = getKstDateParts(res.startTime).day;
     const price = (res.price || 0);
     if (day <= 7) weekRevenue[0] += price;
     else if (day <= 14) weekRevenue[1] += price;
@@ -106,17 +128,17 @@ export default function AnalyticsPage() {
   ];
 
   // 3. Dynamic scenario percentages based on accumulated sales
-  const totalRevenue = thisMonthReservations.reduce((sum, res) => sum + (res.price || 0), 0);
+  const totalRevenue = selectedMonthReservations.reduce((sum, res) => sum + (res.price || 0), 0);
 
   // 취소/노쇼 집계 (대시보드엔 안 띄우고 통계에서만 표기)
-  const cancelledList = thisMonthReservations.filter((res) => res.status === "CANCELLED");
+  const cancelledList = selectedMonthReservations.filter((res) => res.status === "CANCELLED");
   const noShowList = cancelledList.filter((res) => res.isNoShow);
   const realCancelList = cancelledList.filter((res) => !res.isNoShow);
   const noShowCount = noShowList.length;
   const realCancelCount = realCancelList.length;
   const cancelledFee = cancelledList.reduce((sum, res) => sum + (res.price || 0), 0); // 취소+노쇼 수수료 합
   // 예약 건수 = 성사된 건(확정 + 노쇼). 일반 취소만 제외.
-  const bookedCount = thisMonthReservations.length - realCancelCount;
+  const bookedCount = selectedMonthReservations.length - realCancelCount;
 
   // Targets: Scenario 1 (Conservative: 15만 원), Scenario 2 (Standard: 35만 원), Scenario 3 (Aggressive: 60만 원)
   const t1 = 150000;
@@ -138,16 +160,48 @@ export default function AnalyticsPage() {
 
   return (
     <div className="p-4 md:p-8 space-y-6 pb-24 max-w-5xl mx-auto w-full">
-      <header className="pt-8 pb-4">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">결산 및 통계</h1>
-        <p className="text-sm text-slate-500 mt-1">포스 및 예약 채널 실시간 자동 종합 레포트</p>
+      <header className="flex flex-col gap-4 pt-8 pb-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">결산 및 통계</h1>
+          <p className="text-sm text-slate-500 mt-1">포스 및 예약 채널 실시간 자동 종합 레포트</p>
+        </div>
+        <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm md:w-auto">
+          <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+          <label className="flex min-w-0 flex-1 items-center gap-1.5 md:flex-none">
+            <span className="text-xs font-semibold text-slate-500">연도</span>
+            <select
+              value={selectedYear}
+              onChange={(event) => setSelectedYear(Number(event.target.value))}
+              className="min-w-20 cursor-pointer bg-transparent text-sm font-semibold text-slate-800 outline-none"
+              aria-label="통계 연도 선택"
+            >
+              {yearOptions.map((year) => (
+                <option key={year} value={year}>{year}년</option>
+              ))}
+            </select>
+          </label>
+          <div className="h-5 w-px shrink-0 bg-slate-200" aria-hidden="true" />
+          <label className="flex min-w-0 flex-1 items-center gap-1.5 md:flex-none">
+            <span className="text-xs font-semibold text-slate-500">월</span>
+            <select
+              value={selectedMonth}
+              onChange={(event) => setSelectedMonth(Number(event.target.value))}
+              className="min-w-16 cursor-pointer bg-transparent text-sm font-semibold text-slate-800 outline-none"
+              aria-label="통계 월 선택"
+            >
+              {MONTH_OPTIONS.map((month) => (
+                <option key={month} value={month}>{month}월</option>
+              ))}
+            </select>
+          </label>
+        </div>
       </header>
 
       {/* Revenue Summary Banner */}
       <div className="p-5 bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500 text-white rounded-2xl shadow-lg shadow-indigo-200/50 space-y-1 relative overflow-hidden">
         {/* 장식용 빛 반사 효과 */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
-        <p className="text-[11px] font-bold tracking-wider text-white/80 uppercase relative z-10">이달의 총 매출액</p>
+        <p className="text-[11px] font-bold tracking-wider text-white/80 uppercase relative z-10">{selectedPeriodLabel} 총 매출액</p>
         <p className="text-3xl font-extrabold relative z-10">{totalRevenue.toLocaleString()}원</p>
         <p className="text-[10px] text-white/70 mt-2 font-medium relative z-10">네이버 및 스페이스클라우드 webhook 실시간 종합 집계액</p>
       </div>
@@ -175,10 +229,10 @@ export default function AnalyticsPage() {
       {/* Purpose Ratio Section */}
       <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
         <h2 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-1.5">
-          <span>이번 달 이용 목적별 비중 (매출 기준)</span>
+          <span>{selectedPeriodLabel} 이용 목적별 비중 (매출 기준)</span>
         </h2>
         <div className="h-48 w-full flex items-center justify-center">
-          {isMounted ? (
+          {isMounted && hasPurposeData ? (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -200,8 +254,10 @@ export default function AnalyticsPage() {
                 />
               </PieChart>
             </ResponsiveContainer>
-          ) : (
+          ) : !isMounted ? (
             <span className="text-xs text-slate-400 font-semibold animate-pulse">차트를 로딩하는 중...</span>
+          ) : (
+            <span className="text-sm font-semibold text-slate-400">해당 월 이용 목적 데이터가 없습니다.</span>
           )}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-y-3 gap-x-4 justify-center mt-3 pt-4 border-t border-slate-50">
