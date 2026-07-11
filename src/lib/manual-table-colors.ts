@@ -23,6 +23,20 @@ export const MANUAL_CELL_COLORS = [
     swatchClass: "bg-[#C65911]",
     cellClass: "bg-[#C65911] text-slate-950",
   },
+  {
+    key: "manual-cancelled",
+    label: "취소 · 노쇼",
+    swatchClass: "bg-[#BFBFBF]",
+    cellClass: "bg-[#BFBFBF] text-slate-950",
+    monthlyOnly: true,
+  },
+  {
+    key: "provisional-block",
+    label: "가예약 · 임시차단",
+    swatchClass: "bg-[#E2E8F0]",
+    cellClass: "bg-[#E2E8F0] text-slate-950",
+    monthlyOnly: true,
+  },
 ] as const;
 
 export type ManualCellColor = (typeof MANUAL_CELL_COLORS)[number]["key"];
@@ -35,6 +49,21 @@ export interface ManualCellData {
 
 export function emptyManualCell(): ManualCellData {
   return { value: "", color: null };
+}
+
+export function manualCellDataEquals(
+  left: { value: string; color: string | null },
+  right: { value: string; color: string | null },
+) {
+  return left.value === right.value && left.color === right.color;
+}
+
+export function reconcileDirtyKey(previous: Set<string>, key: string, isDirty: boolean) {
+  if (previous.has(key) === isDirty) return previous;
+  const next = new Set(previous);
+  if (isDirty) next.add(key);
+  else next.delete(key);
+  return next;
 }
 
 export function manualColorClass(color?: string | null) {

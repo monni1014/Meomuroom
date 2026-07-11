@@ -7,7 +7,14 @@ const execFileAsync = promisify(execFile);
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
 const ALERT_TYPE = "COMPETITOR_MONITOR";
 
-export type CompetitorScanMode = "daily" | "weekly" | "monthly" | "range";
+export type CompetitorScanMode =
+  | "today"
+  | "today-next"
+  | "next-week"
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "range";
 
 type ScannerObservation = {
   competitorId: string;
@@ -77,6 +84,9 @@ function resolveRange(options: RunOptions) {
     if (!options.startKey || !options.endKey) throw new Error("Range scan requires startKey and endKey");
     return { startKey: options.startKey, endKey: options.endKey };
   }
+  if (options.mode === "today") return { startKey: today, endKey: today };
+  if (options.mode === "today-next") return { startKey: today, endKey: addDays(today, 1) };
+  if (options.mode === "next-week") return { startKey: addDays(today, 1), endKey: addDays(today, 7) };
   if (options.mode === "daily") return { startKey: today, endKey: addDays(today, 7) };
   if (options.mode === "monthly") return { startKey: today, endKey: endOfMonthKey(today) };
 
@@ -123,6 +133,7 @@ async function executeScanner(startKey: string, endKey: string) {
 }
 
 type ExistingSlot = Awaited<ReturnType<typeof prisma.competitorSlot.findMany>>[number];
+const MEMOROOM_ROOMS = ["머무룸1", "머무룸2"] as const;
 
 function resolveState(current: ExistingSlot | undefined, observation: ScannerObservation) {
   const checkedAt = new Date(observation.checkedAt);
@@ -177,6 +188,146 @@ function resolveState(current: ExistingSlot | undefined, observation: ScannerObs
   };
 }
 
+type OpportunitySlot = {
+  id: string;
+  competitorId: string;
+  dateKey: string;
+  hour: number;
+  firstObservedAt: Date;
+  lastBookedAt: Date | null;
+  opportunityLostRooms: string | null;
+};
+
+function opportunityDetectionTime(slot: OpportunitySlot) {
+  return slot.lastBookedAt || slot.firstObservedAt;
+}
+
+/**
+ * Repairs only missing competitor judgements. A stored result is never recalculated,
+ * because opportunity loss must describe the Memoroom calendar at first discovery.
+ */
+async function reconcileMissingOpportunityLoss(startKey: string, endKey: string) {
+  const bookedSlots = await prisma.competitorSlot.findMany({
+    where: {
+      dateKey: { gte: startKey, lte: endKey },
+      state: "BOOKED",
+    },
+    orderBy: [{ competitorId: "asc" }, { dateKey: "asc" }, { hour: "asc" }],
+    select: {
+      id: true,
+      competitorId: true,
+      dateKey: true,
+      hour: true,
+      firstObservedAt: true,
+      lastBookedAt: true,
+      opportunityLostRooms: true,
+    },
+  });
+
+  const groups: OpportunitySlot[][] = [];
+  for (const slot of bookedSlots) {
+    const previousGroup = groups.at(-1);
+    const previous = previousGroup?.at(-1);
+    const sameDiscovery = previous
+      && opportunityDetectionTime(previous).getTime() === opportunityDetectionTime(slot).getTime();
+    if (!previous
+      || previous.competitorId !== slot.competitorId
+      || previous.dateKey !== slot.dateKey
+      || previous.hour + 1 !== slot.hour
+      || !sameDiscovery) {
+      groups.push([slot]);
+    } else {
+      previousGroup!.push(slot);
+    }
+  }
+
+  let repairedSlots = 0;
+  const judgementGroups: OpportunitySlot[][] = [];
+  for (const group of groups) {
+    const first = group[0];
+    const isSingleHourTriground = first.competitorId.startsWith("triground-") && group.length < 2;
+    if (isSingleHourTriground) {
+      const result = await prisma.competitorSlot.updateMany({
+        where: {
+          id: { in: group.map((slot) => slot.id) },
+          OR: [
+            { opportunityLostRooms: null },
+            { opportunityLostRooms: { not: "NONE" } },
+          ],
+        },
+        data: { opportunityLostRooms: "NONE" },
+      });
+      repairedSlots += result.count;
+      continue;
+    }
+    if (group.some((slot) => slot.opportunityLostRooms === null)) judgementGroups.push(group);
+  }
+
+  if (judgementGroups.length === 0) return repairedSlots;
+
+  const rangeStart = new Date(`${startKey}T00:00:00+09:00`);
+  const rangeEnd = new Date(`${addDays(endKey, 1)}T00:00:00+09:00`);
+  const reservations = await prisma.reservation.findMany({
+    where: {
+      roomName: { in: [...MEMOROOM_ROOMS] },
+      startTime: { lt: rangeEnd },
+      endTime: { gt: rangeStart },
+    },
+    select: {
+      roomName: true,
+      startTime: true,
+      endTime: true,
+      createdAt: true,
+      updatedAt: true,
+      status: true,
+    },
+  });
+
+  for (const group of judgementGroups) {
+    const first = group[0];
+    const last = group.at(-1)!;
+    const detectedAt = opportunityDetectionTime(first);
+    const segmentStart = new Date(
+      `${first.dateKey}T${String(first.hour).padStart(2, "0")}:00:00+09:00`,
+    );
+    const segmentEnd = new Date(
+      `${last.dateKey}T${String(last.hour + 1).padStart(2, "0")}:00:00+09:00`,
+    );
+
+    // A past/current baseline cannot prove that a customer chose the competitor.
+    // Record NONE so the row is no longer left in an ambiguous NULL state.
+    let opportunityLostRooms = "NONE";
+    if (segmentStart > detectedAt) {
+      const lostRooms = MEMOROOM_ROOMS.filter((roomName) => {
+        const occupiedAtDiscovery = reservations.some((reservation) => {
+          if (reservation.roomName !== roomName || reservation.createdAt > detectedAt) return false;
+          const wasActiveAtDiscovery = reservation.status === "CONFIRMED"
+            || (reservation.status === "CANCELLED" && reservation.updatedAt > detectedAt);
+          return wasActiveAtDiscovery
+            && reservation.startTime < segmentEnd
+            && reservation.endTime > segmentStart;
+        });
+        return !occupiedAtDiscovery;
+      });
+      opportunityLostRooms = lostRooms.length > 0 ? lostRooms.join(",") : "NONE";
+    }
+
+    const result = await prisma.competitorSlot.updateMany({
+      where: {
+        id: { in: group.map((slot) => slot.id) },
+        opportunityLostRooms: null,
+      },
+      data: { opportunityLostRooms },
+    });
+    repairedSlots += result.count;
+  }
+
+  if (repairedSlots > 0) {
+    console.log(`[Competitor] Repaired ${repairedSlots} missing opportunity-loss slots.`);
+  }
+  return repairedSlots;
+}
+
 async function persistScannerResult(scanId: string, result: ScannerResult) {
   const existingRows = await prisma.competitorSlot.findMany({
     where: {
@@ -191,7 +342,7 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
   const memoroomReservations = await prisma.reservation.findMany({
     where: {
       status: "CONFIRMED",
-      roomName: { in: ["머무룸1", "머무룸2"] },
+      roomName: { in: [...MEMOROOM_ROOMS] },
       startTime: { lt: rangeEnd },
       endTime: { gt: rangeStart },
     },
@@ -211,8 +362,7 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
     let opportunityLostRooms = current?.opportunityLostRooms || null;
     if (resolved.eventType === "CANCELLED") opportunityLostRooms = null;
     const slotStart = new Date(`${observation.dateKey}T${String(observation.hour).padStart(2, "0")}:00:00+09:00`);
-    const shouldEvaluateOpportunity = observation.competitorId === "synergy"
-      && resolved.state === "BOOKED"
+    const shouldEvaluateOpportunity = resolved.state === "BOOKED"
       && opportunityLostRooms === null
       && slotStart > resolved.checkedAt;
     if (shouldEvaluateOpportunity) {
@@ -222,7 +372,7 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
           .filter((reservation) => reservation.startTime < slotEnd && reservation.endTime > slotStart)
           .map((reservation) => reservation.roomName),
       );
-      const availableRooms = ["머무룸1", "머무룸2"].filter((roomName) => !occupiedRooms.has(roomName));
+      const availableRooms = MEMOROOM_ROOMS.filter((roomName) => !occupiedRooms.has(roomName));
       opportunityLostRooms = availableRooms.length > 0 ? availableRooms.join(",") : "NONE";
     }
 
@@ -303,6 +453,8 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
 
     currentMap.set(key, slot);
   }
+
+  await reconcileMissingOpportunityLoss(result.startKey, result.endKey);
 
   return { changedSlots, bookingEvents, cancellationEvents };
 }

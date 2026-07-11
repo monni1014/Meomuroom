@@ -368,7 +368,7 @@ export default function CalendarPage() {
       case "머무룸2":
         return "bg-purple-50 text-purple-700 border border-purple-100";
       case "머무룸3":
-        return "bg-teal-50 text-teal-700 border border-teal-100";
+        return "bg-emerald-50 text-emerald-700 border border-emerald-100";
       default:
         return "bg-slate-50 text-slate-700 border border-slate-100";
     }
@@ -421,8 +421,8 @@ export default function CalendarPage() {
       )}
 
       {/* Room Filter Tabs */}
-      <div className="flex gap-2">
-        {["all", "머무룸1", "머무룸2"].map((room) => (
+      <div className="flex flex-wrap gap-2">
+        {["all", "머무룸1", "머무룸2", "머무룸3"].map((room) => (
           <button
             key={room}
             onClick={() => setRoomFilter(room)}
@@ -777,6 +777,7 @@ export default function CalendarPage() {
                   >
                     <option value="머무룸1">머무룸1</option>
                     <option value="머무룸2">머무룸2</option>
+                    <option value="머무룸3">머무룸3</option>
                   </select>
                 </div>
 

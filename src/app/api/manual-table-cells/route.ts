@@ -31,7 +31,11 @@ export async function GET(request: NextRequest) {
       orderBy: [{ sectionId: "asc" }, { day: "asc" }, { cellKey: "asc" }],
     });
 
-    return NextResponse.json(cells);
+    return NextResponse.json(cells, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+      },
+    });
   } catch (error) {
     console.error("GET manual table cells error:", error);
     return NextResponse.json({ error: "Failed to fetch manual table cells" }, { status: 500 });

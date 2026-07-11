@@ -15,6 +15,7 @@ interface UsageLog {
   extraPrice: number | null;
   isExtraPaid: boolean;
   extraPaymentMethod: string | null;
+  reservedHeadCount: number;
 }
 
 interface Reservation {
@@ -140,6 +141,36 @@ export default function AnalyticsPage() {
   // 예약 건수 = 성사된 건(확정 + 노쇼). 일반 취소만 제외.
   const bookedCount = selectedMonthReservations.length - realCancelCount;
 
+  // 경쟁사 매출 추정을 위한 핵심 지표 계산
+  let totalPersonHours = 0;
+  let totalHours = 0;
+  let validRevenueForAvg = 0;
+
+  selectedMonthReservations
+    .filter((res) => res.status !== "CANCELLED")
+    .forEach((res) => {
+      const start = new Date(res.startTime).getTime();
+      const end = new Date(res.endTime).getTime();
+      const hours = Math.max(0, (end - start) / (1000 * 60 * 60)); // 이용 시간 (시간 단위)
+
+      let minHeadcount = 4; // 기본
+      if (res.source === "naver") minHeadcount = 4;
+      else if (res.source === "spacecloud") minHeadcount = 5;
+
+      const observedHeadCount = res.usageLog?.headCount || 0;
+      const reservedHeadCount = res.usageLog?.reservedHeadCount || 0;
+      const actualHeadcount = Math.max(observedHeadCount, reservedHeadCount);
+      const billedHeadcount = Math.max(actualHeadcount, minHeadcount); // 최소 보증 인원 적용
+
+      const personHours = hours * billedHeadcount;
+      totalPersonHours += personHours;
+      totalHours += hours;
+      validRevenueForAvg += (res.price || 0);
+    });
+
+  const timeWeightedAvgHeadcount = totalHours > 0 ? (totalPersonHours / totalHours) : 0;
+  const avgPricePerPersonPerHour = totalPersonHours > 0 ? (validRevenueForAvg / totalPersonHours) : 0;
+
   // Targets: Scenario 1 (Conservative: 15만 원), Scenario 2 (Standard: 35만 원), Scenario 3 (Aggressive: 60만 원)
   const t1 = 150000;
   const t2 = 350000;
@@ -205,6 +236,34 @@ export default function AnalyticsPage() {
         <p className="text-3xl font-extrabold relative z-10">{totalRevenue.toLocaleString()}원</p>
         <p className="text-[10px] text-white/70 mt-2 font-medium relative z-10">네이버 및 스페이스클라우드 webhook 실시간 종합 집계액</p>
       </div>
+
+      {/* 경쟁사 분석용 핵심 지표 (시간 가중 평균 통계) */}
+      <section className="bg-gradient-to-br from-slate-50 to-white p-5 rounded-2xl shadow-sm border border-slate-200">
+        <h2 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <span className="bg-indigo-100 text-indigo-700 p-1.5 rounded-lg"><CalendarDays className="w-4 h-4" /></span>
+          경쟁사 매출 추정용 지표 (시간 가중 평균)
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-2 h-full bg-blue-400"></div>
+            <p className="text-[11px] font-bold text-slate-500 mb-1">시간당 평균 인원</p>
+            <p className="text-2xl font-extrabold text-slate-800">{timeWeightedAvgHeadcount.toFixed(1)}<span className="text-sm font-medium text-slate-500 ml-1">명 / 시간</span></p>
+            <p className="text-[10px] text-slate-400 mt-2 tracking-tight">최소인원(네이버 4, 스클 5) 보정</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-2 h-full bg-indigo-400"></div>
+            <p className="text-[11px] font-bold text-slate-500 mb-1">1인당 1시간 평균 단가</p>
+            <p className="text-2xl font-extrabold text-slate-800">{Math.round(avgPricePerPersonPerHour).toLocaleString()}<span className="text-sm font-medium text-slate-500 ml-1">원</span></p>
+            <p className="text-[10px] text-slate-400 mt-2 tracking-tight">총 매출 ÷ (이용시간 × 결제인원)</p>
+          </div>
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-2 h-full bg-violet-400"></div>
+            <p className="text-[11px] font-bold text-slate-500 mb-1">우리가 점유한 총 이용 시간</p>
+            <p className="text-2xl font-extrabold text-slate-800">{totalHours.toFixed(1)}<span className="text-sm font-medium text-slate-500 ml-1">시간</span></p>
+            <p className="text-[10px] text-slate-400 mt-2 tracking-tight">이번 달 누적 공간 대여 시간</p>
+          </div>
+        </div>
+      </section>
 
       {/* 이용/취소/노쇼 집계 (대시보드엔 없고 통계에서만) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

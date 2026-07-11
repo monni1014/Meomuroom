@@ -18,6 +18,37 @@ function bezier(p0, p1, p2, p3, t) {
     + (t ** 3 * p3);
 }
 
+function shouldShowMouseCursor() {
+  return ["1", "true", "yes", "on"].includes(optionalEnv("RPA_SHOW_MOUSE_CURSOR", "false").toLowerCase());
+}
+
+async function showMouseCursor(page, x, y, pressed = false) {
+  if (!shouldShowMouseCursor()) return;
+  await page.evaluate(({ cursorX, cursorY, isPressed }) => {
+    let cursor = document.getElementById("memoroom-rpa-cursor");
+    if (!cursor) {
+      cursor = document.createElement("div");
+      cursor.id = "memoroom-rpa-cursor";
+      Object.assign(cursor.style, {
+        position: "fixed",
+        width: "18px",
+        height: "18px",
+        borderRadius: "50%",
+        background: "#ef4444",
+        border: "3px solid white",
+        boxShadow: "0 0 0 2px rgba(15, 23, 42, 0.65)",
+        pointerEvents: "none",
+        zIndex: "2147483647",
+        transition: "transform 40ms linear",
+      });
+      document.documentElement.appendChild(cursor);
+    }
+    cursor.style.left = `${cursorX}px`;
+    cursor.style.top = `${cursorY}px`;
+    cursor.style.transform = `translate(-50%, -50%) scale(${isPressed ? 0.72 : 1})`;
+  }, { cursorX: x, cursorY: y, isPressed: pressed });
+}
+
 export function randomDelayMs(minMs, maxMs) {
   const multiplier = Number(optionalEnv("RPA_DELAY_MULTIPLIER", "2.0")) || 2.0;
   const floor = Number(optionalEnv("RPA_MIN_RANDOM_DELAY_FLOOR_MS", "1200")) || 1200;
@@ -72,7 +103,8 @@ export async function humanMouseMove(page, targetX, targetY, label = "mouse move
     const y = Math.max(1, Math.min(viewport.height - 1, bezier(start.y, c1.y, c2.y, targetY, ease) + jitter));
 
     await page.mouse.move(x, y);
-    await page.waitForTimeout(randomInt(10, 34));
+    await showMouseCursor(page, x, y);
+    await page.waitForTimeout(shouldShowMouseCursor() ? randomInt(45, 70) : randomInt(10, 34));
   }
 
   mousePositions.set(page, { x: targetX, y: targetY });
@@ -84,9 +116,11 @@ export async function humanClick(page, x, y, label = "mouse click") {
 
   await humanMouseMove(page, targetX, targetY, label);
   await page.waitForTimeout(randomInt(90, 260));
+  await showMouseCursor(page, targetX, targetY, true);
   await page.mouse.down();
   await page.waitForTimeout(randomInt(70, 190));
   await page.mouse.up();
+  await showMouseCursor(page, targetX, targetY, false);
   await page.waitForTimeout(randomInt(120, 360));
 }
 

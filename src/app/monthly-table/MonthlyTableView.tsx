@@ -1,13 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth } from "date-fns";
-import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, MessageSquareText, RefreshCw, Save, Undo2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { EditableTableCellInput } from "@/components/EditableTableCellInput";
+import {
+  MONTHLY_GRID_BODY_ROW_CLASS,
+  MONTHLY_GRID_END_DIVIDER_CLASS,
+  MONTHLY_GRID_HEADER_ROW_CLASS,
+  MONTHLY_GRID_TABLE_CLASS,
+  MONTHLY_GRID_TOTAL_LEFT_CLASS,
+  MonthlyGridColGroup,
+} from "@/components/MonthlyGridLayout";
 import { TablePaintToolbar } from "@/components/TablePaintToolbar";
-import { ManualCellData, PaintSelection, emptyManualCell, manualColorClass } from "@/lib/manual-table-colors";
+import {
+  ManualCellData,
+  PaintSelection,
+  emptyManualCell,
+  manualCellDataEquals,
+  manualColorClass,
+  reconcileDirtyKey,
+} from "@/lib/manual-table-colors";
 
 interface UsageLog {
   id: string;
@@ -56,7 +71,8 @@ interface ManualTableCell {
   color: string | null;
 }
 
-const ROOMS = ["머무룸1", "머무룸2"] as const;
+const ROOMS = ["머무룸1", "머무룸2", "머무룸3"] as const;
+type RoomName = (typeof ROOMS)[number];
 const HOURS = Array.from({ length: 17 }, (_, i) => i + 8);
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const FIRST_BUSINESS_YEAR = 2025;
@@ -107,7 +123,7 @@ function reservationSlots(reservation: Reservation) {
 }
 
 function reservationTokens(reservation: Reservation) {
-  const tokens: { kind: "status" | "headCount" | "detail" | "discount" | "price"; label: string }[] = [];
+  const tokens: { kind: "status" | "headCount" | "detail" | "price"; label: string }[] = [];
   const headCount = reservation.usageLog?.headCount;
   const detail = reservation.usageLog?.detail || reservation.usageLog?.purpose;
 
@@ -117,9 +133,6 @@ function reservationTokens(reservation: Reservation) {
     if (reservation.isNoShow) tokens.push({ kind: "status", label: "노쇼" });
     if (headCount) tokens.push({ kind: "headCount", label: `${headCount}인` });
     if (detail) tokens.push({ kind: "detail", label: detail });
-    if (reservation.discount > 0) {
-      tokens.push({ kind: "discount", label: `${reservation.discount.toLocaleString()}원할인` });
-    }
   }
 
   if (reservation.price > 0) {
@@ -136,29 +149,42 @@ function cellLabel(reservation: Reservation, hour: number) {
 
   const tokens = reservationTokens(reservation);
   if (tokens.length === 0) return "";
-  if (slots.length === 1) return tokens.map((token) => token.label).join(" / ");
+  if (slots.length === 1) {
+    const firstContent = tokens.find((token) => token.kind !== "detail" && token.kind !== "price");
+    const price = tokens.find((token) => token.kind === "price");
+    return [firstContent?.label, price?.label].filter(Boolean).join(" / ");
+  }
 
   const labels = Array.from({ length: slots.length }, () => "");
   const priceToken = tokens.find((token) => token.kind === "price");
   const contentTokens = tokens.filter((token) => token.kind !== "price");
-
-  contentTokens.forEach((token, index) => {
-    if (index < labels.length) labels[index] = token.label;
+  const contentCapacity = priceToken ? labels.length - 1 : labels.length;
+  contentTokens.slice(0, contentCapacity).forEach((token, index) => {
+    labels[index] = token.label;
   });
-
-  if (priceToken) {
-    const lastIndex = labels.length - 1;
-    if (!labels[lastIndex]) {
-      labels[lastIndex] = priceToken.label;
-    } else {
-      const emptyIndex = labels.findIndex((label, index) => index < lastIndex && !label);
-      if (emptyIndex >= 0) {
-        labels[emptyIndex] = priceToken.label;
-      }
-    }
-  }
+  if (priceToken) labels[labels.length - 1] = priceToken.label;
 
   return labels[slotIndex] || "";
+}
+
+function isReservationPriceCell(reservation: Reservation, hour: number) {
+  const slots = reservationSlots(reservation);
+  return reservation.price > 0 && slots[slots.length - 1] === hour;
+}
+
+function reservationMemoData(reservation: Reservation) {
+  const detail = reservation.usageLog?.detail || reservation.usageLog?.purpose;
+  const slots = reservationSlots(reservation);
+  const tokens = reservationTokens(reservation);
+  const priceToken = tokens.find((token) => token.kind === "price");
+  const contentTokens = tokens.filter((token) => token.kind !== "price");
+  const detailIndex = contentTokens.findIndex((token) => token.kind === "detail");
+  const contentCapacity = priceToken ? slots.length - 1 : slots.length;
+  return {
+    purpose: detail && (slots.length <= 1 || detailIndex >= contentCapacity) ? detail : null,
+    coffeeCount: reservation.usageLog?.coffeeCount || 0,
+    hasCoupon: reservation.discount > 0,
+  };
 }
 
 function cellStyle(reservation: Reservation, isWeekend: boolean) {
@@ -218,11 +244,14 @@ export default function MonthlyTableView() {
   const router = useRouter();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [manualCells, setManualCells] = useState<Record<string, ManualCellData>>({});
+  const [savedManualCells, setSavedManualCells] = useState<Record<string, ManualCellData>>({});
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
   const [paintSelection, setPaintSelection] = useState<PaintSelection>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editMessage, setEditMessage] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [roomFilter, setRoomFilter] = useState<"all" | "머무룸1" | "머무룸2">("all");
-  const [expandedCellKey, setExpandedCellKey] = useState<string | null>(null);
+  const [roomFilter, setRoomFilter] = useState<"all" | RoomName>("all");
 
   const fetchReservations = async (showLoading = true) => {
     try {
@@ -248,42 +277,56 @@ export default function MonthlyTableView() {
   const visibleRooms = roomFilter === "all" ? ROOMS : ROOMS.filter((room) => room === roomFilter);
 
   const moveToMonth = (year: number, month: number) => {
+    if (dirtyKeys.size > 0) {
+      setEditMessage("저장하거나 되돌린 뒤 다른 월로 이동하세요.");
+      return;
+    }
     setCurrentDate(new Date(year, month - 1, 1));
   };
 
   const moveMonthBy = (amount: number) => {
+    if (dirtyKeys.size > 0) {
+      setEditMessage("저장하거나 되돌린 뒤 다른 월로 이동하세요.");
+      return;
+    }
     setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + amount, 1));
   };
 
-  const fetchManualCells = async (year: number, month: number) => {
+  const requestManualCells = useCallback(async (year: number, month: number) => {
+    const res = await fetch(`/api/manual-table-cells?tableId=monthly-table&year=${year}&month=${month}`, { cache: "no-store" });
+    if (!res.ok) throw new Error("월간표 수동 입력을 불러오지 못했습니다.");
+    const cells = (await res.json()) as ManualTableCell[];
+    return cells.reduce<Record<string, ManualCellData>>((acc, cell) => {
+      const day = new Date(cell.year, cell.month - 1, cell.day);
+      acc[manualCellKey(cell.sectionId, day, cell.cellKey)] = {
+        value: cell.value,
+        color: cell.color as ManualCellData["color"],
+      };
+      return acc;
+    }, {});
+  }, []);
+
+  const fetchManualCells = useCallback(async (year: number, month: number) => {
     try {
-      const res = await fetch(`/api/manual-table-cells?tableId=monthly-table&year=${year}&month=${month}`);
-      if (!res.ok) return;
-      const cells = (await res.json()) as ManualTableCell[];
-      setManualCells(
-        cells.reduce<Record<string, ManualCellData>>((acc, cell) => {
-          const day = new Date(cell.year, cell.month - 1, cell.day);
-          acc[manualCellKey(cell.sectionId, day, cell.cellKey)] = {
-            value: cell.value,
-            color: cell.color as ManualCellData["color"],
-          };
-          return acc;
-        }, {})
-      );
+      const loadedCells = await requestManualCells(year, month);
+      setManualCells(loadedCells);
+      setSavedManualCells(loadedCells);
+      setDirtyKeys(new Set());
     } catch (error) {
       console.error("Failed to load manual monthly table cells:", error);
+      setEditMessage(error instanceof Error ? error.message : "월간표 수동 입력을 불러오지 못했습니다.");
     }
-  };
+  }, [requestManualCells]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchManualCells(currentYear, currentMonth);
-  }, [currentYear, currentMonth]);
+  }, [currentYear, currentMonth, fetchManualCells]);
 
   useEffect(() => {
     const refreshLinkedData = () => {
       fetchReservations(false);
-      fetchManualCells(currentYear, currentMonth);
+      if (dirtyKeys.size === 0) fetchManualCells(currentYear, currentMonth);
     };
     const timer = window.setInterval(refreshLinkedData, 30_000);
     window.addEventListener("focus", refreshLinkedData);
@@ -291,44 +334,59 @@ export default function MonthlyTableView() {
       window.clearInterval(timer);
       window.removeEventListener("focus", refreshLinkedData);
     };
-  }, [currentYear, currentMonth]);
+  }, [currentYear, currentMonth, dirtyKeys.size, fetchManualCells]);
 
   const updateManualCell = (sectionId: string, day: Date, cellKey: string, patch: Partial<ManualCellData>) => {
     const key = manualCellKey(sectionId, day, cellKey);
-    setManualCells((prev) => ({
-      ...prev,
-      [key]: {
-        ...emptyManualCell(),
-        ...prev[key],
-        ...patch,
-      },
-    }));
+    const currentCell = { ...emptyManualCell(), ...manualCells[key] };
+    const nextCell = { ...currentCell, ...patch };
+    const savedCell = { ...emptyManualCell(), ...savedManualCells[key] };
+    const changedFromCurrent = !manualCellDataEquals(currentCell, nextCell);
+    const changedFromSaved = !manualCellDataEquals(savedCell, nextCell);
+
+    if (changedFromCurrent) {
+      setManualCells((previous) => ({
+        ...previous,
+        [key]: nextCell,
+      }));
+    }
+    setDirtyKeys((previous) => reconcileDirtyKey(previous, key, changedFromSaved));
+    if (!changedFromCurrent) return;
+    setEditMessage(null);
   };
 
-  const saveManualCell = async (sectionId: string, day: Date, cellKey: string, cell: ManualCellData) => {
-    try {
-      await fetch("/api/manual-table-cells", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tableId: "monthly-table",
-          sectionId,
-          year: currentYear,
-          month: currentMonth,
-          day: day.getDate(),
-          cellKey,
-          value: cell.value,
-          color: cell.color,
-        }),
-      });
-    } catch (error) {
-      console.error("Failed to save manual monthly table cell:", error);
-    }
+  const saveManualCell = async (
+    sectionId: string,
+    day: Date,
+    cellKey: string,
+    cell: ManualCellData,
+    year: number,
+    month: number,
+  ) => {
+    const response = await fetch("/api/manual-table-cells", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tableId: "monthly-table",
+        sectionId,
+        year,
+        month,
+        day: day.getDate(),
+        cellKey,
+        value: cell.value,
+        color: cell.color,
+      }),
+    });
+    if (!response.ok) throw new Error("월간표 변경사항을 저장하지 못했습니다.");
   };
 
   const refreshAll = () => {
     fetchReservations(true);
-    fetchManualCells(currentYear, currentMonth);
+    if (dirtyKeys.size === 0) {
+      fetchManualCells(currentYear, currentMonth);
+    } else {
+      setEditMessage("저장 전 변경사항이 있어 수동 입력은 새로고침하지 않았습니다.");
+    }
   };
 
   const applyPaintToCell = (sectionId: string, day: Date, cellKey: string) => {
@@ -340,7 +398,47 @@ export default function MonthlyTableView() {
       color: paintSelection === "clear" ? null : paintSelection,
     };
     updateManualCell(sectionId, day, cellKey, { color: nextCell.color });
-    saveManualCell(sectionId, day, cellKey, nextCell);
+  };
+
+  const undoChanges = () => {
+    setManualCells(savedManualCells);
+    setDirtyKeys(new Set());
+    setEditMessage("저장 전 변경사항을 되돌렸습니다.");
+  };
+
+  const saveChanges = async () => {
+    if (dirtyKeys.size === 0 || isSaving) return;
+    setIsSaving(true);
+    setEditMessage(null);
+    const draft = manualCells;
+    const keysToSave = [...dirtyKeys];
+    const savingYear = currentYear;
+    const savingMonth = currentMonth;
+
+    try {
+      for (const key of keysToSave) {
+        const [sectionId, dateKey, cellKey] = key.split("|");
+        const day = new Date(`${dateKey}T12:00:00`);
+        await saveManualCell(sectionId, day, cellKey, draft[key] || emptyManualCell(), savingYear, savingMonth);
+      }
+
+      const verifiedCells = await requestManualCells(savingYear, savingMonth);
+      const mismatched = keysToSave.some((key) => {
+        const expected = draft[key] || emptyManualCell();
+        const actual = verifiedCells[key] || emptyManualCell();
+        return expected.value.trim() !== actual.value.trim() || expected.color !== actual.color;
+      });
+      if (mismatched) throw new Error("저장값 확인에 실패했습니다. 변경사항은 화면에 유지됩니다.");
+
+      setManualCells(verifiedCells);
+      setSavedManualCells(verifiedCells);
+      setDirtyKeys(new Set());
+      setEditMessage("저장되었습니다.");
+    } catch (error) {
+      setEditMessage(error instanceof Error ? error.message : "월간표 변경사항을 저장하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -348,7 +446,7 @@ export default function MonthlyTableView() {
       <header className="pt-8 pb-2 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">월간 예약표</h1>
-          <p className="text-sm text-slate-500 mt-1">머무룸1과 머무룸2 예약을 시간표 형식으로 확인합니다.</p>
+          <p className="text-sm text-slate-500 mt-1">머무룸1·2·3 예약을 시간표 형식으로 확인합니다.</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -419,7 +517,7 @@ export default function MonthlyTableView() {
 
           <div className="space-y-1.5">
             <p className="text-xs font-black text-slate-400 uppercase">공간</p>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-4 gap-1.5">
               {(["all", ...ROOMS] as const).map((room) => (
                 <button
                   key={room}
@@ -438,7 +536,34 @@ export default function MonthlyTableView() {
           </div>
         </div>
         <div className="border-t border-slate-100 pt-4">
-          <TablePaintToolbar selected={paintSelection} onSelect={setPaintSelection} />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <TablePaintToolbar
+              selected={paintSelection}
+              onSelect={setPaintSelection}
+              showMonthlyOnlyColors
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={undoChanges}
+                disabled={dirtyKeys.size === 0 || isSaving}
+                className="inline-flex h-9 items-center gap-1.5 rounded border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+                되돌리기
+              </button>
+              <button
+                type="button"
+                onClick={saveChanges}
+                disabled={dirtyKeys.size === 0 || isSaving}
+                className="inline-flex h-9 items-center gap-1.5 rounded bg-emerald-600 px-3 text-xs font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                <Save className="h-3.5 w-3.5" />
+                {isSaving ? "저장 중" : `저장${dirtyKeys.size > 0 ? ` (${dirtyKeys.size})` : ""}`}
+              </button>
+            </div>
+          </div>
+          {editMessage && <p className="mt-2 text-xs font-bold text-slate-500">{editMessage}</p>}
         </div>
       </section>
 
@@ -456,7 +581,11 @@ export default function MonthlyTableView() {
               .filter(countsAsTime)
               .reduce((sum, reservation) => sum + durationHours(reservation), 0);
             const monthRevenue = roomReservations.reduce((sum, reservation) => sum + reservation.price, 0);
-            const roomHeaderClass = room === "머무룸1" ? "bg-amber-100 text-amber-950" : "bg-sky-100 text-sky-950";
+            const roomHeaderClass = room === "머무룸1"
+              ? "bg-amber-100 text-amber-950"
+              : room === "머무룸2"
+                ? "bg-sky-100 text-sky-950"
+                : "bg-emerald-100 text-emerald-950";
 
             return (
               <section key={room} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -464,17 +593,18 @@ export default function MonthlyTableView() {
                   {room}
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="min-w-[1380px] w-full table-fixed border-collapse text-[11px]">
+                  <table className={MONTHLY_GRID_TABLE_CLASS}>
+                    <MonthlyGridColGroup hours={HOURS} />
                     <thead>
-                      <tr className="h-6 bg-emerald-50 text-slate-900">
-                        <th className="sticky left-0 z-20 w-[92px] border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle">날짜</th>
-                        <th className="sticky left-[92px] z-20 w-[76px] border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle">시간 합계</th>
+                      <tr className={MONTHLY_GRID_HEADER_ROW_CLASS}>
+                        <th className="sticky left-0 z-20 border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle">날짜</th>
+                        <th className={cn("sticky z-20 border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle", MONTHLY_GRID_TOTAL_LEFT_CLASS)}>시간 합계</th>
                         {HOURS.map((hour) => (
-                          <th key={hour} className="w-[64px] border border-slate-300 px-1 py-0.5 text-center align-middle">
+                          <th key={hour} className="border border-slate-300 px-1 py-0.5 text-center align-middle">
                             {hour}
                           </th>
                         ))}
-                        <th className="sticky right-0 z-20 w-[92px] border border-slate-300 border-l-4 border-l-slate-700 bg-emerald-50 px-1 py-0.5 text-center align-middle">일 매출액</th>
+                        <th className={cn("sticky right-0 z-20 border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle", MONTHLY_GRID_END_DIVIDER_CLASS)}>일 매출액</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -490,11 +620,11 @@ export default function MonthlyTableView() {
                         const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 
                         return (
-                          <tr key={`${room}-${day.toISOString()}`} className="group h-6 hover:bg-slate-50">
+                          <tr key={`${room}-${day.toISOString()}`} className={MONTHLY_GRID_BODY_ROW_CLASS}>
                             <td className={cn("sticky left-0 z-10 border border-slate-300 bg-white px-1 py-0.5 text-center align-middle font-semibold group-hover:bg-slate-50", isWeekend && "text-red-500")}>
                               {format(day, "MM월 dd일")}
                             </td>
-                            <td className="sticky left-[92px] z-10 border border-slate-300 bg-white px-1 py-0.5 text-center align-middle font-bold text-slate-800 group-hover:bg-slate-50">
+                            <td className={cn("sticky z-10 border border-slate-300 bg-white px-1 py-0.5 text-center align-middle font-bold text-slate-800 group-hover:bg-slate-50", MONTHLY_GRID_TOTAL_LEFT_CLASS)}>
                               {dayHours > 0 ? Number(dayHours.toFixed(1)) : "-"}
                             </td>
                             {HOURS.map((hour) => {
@@ -505,9 +635,19 @@ export default function MonthlyTableView() {
                               const manualKey = manualCellKey(room, day, editableKey);
                               const manualCell = manualCells[manualKey] || emptyManualCell();
                               const manualClass = manualColorClass(manualCell.color);
-                              const displayValue = manualCell.value || label;
-                              const expandedKey = `${room}|${format(day, "yyyy-MM-dd")}|${editableKey}`;
-                              const isExpanded = expandedCellKey === expandedKey && displayValue.trim().length > 0;
+                              const isPriceCell = primary ? isReservationPriceCell(primary, hour) : false;
+                              const isReservationStart = primary
+                                ? reservationSlots(primary)[0] === hour
+                                : false;
+                              const memo = primary && isReservationStart
+                                ? reservationMemoData(primary)
+                                : { purpose: null, coffeeCount: 0, hasCoupon: false };
+                              const hasMemo = Boolean(memo.purpose || memo.coffeeCount > 0 || memo.hasCoupon);
+                              const memoLabel = [
+                                memo.purpose ? `목적 ${memo.purpose}` : null,
+                                memo.coffeeCount > 0 ? `커피 ${memo.coffeeCount}잔` : null,
+                                memo.hasCoupon ? "쿠폰 사용" : null,
+                              ].filter(Boolean).join(", ");
 
                               return (
                                 <td
@@ -518,17 +658,17 @@ export default function MonthlyTableView() {
                                       applyPaintToCell(room, day, editableKey);
                                     }
                                   }}
-                                  onDoubleClick={() => {
-                                    if (displayValue.trim()) {
-                                      setExpandedCellKey((current) => current === expandedKey ? null : expandedKey);
-                                    } else if (primary) {
-                                      router.push(`/usage?selected=${primary.id}`);
-                                    }
+                                  onDoubleClick={(event) => {
+                                    if (!primary || !isPriceCell || paintSelection !== null) return;
+                                    event.preventDefault();
+                                    router.push(`/usage?selected=${encodeURIComponent(primary.id)}`);
                                   }}
                                   className={cn(
                                     "relative h-6 overflow-visible border border-slate-300 p-0 text-center align-middle font-semibold",
                                     manualClass || (primary ? cellStyle(primary, isWeekend) : "bg-white text-slate-500"),
-                                    paintSelection !== null && "cursor-crosshair"
+                                    paintSelection !== null && "cursor-crosshair",
+                                    isPriceCell && paintSelection === null && "cursor-pointer",
+                                    hasMemo && "hover:z-40 focus-within:z-40"
                                   )}
                                   title={
                                     primary
@@ -544,26 +684,37 @@ export default function MonthlyTableView() {
                                     placeholder={label}
                                     disabled={paintSelection !== null}
                                     onChange={(value) => updateManualCell(room, day, editableKey, { value })}
-                                    onCommit={(value) =>
-                                      saveManualCell(room, day, editableKey, {
-                                        ...manualCell,
-                                        value,
-                                      })
-                                    }
-                                    className={cn(primary ? "text-current" : "text-slate-800")}
+                                    onCommit={(value) => updateManualCell(room, day, editableKey, { value })}
+                                    className={cn(
+                                      primary ? "text-current" : "text-slate-800",
+                                      isPriceCell && paintSelection === null && "cursor-pointer",
+                                    )}
                                   />
-                                  {isExpanded && (
-                                    <div
-                                      className="absolute left-1/2 top-1/2 z-50 min-w-[180px] max-w-[320px] -translate-x-1/2 -translate-y-1/2 whitespace-normal rounded-lg border border-slate-400 bg-white px-3 py-2 text-center text-xs font-black leading-relaxed text-slate-950 shadow-2xl"
+                                  {hasMemo && (
+                                    <span
+                                      className="group/memo absolute right-0.5 top-0.5 z-30 grid h-4 w-4 place-items-center rounded-sm border border-[#8B5E3C] bg-white text-[#7A4B2A] shadow-sm"
+                                      aria-label={memoLabel}
+                                      title=""
+                                      tabIndex={0}
                                     >
-                                      {displayValue}
-                                    </div>
+                                      <MessageSquareText className="h-2.5 w-2.5" />
+                                      <span className="pointer-events-none invisible absolute left-1/2 top-[calc(100%+6px)] z-[70] flex min-w-[128px] -translate-x-1/2 flex-col items-center gap-1 whitespace-nowrap rounded-md border border-[#D8C2B2] bg-white px-2.5 py-2 text-center text-[10px] font-bold text-slate-800 opacity-0 shadow-xl transition group-hover/memo:visible group-hover/memo:opacity-100 group-focus/memo:visible group-focus/memo:opacity-100">
+                                        <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 border-l border-t border-[#D8C2B2] bg-white" />
+                                        {memo.purpose && <span>목적: {memo.purpose}</span>}
+                                        {memo.coffeeCount > 0 && <span>커피: {memo.coffeeCount}잔</span>}
+                                        {memo.hasCoupon && (
+                                          <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[9px] font-semibold text-rose-600">
+                                            🎟️ 쿠폰
+                                          </span>
+                                        )}
+                                      </span>
+                                    </span>
                                   )}
                                 </td>
                               );
                             })}
                             <td
-                              className="sticky right-0 z-10 border border-slate-300 border-l-4 border-l-slate-700 bg-white px-1 py-0.5 text-center align-middle font-bold text-slate-900 group-hover:bg-slate-50"
+                              className={cn("sticky right-0 z-10 border border-slate-300 bg-white px-1 py-0.5 text-center align-middle font-bold text-slate-900 group-hover:bg-slate-50", MONTHLY_GRID_END_DIVIDER_CLASS)}
                               title={dayRevenueTitle}
                             >
                               {formatNumber(dayRevenue)}
@@ -575,13 +726,13 @@ export default function MonthlyTableView() {
                     <tfoot>
                       <tr className="bg-slate-100 font-black text-slate-900">
                         <td className="sticky left-0 z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle">월 총합</td>
-                        <td className="sticky left-[92px] z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle">
+                        <td className={cn("sticky z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle", MONTHLY_GRID_TOTAL_LEFT_CLASS)}>
                           {Number(monthHours.toFixed(1))}
                         </td>
                         <td className="border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle" colSpan={HOURS.length}>
                           월 매출액
                         </td>
-                        <td className="sticky right-0 z-20 border border-slate-400 border-l-4 border-l-slate-700 bg-slate-100 px-1 py-0.5 text-center align-middle">
+                        <td className={cn("sticky right-0 z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle", MONTHLY_GRID_END_DIVIDER_CLASS)}>
                           {monthRevenue.toLocaleString()}
                         </td>
                       </tr>

@@ -21,24 +21,31 @@ function clientState(state: string) {
   return "not_collected";
 }
 
-type CancellationEvent = {
+type SlotEvent = {
+  id: string;
   scanId: string;
   competitorId: string;
   dateKey: string;
   hour: number;
+  eventType: string;
   cancellationFeeRate: number | null;
   occurredAt: Date;
+  acknowledgedAt: Date | null;
 };
 
-function groupCancellationEvents(events: CancellationEvent[]) {
+function groupSlotEvents(events: SlotEvent[]) {
   const groups: Array<{
+    id: string;
+    eventIds: string[];
     scanId: string;
     competitorId: string;
     dateKey: string;
+    eventType: string;
     startHour: number;
     endHour: number;
     feeRate: number | null;
     occurredAt: string;
+    acknowledged: boolean;
   }> = [];
 
   for (const event of events) {
@@ -48,20 +55,27 @@ function groupCancellationEvents(events: CancellationEvent[]) {
       && previous.scanId === event.scanId
       && previous.competitorId === event.competitorId
       && previous.dateKey === event.dateKey
+      && previous.eventType === event.eventType
       && previous.endHour === event.hour
       && previous.feeRate === event.cancellationFeeRate
     ) {
       previous.endHour = event.hour + 1;
+      previous.eventIds.push(event.id);
+      previous.acknowledged = previous.acknowledged && Boolean(event.acknowledgedAt);
       continue;
     }
     groups.push({
+      id: event.id,
+      eventIds: [event.id],
       scanId: event.scanId,
       competitorId: event.competitorId,
       dateKey: event.dateKey,
+      eventType: event.eventType === "CANCELLED" ? "CANCELLED" as const : "BOOKED" as const,
       startHour: event.hour,
       endHour: event.hour + 1,
       feeRate: event.cancellationFeeRate,
       occurredAt: event.occurredAt.toISOString(),
+      acknowledged: Boolean(event.acknowledgedAt),
     });
   }
   return groups;
@@ -69,7 +83,7 @@ function groupCancellationEvents(events: CancellationEvent[]) {
 
 export async function getCompetitorSnapshots(year: number, month: number) {
   const { startKey, endKey } = monthRange(year, month);
-  const [slots, cancellationEvents, latestScan] = await Promise.all([
+  const [slots, slotEvents, latestScan] = await Promise.all([
     prisma.competitorSlot.findMany({
       where: {
         competitorId: { in: [...COMPETITOR_IDS] },
@@ -81,17 +95,23 @@ export async function getCompetitorSnapshots(year: number, month: number) {
     prisma.competitorSlotEvent.findMany({
       where: {
         competitorId: { in: [...COMPETITOR_IDS] },
-        dateKey: { gte: startKey, lte: endKey },
-        eventType: "CANCELLED",
+        eventType: { in: ["BOOKED", "CANCELLED"] },
+        OR: [
+          { dateKey: { gte: startKey, lte: endKey } },
+          { acknowledgedAt: null },
+        ],
       },
       orderBy: [{ occurredAt: "asc" }, { competitorId: "asc" }, { dateKey: "asc" }, { hour: "asc" }],
       select: {
+        id: true,
         scanId: true,
         competitorId: true,
         dateKey: true,
         hour: true,
+        eventType: true,
         cancellationFeeRate: true,
         occurredAt: true,
+        acknowledgedAt: true,
       },
     }),
     prisma.competitorScan.findFirst({ orderBy: { startedAt: "desc" } }),
@@ -105,6 +125,7 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       cancellationPending: boolean;
       bookingNumber: number | null;
       bookingGroup: string | null;
+      firstDetectedAt: string | null;
     }>;
   }>> = {};
   const bookingGroupKeys = new Map<string, string>();
@@ -120,6 +141,7 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       cancellationPending: slot.pendingState === "AVAILABLE",
       bookingNumber: null,
       bookingGroup: null,
+      firstDetectedAt: (slot.lastBookedAt || slot.firstObservedAt).toISOString(),
     };
     bookingGroupKeys.set(
       `${slot.competitorId}|${slot.dateKey}|${slot.hour}`,
@@ -146,14 +168,16 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       }
 
       segments.forEach((segment, segmentIndex) => {
-        const opportunityLostRooms = competitorId === "synergy"
-          ? ["머무룸1", "머무룸2"].filter((roomName) => {
+        const duration = segment.endHour - segment.startHour + 1;
+        const ignoreOneHourTriground = competitorId.startsWith("triground-") && duration < 2;
+        const opportunityLostRooms = ignoreOneHourTriground
+          ? []
+          : ["머무룸1", "머무룸2"].filter((roomName) => {
               for (let hour = segment.startHour; hour <= segment.endHour; hour += 1) {
                 if (!day.slots[String(hour)].opportunityLostRooms.includes(roomName)) return false;
               }
               return true;
-            })
-          : [];
+            });
 
         for (let hour = segment.startHour; hour <= segment.endHour; hour += 1) {
           const slot = day.slots[String(hour)];
@@ -188,14 +212,47 @@ export async function getCompetitorSnapshots(year: number, month: number) {
     }
   }
 
+  const groupedEvents = groupSlotEvents(slotEvents);
+  const unreadGroups = groupedEvents.filter((event) => !event.acknowledged);
+  const supersededBookingIds = new Set<string>();
+  const unreadEvents = unreadGroups.map((event) => {
+    if (event.eventType !== "CANCELLED") return event;
+
+    const matchingBookings = unreadGroups.filter((candidate) => (
+      candidate.eventType === "BOOKED"
+      && candidate.competitorId === event.competitorId
+      && candidate.dateKey === event.dateKey
+      && candidate.startHour === event.startHour
+      && candidate.endHour === event.endHour
+      && candidate.occurredAt < event.occurredAt
+    ));
+    matchingBookings.forEach((booking) => booking.eventIds.forEach((id) => supersededBookingIds.add(id)));
+    return {
+      ...event,
+      eventIds: [...event.eventIds, ...matchingBookings.flatMap((booking) => booking.eventIds)],
+    };
+  }).filter((event) => !event.eventIds.every((id) => supersededBookingIds.has(id)));
+
   return {
     days,
-    cancellations: groupCancellationEvents(cancellationEvents).map((event) => ({
+    cancellations: groupedEvents.filter((event) => (
+      event.eventType === "CANCELLED" && event.dateKey >= startKey && event.dateKey <= endKey
+    )).map((event) => ({
       competitorId: event.competitorId,
       dateKey: event.dateKey,
       startHour: event.startHour,
       endHour: event.endHour,
       feeRate: event.feeRate,
+      occurredAt: event.occurredAt,
+    })),
+    unreadEvents: unreadEvents.map((event) => ({
+      id: event.id,
+      eventIds: event.eventIds,
+      competitorId: event.competitorId,
+      dateKey: event.dateKey,
+      eventType: event.eventType === "CANCELLED" ? "CANCELLED" as const : "BOOKED" as const,
+      startHour: event.startHour,
+      endHour: event.endHour,
       occurredAt: event.occurredAt,
     })),
     latestScan: latestScan

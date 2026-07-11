@@ -95,6 +95,7 @@ model AdminAlert {
   message   String
   dedupeKey String?  @unique
   resolved  Boolean  @default(false)
+  dismissedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -180,7 +181,9 @@ model CompetitorSlotEvent {
   cancellationFeeRate  Int?
   opportunityLostRooms String?
   occurredAt           DateTime @default(now())
+  acknowledgedAt       DateTime?
 
   @@index([competitorId, dateKey, occurredAt])
   @@index([eventType, occurredAt])
+  @@index([acknowledgedAt, occurredAt])
 }

@@ -1,5 +1,6 @@
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
 import { parseArgs } from "./lib/cli.mjs";
+import { humanClickElement } from "./lib/human.mjs";
 
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
 const TRACKED_START_HOUR = 8;
@@ -114,7 +115,7 @@ async function navigateToMonth(page, targetKey) {
     if (await button.isDisabled()) {
       throw new Error(`Calendar cannot move to ${target.year}.${target.month}`);
     }
-    await button.click();
+    await humanClickElement(page, button, `competitor calendar ${direction}`);
     await page.waitForFunction(
       ({ year, month }) => {
         const text = document.querySelector(".calendar_title")?.textContent || "";
@@ -141,7 +142,7 @@ async function selectDate(page, targetKey) {
   const button = buttons.nth(index);
   if (await button.isDisabled()) return false;
 
-  await button.click();
+  await humanClickElement(page, button, `competitor calendar date ${targetKey}`);
   await page.waitForFunction(
     ({ expectedDay }) => {
       const selected = document.querySelector(".calendar_date.selected .num")?.textContent?.trim();
@@ -214,7 +215,7 @@ function buildObservations(competitor, targetKey, rawSlots, checkedAt) {
   return observations;
 }
 
-async function scanCompetitor(context, competitor, targetDates) {
+async function scanCompetitor(context, competitor, targetDates, demoHoldMs = 0) {
   const page = await context.newPage();
   const observations = [];
 
@@ -229,6 +230,8 @@ async function scanCompetitor(context, competitor, targetDates) {
       observations.push(...buildObservations(competitor, targetKey, rawSlots, checkedAt));
     }
 
+    if (demoHoldMs > 0) await page.waitForTimeout(demoHoldMs);
+
     return observations;
   } finally {
     await page.close();
@@ -237,6 +240,9 @@ async function scanCompetitor(context, competitor, targetDates) {
 
 async function main() {
   const args = parseArgs(process.argv);
+  const headed = args.headed === "true";
+  const demoHoldMs = headed ? Math.max(0, Number(args["hold-ms"] || 5_000)) : 0;
+  if (args["show-mouse"] === "true") process.env.RPA_SHOW_MOUSE_CURSOR = "true";
   const startKey = requiredDateKey(args.start, "--start");
   const endKey = requiredDateKey(args.end, "--end");
   if (startKey > endKey) throw new Error("--start must not be after --end");
@@ -250,7 +256,7 @@ async function main() {
   if (competitors.length === 0) throw new Error("No matching competitors were selected");
 
   const targetDates = datesBetween(startKey, endKey);
-  const browser = await launchRpaBrowser({ headless: true, useProxy: false });
+  const browser = await launchRpaBrowser({ headless: !headed, useProxy: false });
   const observations = [];
   const errors = [];
 
@@ -258,7 +264,7 @@ async function main() {
     const context = await newRpaContext(browser, { blockHeavyResources: true });
     for (const competitor of competitors) {
       try {
-        observations.push(...await scanCompetitor(context, competitor, targetDates));
+        observations.push(...await scanCompetitor(context, competitor, targetDates, demoHoldMs));
       } catch (error) {
         errors.push({
           competitorId: competitor.id,

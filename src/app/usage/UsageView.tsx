@@ -420,13 +420,19 @@ export default function UsagePage() {
     : source === "spacecloud" ? "text-blue-700"
     : "text-slate-500";
 
+  const roomBadgeColor = (roomName: string) =>
+    roomName === "머무룸1" ? "bg-sky-50 text-sky-700"
+    : roomName === "머무룸2" ? "bg-purple-50 text-purple-700"
+    : roomName === "머무룸3" ? "bg-emerald-50 text-emerald-700"
+    : "bg-slate-100 text-slate-700";
+
   // 한 줄 라벨: 날짜 · 이름 (루트색) (수기)
   const renderResLabel = (res: Reservation) => (
     <span className={`flex items-center gap-1 truncate ${res.status === "CANCELLED" ? "opacity-60" : ""}`}>
       {res.status === "CANCELLED" && <span className="text-slate-500 font-bold bg-slate-100 px-1 rounded text-xs">[취소됨]</span>}
       {res.isCleanUpBad && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-600 border border-red-500 shadow-sm shadow-red-100" title="정리상태 불량">🧹불량!</span>}
       <RpaStatusBadge memo={res.memo} createdAt={res.createdAt} updatedAt={res.updatedAt} />
-      <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${res.roomName === "머무룸1" ? "bg-sky-50 text-sky-700" : res.roomName === "머무룸2" ? "bg-purple-50 text-purple-700" : "bg-slate-100 text-slate-700"}`}>{res.roomName}</span>
+      <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${roomBadgeColor(res.roomName)}`}>{res.roomName}</span>
       <span className={res.status === "CANCELLED" ? "text-slate-500 line-through" : "text-slate-700"}>
         {formatDateLabel(res.startTime)} · {res.customerName}
       </span>
@@ -579,6 +585,13 @@ export default function UsagePage() {
                     className={`flex-1 py-2 text-sm font-bold rounded-xl border transition ${editRoomName === "머무룸2" ? "bg-purple-50 text-purple-600 border-purple-500" : "bg-white text-slate-500 border-slate-200"}`}
                   >
                     머무룸 2
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditRoomName("머무룸3")}
+                    className={`flex-1 py-2 text-sm font-bold rounded-xl border transition ${editRoomName === "머무룸3" ? "bg-emerald-50 text-emerald-600 border-emerald-500" : "bg-white text-slate-500 border-slate-200"}`}
+                  >
+                    머무룸 3
                   </button>
                 </div>
               </div>
@@ -987,7 +1000,7 @@ export default function UsagePage() {
                   <div className="space-y-1">
                     <p className="text-sm font-bold text-slate-900 flex items-center gap-1">
                       {log.isCleanUpBad && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-600 border border-red-500 shadow-sm shadow-red-100" title="정리상태 불량">🧹불량!</span>}
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${log.roomName === "머무룸1" ? "bg-sky-50 text-sky-700" : log.roomName === "머무룸2" ? "bg-purple-50 text-purple-700" : "bg-slate-100 text-slate-700"}`}>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${roomBadgeColor(log.roomName)}`}>
                         {log.roomName}
                       </span>
                       {parsedDateStr} ({log.customerName || "미지정"})

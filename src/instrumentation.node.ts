@@ -9,14 +9,12 @@ export async function registerNodeInstrumentation() {
   const { checkIproyalTrafficAndAlert } = await import("@/lib/iproyal-traffic");
   const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
   const { runCompetitorScan } = await import("@/lib/competitor-monitor");
-  const { captureSynergyCutoffStudy } = await import("@/lib/competitor-cutoff-study");
 
   let running = false;
   let proxyTrafficRunning = false;
   let naverStatusReconcileRunning = false;
   let notificationRunning = false;
   let competitorScanRunning = false;
-  let cutoffCaptureRunning = false;
 
   async function runEmailSync(label: string) {
     if (running) {
@@ -96,7 +94,7 @@ export async function registerNodeInstrumentation() {
 
   async function runCompetitorMonitor(
     label: string,
-    mode: "daily" | "weekly" | "monthly",
+    mode: "today" | "today-next" | "next-week" | "daily" | "weekly" | "monthly",
     skipIfRecentMinutes?: number,
   ) {
     if (competitorScanRunning) {
@@ -117,23 +115,6 @@ export async function registerNodeInstrumentation() {
     }
   }
 
-  async function runCutoffCapture(label: string) {
-    if (cutoffCaptureRunning) {
-      console.log(`[Cron] Previous cutoff capture is still running. Skipping ${label}.`);
-      return;
-    }
-
-    cutoffCaptureRunning = true;
-    try {
-      const result = await captureSynergyCutoffStudy();
-      if (result) console.log(`[Cron] Synergy cutoff captured (${label}): ${result.checkedAtKst}`);
-    } catch (error) {
-      console.error(`[Cron] Synergy cutoff capture failed (${label}):`, error);
-    } finally {
-      cutoffCaptureRunning = false;
-    }
-  }
-
   setTimeout(() => {
     void runEmailSync("startup");
   }, 0);
@@ -147,7 +128,7 @@ export async function registerNodeInstrumentation() {
   }, 15_000);
 
   setTimeout(() => {
-    void runCompetitorMonitor("startup", "daily", 120);
+    void runCompetitorMonitor("startup", "today-next", 120);
   }, 60_000);
 
   schedule("*/15 * * * * *", async () => {
@@ -169,19 +150,25 @@ export async function registerNodeInstrumentation() {
   });
 
   schedule("0 7 2-31 * *", async () => {
-    await runCompetitorMonitor("daily", "daily");
+    await runCompetitorMonitor("07:00 today and tomorrow", "today-next");
   }, {
     timezone: "Asia/Seoul",
   });
 
-  schedule("0 12,18,23 * * *", async () => {
-    await runCompetitorMonitor("daily", "daily");
+  schedule("0 12 * * *", async () => {
+    await runCompetitorMonitor("12:00 today", "today");
   }, {
     timezone: "Asia/Seoul",
   });
 
-  schedule("30 0 * * 1", async () => {
-    await runCompetitorMonitor("weekly", "weekly");
+  schedule("0 18 * * *", async () => {
+    await runCompetitorMonitor("18:00 today and tomorrow", "today-next");
+  }, {
+    timezone: "Asia/Seoul",
+  });
+
+  schedule("0 23 * * *", async () => {
+    await runCompetitorMonitor("23:00 next seven days", "next-week");
   }, {
     timezone: "Asia/Seoul",
   });
@@ -192,28 +179,9 @@ export async function registerNodeInstrumentation() {
     timezone: "Asia/Seoul",
   });
 
-  schedule("55 10,11,15,18,20 * * *", async () => {
-    await runCutoffCapture("before-hour");
-  }, {
-    timezone: "Asia/Seoul",
-  });
-
-  schedule("5 11,12,16,19,21 * * *", async () => {
-    await runCutoffCapture("after-hour");
-  }, {
-    timezone: "Asia/Seoul",
-  });
-
-  schedule("25 11,16 * * *", async () => {
-    await runCutoffCapture("mid-hour");
-  }, {
-    timezone: "Asia/Seoul",
-  });
-
   console.log("[Cron] Email auto sync started (15 second interval)");
   console.log("[Cron] Reservation notification monitor started (1 minute interval)");
   console.log("[Cron] IPRoyal traffic monitor started (10 minute interval)");
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
-  console.log("[Cron] Competitor monitor started (07:00/12:00/18:00/23:00, monthly baseline at 07:00 on day 1)");
-  console.log("[Cron] Synergy cutoff study capture schedule registered (10:55/11:05/11:25/11:55/12:05/15:55/16:05/16:25/18:55/19:05/20:55/21:05)");
+  console.log("[Cron] Competitor monitor started (07:00 today+tomorrow, 12:00 today, 18:00 today+tomorrow, 23:00 next 7 days, monthly baseline at 07:00 on day 1)");
 }

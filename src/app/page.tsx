@@ -1,4 +1,4 @@
-import { AlertTriangle, Calendar, Users, TrendingUp, Clock } from "lucide-react";
+import { Calendar, Users, TrendingUp, Clock } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import EmailSyncButton from "./EmailSyncButton";
 import AutoRefresh from "./AutoRefresh";
@@ -6,6 +6,7 @@ import MonthlyReservationsList from "@/components/MonthlyReservationsList";
 import TodayReservationsList from "@/components/TodayReservationsList";
 import WeekFilter from "@/components/WeekFilter";
 import MonthFilter from "@/components/MonthFilter";
+import DismissibleAdminAlerts from "@/components/DismissibleAdminAlerts";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
     : currentMonthStart;
   const monthOptions = buildMonthOptions(firstDataMonth, lastDataMonth, selectedMonthStart);
   const activeAlerts = await prisma.adminAlert.findMany({
-    where: { resolved: false },
+    where: { resolved: false, dismissedAt: null },
     orderBy: { createdAt: "desc" },
     take: 5,
   });
@@ -189,11 +190,10 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   // 매출 = 캘린더에 표시되는 최종금액(price) 합계. extraPrice는 추가금 사유/금액 기록용이며 중복 합산하지 않는다.
   const monthlyRevenue = thisMonthReservations.reduce((sum, res) => sum + res.price, 0);
   const sumPrice = (list: typeof thisMonthReservations) => list.reduce((s, r) => s + r.price, 0);
-  const fmtMan = (won: number) => won >= 10000 ? (won / 10000).toFixed(1) + "만" : won.toLocaleString();
-  const room1Revenue = fmtMan(sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸1")));
-  const room2Revenue = fmtMan(sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸2")));
+  const room1Revenue = `${sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸1")).toLocaleString()}원`;
+  const room2Revenue = `${sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸2")).toLocaleString()}원`;
 
-  const revenueText = fmtMan(monthlyRevenue);
+  const revenueText = `${monthlyRevenue.toLocaleString()}원`;
 
   const room1Count = countedMonthly.filter(r => r.roomName === "머무룸1").length;
   const room2Count = countedMonthly.filter(r => r.roomName === "머무룸2").length;
@@ -204,10 +204,10 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const wRoom2Guests = sumGuests(activeWeekly.filter(r => r.roomName === "머무룸2"));
   const countedWeekly = thisWeekReservations.filter(r => r.status !== "CANCELLED" || r.isNoShow);
   const weeklyRevenue = thisWeekReservations.reduce((sum, res) => sum + res.price, 0);
-  const wRoom1Revenue = fmtMan(sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸1")));
-  const wRoom2Revenue = fmtMan(sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸2")));
+  const wRoom1Revenue = `${sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸1")).toLocaleString()}원`;
+  const wRoom2Revenue = `${sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸2")).toLocaleString()}원`;
 
-  const wRevenueText = fmtMan(weeklyRevenue);
+  const wRevenueText = `${weeklyRevenue.toLocaleString()}원`;
 
   const wRoom1Count = countedWeekly.filter(r => r.roomName === "머무룸1").length;
   const wRoom2Count = countedWeekly.filter(r => r.roomName === "머무룸2").length;
@@ -241,22 +241,14 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
         <EmailSyncButton />
       </header>
 
-      {activeAlerts.length > 0 && (
-        <section className="space-y-2">
-          {activeAlerts.map((alert) => (
-            <div
-              key={alert.id}
-              className="flex gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-950"
-            >
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
-              <div className="min-w-0">
-                <p className="text-sm font-black">{alert.title}</p>
-                <p className="mt-1 text-xs font-semibold text-rose-800">{alert.message}</p>
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
+      <DismissibleAdminAlerts
+        key={activeAlerts.map((alert) => `${alert.id}:${alert.updatedAt.getTime()}`).join("|")}
+        alerts={activeAlerts.map((alert) => ({
+          id: alert.id,
+          title: alert.title,
+          message: alert.message,
+        }))}
+      />
 
       {/* Summary Cards (Top) */}
       <section className="space-y-6">
@@ -310,8 +302,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
                 <TrendingUp className="w-6 h-6" />
               </div>
               <p className="text-sm font-medium text-slate-500">월 매출</p>
-              <p className="text-2xl font-semibold text-slate-900">{revenueText}</p>
-              <p className="text-xs text-slate-400">
+              <p className="text-xl font-semibold tabular-nums text-slate-900 sm:text-2xl">{revenueText}</p>
+              <p className="text-center text-xs text-slate-400">
                 <span className="text-sky-600">룸1</span> {room1Revenue} · <span className="text-purple-600">룸2</span> {room2Revenue}
               </p>
             </div>

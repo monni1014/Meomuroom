@@ -55,6 +55,7 @@ export async function createAdminAlert(input: AdminAlertInput) {
           title: input.title,
           message: input.message,
           resolved: false,
+          dismissedAt: null,
         },
       })
     : await prisma.adminAlert.create({

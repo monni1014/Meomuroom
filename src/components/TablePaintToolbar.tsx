@@ -10,6 +10,8 @@ interface TablePaintToolbarProps {
   clearLabel?: string;
   clearTitle?: string;
   showColorLabels?: boolean;
+  inputActive?: boolean;
+  showMonthlyOnlyColors?: boolean;
 }
 
 export function TablePaintToolbar({
@@ -18,7 +20,16 @@ export function TablePaintToolbar({
   clearLabel = "색 지우기",
   clearTitle,
   showColorLabels = false,
+  inputActive = true,
+  showMonthlyOnlyColors = false,
 }: TablePaintToolbarProps) {
+  const standardColors = MANUAL_CELL_COLORS.filter(
+    (color) => !("monthlyOnly" in color && color.monthlyOnly),
+  );
+  const monthlyOnlyColors = showMonthlyOnlyColors
+    ? MANUAL_CELL_COLORS.filter((color) => "monthlyOnly" in color && color.monthlyOnly)
+    : [];
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <button
@@ -27,7 +38,7 @@ export function TablePaintToolbar({
         onClick={() => onSelect(null)}
         className={cn(
           "inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-black transition active:scale-95",
-          selected === null
+          selected === null && inputActive
             ? "border-slate-900 bg-slate-900 text-white"
             : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
         )}
@@ -51,7 +62,7 @@ export function TablePaintToolbar({
         {clearLabel}
       </button>
       <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-1.5">
-        {MANUAL_CELL_COLORS.map((color) => (
+        {standardColors.map((color) => (
           <button
             key={color.key}
             type="button"
@@ -70,6 +81,25 @@ export function TablePaintToolbar({
           </button>
         ))}
       </div>
+      {monthlyOnlyColors.map((color) => (
+        <div key={color.key} className="flex items-center rounded-xl border border-slate-200 bg-white px-2 py-1.5">
+          <button
+            type="button"
+            data-paint-color={color.key}
+            aria-label={`${color.label} 색상`}
+            title={color.label}
+            onClick={() => onSelect(color.key)}
+            className={cn(
+              "inline-flex h-7 items-center rounded-md border border-slate-300 transition active:scale-95",
+              showColorLabels ? "gap-1.5 px-2 text-[11px] font-bold text-white" : "w-7 justify-center",
+              color.swatchClass,
+              selected === color.key && "ring-2 ring-slate-900 ring-offset-2",
+            )}
+          >
+            {showColorLabels && color.label}
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

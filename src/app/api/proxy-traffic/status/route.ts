@@ -23,7 +23,7 @@ export async function GET() {
     });
 
     const activeAlert = await prisma.adminAlert.findFirst({
-      where: { type: "IPROYAL_TRAFFIC", resolved: false },
+      where: { type: "IPROYAL_TRAFFIC", resolved: false, dismissedAt: null },
       orderBy: { createdAt: "desc" },
     });
 
