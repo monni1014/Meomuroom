@@ -143,6 +143,7 @@ function resolveState(current: ExistingSlot | undefined, observation: ScannerObs
   let pendingSince: Date | null = null;
   let reason = observation.reason;
   let eventType: "BOOKED" | "CANCELLED" | null = null;
+  let eventObservedAt = checkedAt;
 
   if (observation.observedState === "POLICY_CLOSED") {
     if (current?.state === "BOOKED") {
@@ -168,6 +169,7 @@ function resolveState(current: ExistingSlot | undefined, observation: ScannerObs
     } else {
       state = "AVAILABLE";
       eventType = "CANCELLED";
+      eventObservedAt = current.pendingSince || checkedAt;
       reason = "CANCELLATION_CONFIRMED_BY_TWO_SCANS";
     }
   }
@@ -185,6 +187,7 @@ function resolveState(current: ExistingSlot | undefined, observation: ScannerObs
     reason,
     eventType,
     checkedAt,
+    eventObservedAt,
   };
 }
 
@@ -431,7 +434,7 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
 
     if (resolved.eventType) {
       const feeRate = resolved.eventType === "CANCELLED"
-        ? cancellationFeeRate(observation.competitorId, observation.dateKey, resolved.checkedAt)
+        ? cancellationFeeRate(observation.competitorId, observation.dateKey, resolved.eventObservedAt)
         : null;
       await prisma.competitorSlotEvent.create({
         data: {
@@ -444,7 +447,7 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
           newState: resolved.state,
           cancellationFeeRate: feeRate,
           opportunityLostRooms: resolved.eventType === "BOOKED" ? opportunityLostRooms : null,
-          occurredAt: resolved.checkedAt,
+          occurredAt: resolved.eventObservedAt,
         },
       });
       if (resolved.eventType === "BOOKED") bookingEvents += 1;
