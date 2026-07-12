@@ -383,6 +383,26 @@ export default function CompetitorsView({
     void loadMonth(currentYear, currentMonth);
   }, [currentMonth, currentYear, loadMonth]);
 
+  useEffect(() => {
+    const refreshSnapshots = () => {
+      void fetchSnapshots(currentYear, currentMonth).catch((error) => {
+        setLoadError(error instanceof Error ? error.message : "경쟁사 자동 확인 정보를 갱신하지 못했습니다.");
+      });
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshSnapshots();
+    };
+
+    const interval = window.setInterval(refreshSnapshots, 60_000);
+    window.addEventListener("focus", refreshSnapshots);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshSnapshots);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [currentMonth, currentYear, fetchSnapshots]);
+
   const moveToMonth = (year: number, month: number) => setCurrentDate(new Date(year, month - 1, 1));
   const moveToUnreadEvent = (event: UnreadEventSnapshot) => {
     const [year, month] = event.dateKey.split("-").map(Number);
