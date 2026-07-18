@@ -44,6 +44,23 @@ function getKstDateParts(value: string | Date) {
   };
 }
 
+function buildMonthWeeks(year: number, month: number) {
+  const firstDayOfWeek = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const firstMondayDay = 1 - ((firstDayOfWeek + 6) % 7);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const weekCount = Math.floor((daysInMonth - firstMondayDay) / 7) + 1;
+
+  return Array.from({ length: weekCount }, (_, index) => {
+    const rawStartDay = firstMondayDay + index * 7;
+    return {
+      name: `${index + 1}주차`,
+      startDay: Math.max(1, rawStartDay),
+      endDay: Math.min(daysInMonth, rawStartDay + 6),
+      매출: 0,
+    };
+  });
+}
+
 export default function AnalyticsPage() {
   const currentPeriod = getKstDateParts(new Date());
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -110,23 +127,13 @@ export default function AnalyticsPage() {
         }))
     : [];
 
-  // 2. Calculate BAR_DATA (Weekly sales for current booking months)
-  const weekRevenue = [0, 0, 0, 0]; // 1, 2, 3, 4th weeks
+  // 대시보드와 동일하게 월요일~일요일을 한 주로 보고, 월 경계에서는 해당 월 날짜만 합산한다.
+  const barData = buildMonthWeeks(selectedYear, selectedMonth);
   selectedMonthReservations.forEach((res) => {
     const day = getKstDateParts(res.startTime).day;
-    const price = (res.price || 0);
-    if (day <= 7) weekRevenue[0] += price;
-    else if (day <= 14) weekRevenue[1] += price;
-    else if (day <= 21) weekRevenue[2] += price;
-    else weekRevenue[3] += price;
+    const week = barData.find((item) => day >= item.startDay && day <= item.endDay);
+    if (week) week.매출 += res.price || 0;
   });
-
-  const barData = [
-    { name: "1주차", 매출: weekRevenue[0] },
-    { name: "2주차", 매출: weekRevenue[1] },
-    { name: "3주차", 매출: weekRevenue[2] },
-    { name: "4주차", 매출: weekRevenue[3] },
-  ];
 
   // 3. Dynamic scenario percentages based on accumulated sales
   const totalRevenue = selectedMonthReservations.reduce((sum, res) => sum + (res.price || 0), 0);

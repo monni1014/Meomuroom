@@ -44,6 +44,30 @@ model ProcessedEmail {
   createdAt     DateTime @default(now())
 }
 
+model ImapSyncCursor {
+  mailboxKey  String   @id
+  uidValidity String
+  lastUid     Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PendingImapEmail {
+  id            String    @id @default(cuid())
+  mailboxKey    String
+  uidValidity   String
+  uid           Int
+  messageId     String    @unique
+  rawSource     Bytes
+  envelopeDate  DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([mailboxKey, uidValidity, uid])
+  @@index([mailboxKey, uid])
+  @@index([createdAt])
+}
+
 model UsageLog {
   id                 String      @id @default(cuid())
   reservationId      String      @unique
@@ -186,4 +210,27 @@ model CompetitorSlotEvent {
   @@index([competitorId, dateKey, occurredAt])
   @@index([eventType, occurredAt])
   @@index([acknowledgedAt, occurredAt])
+}
+
+model CompetitorEvidence {
+  id           String    @id @default(cuid())
+  scanId       String?
+  competitorId String
+  dateKey      String?
+  startHour    Int?
+  endHour      Int?
+  reasonCode   String
+  reason       String
+  imagePath    String
+  status       String    @default("OPEN") // OPEN | RESOLVED | DISMISSED
+  capturedAt   DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  resolvedAt   DateTime?
+  dismissedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status, capturedAt])
+  @@index([competitorId, dateKey, capturedAt])
+  @@index([scanId])
 }

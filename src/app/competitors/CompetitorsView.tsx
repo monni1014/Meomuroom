@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { eachDayOfInterval, endOfMonth, format, startOfMonth } from "date-fns";
-import { CalendarClock, ChevronLeft, ChevronRight, RefreshCw, Save, Undo2 } from "lucide-react";
+import Image from "next/image";
+import { Camera, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Maximize2, RefreshCw, Save, Undo2, X } from "lucide-react";
 import { EditableTableCellInput } from "@/components/EditableTableCellInput";
 import {
   MONTHLY_GRID_BODY_ROW_CLASS,
@@ -76,10 +77,25 @@ interface ScanSnapshot {
   finishedAt: string | null;
 }
 
+interface EvidenceSnapshot {
+  id: string;
+  competitorId: string;
+  dateKey: string | null;
+  startHour: number | null;
+  endHour: number | null;
+  reasonCode: string;
+  reason: string;
+  status: "OPEN" | "RESOLVED" | string;
+  capturedAt: string;
+  lastSeenAt: string;
+  imageUrl: string;
+}
+
 type SnapshotResponse = CompetitorSnapshotPayload & {
   days: Record<string, Record<string, CompetitorDaySnapshot>>;
   cancellations: CancellationSnapshot[];
   unreadEvents: UnreadEventSnapshot[];
+  evidence: EvidenceSnapshot[];
   latestScan: ScanSnapshot | null;
 };
 
@@ -286,6 +302,15 @@ function scanStatusLabel(scan: ScanSnapshot | null) {
   return `최근 확인 실패 · ${scan.error || "공개 예약 화면을 읽지 못했습니다."}`;
 }
 
+function competitorDisplayName(competitorId: string) {
+  return COMPETITORS.find((competitor) => competitor.id === competitorId)?.displayName || competitorId;
+}
+
+function evidenceTimeLabel(evidence: EvidenceSnapshot) {
+  if (evidence.startHour === null || evidence.endHour === null) return "시간 확인 필요";
+  return `${String(evidence.startHour).padStart(2, "0")}:00-${String(evidence.endHour).padStart(2, "0")}:00`;
+}
+
 export default function CompetitorsView({
   initialSnapshots,
   initialManualCells,
@@ -314,6 +339,8 @@ export default function CompetitorsView({
   const [editMessage, setEditMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isAcknowledging, setIsAcknowledging] = useState(false);
+  const [selectedEvidence, setSelectedEvidence] = useState<EvidenceSnapshot | null>(null);
+  const [dismissingEvidenceId, setDismissingEvidenceId] = useState<string | null>(null);
 
   useEffect(() => {
     const controls = controlsRef.current;
@@ -343,6 +370,7 @@ export default function CompetitorsView({
   const unreadEvents = snapshots.unreadEvents || [];
   const unreadBookings = unreadEvents.filter((event) => event.eventType === "BOOKED");
   const unreadCancellations = unreadEvents.filter((event) => event.eventType === "CANCELLED");
+  const evidence = snapshots.evidence || [];
   const layoutStyle = {
     "--competitor-header-top": competitorFilter === "all" ? "0px" : `${controlsHeight + 8}px`,
   } as CSSProperties;
@@ -616,6 +644,28 @@ export default function CompetitorsView({
     }
   };
 
+  const dismissEvidence = async (evidenceId: string) => {
+    if (dismissingEvidenceId) return;
+    setDismissingEvidenceId(evidenceId);
+    setLoadError(null);
+    try {
+      const response = await fetch(`/api/competitors/evidence/${evidenceId}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "확인 자료를 정리하지 못했습니다.");
+      }
+      setSnapshots((previous) => ({
+        ...previous,
+        evidence: (previous.evidence || []).filter((item) => item.id !== evidenceId),
+      }));
+      setSelectedEvidence((previous) => previous?.id === evidenceId ? null : previous);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "확인 자료를 정리하지 못했습니다.");
+    } finally {
+      setDismissingEvidenceId(null);
+    }
+  };
+
   const runScan = async () => {
     setIsRefreshing(true);
     setLoadError(null);
@@ -698,6 +748,73 @@ export default function CompetitorsView({
           >
             {isAcknowledging ? "확인 중" : "모두 확인"}
           </button>
+        </section>
+      )}
+
+      {evidence.length > 0 && (
+        <section className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Camera className="h-4 w-4 text-amber-700" aria-hidden="true" />
+              <h2 className="text-xs font-black text-amber-950">판단 확인 자료</h2>
+              <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-amber-800">
+                확인 필요 {evidence.filter((item) => item.status === "OPEN").length}건
+              </span>
+            </div>
+            <p className="hidden text-[10px] font-semibold text-amber-800 sm:block">사진을 누르면 크게 볼 수 있습니다.</p>
+          </div>
+          <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+            {evidence.map((item) => (
+              <article
+                key={item.id}
+                className="relative flex min-w-[285px] max-w-[340px] flex-1 items-center gap-2 rounded-md border border-amber-200 bg-white p-2 pr-8"
+              >
+                <button
+                  type="button"
+                  onClick={() => setSelectedEvidence(item)}
+                  className="group relative h-[62px] w-[104px] shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-100"
+                  aria-label={`${competitorDisplayName(item.competitorId)} 확인 화면 확대`}
+                >
+                  <Image
+                    src={item.imageUrl}
+                    alt={`${competitorDisplayName(item.competitorId)} 자동 확인 화면`}
+                    width={208}
+                    height={124}
+                    unoptimized
+                    className="h-full w-full object-cover object-top"
+                  />
+                  <span className="absolute inset-0 flex items-center justify-center bg-slate-950/0 transition group-hover:bg-slate-950/30">
+                    <Maximize2 className="h-4 w-4 text-transparent transition group-hover:text-white" aria-hidden="true" />
+                  </span>
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className="truncate text-xs font-black text-slate-900">{competitorDisplayName(item.competitorId)}</p>
+                    {item.status === "RESOLVED" && (
+                      <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-black text-emerald-700">
+                        <CheckCircle2 className="h-2.5 w-2.5" aria-hidden="true" />해결됨
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-[10px] font-bold text-slate-500">
+                    {item.dateKey || "날짜 확인 필요"} · {evidenceTimeLabel(item)}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-[10px] font-semibold leading-4 text-slate-700">{item.reason}</p>
+                  <p className="mt-0.5 text-[9px] font-semibold text-slate-400">{format(new Date(item.capturedAt), "MM.dd HH:mm")} 캡처</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void dismissEvidence(item.id)}
+                  disabled={dismissingEvidenceId === item.id}
+                  className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"
+                  aria-label="확인 자료 정리"
+                  title="목록에서 지우기"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </article>
+            ))}
+          </div>
         </section>
       )}
 
@@ -1020,6 +1137,63 @@ export default function CompetitorsView({
           );
         })}
       </div>
+
+      {selectedEvidence && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${competitorDisplayName(selectedEvidence.competitorId)} 판단 확인 화면`}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedEvidence(null);
+          }}
+        >
+          <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-sm font-black text-slate-950">{competitorDisplayName(selectedEvidence.competitorId)}</h2>
+                  <span className="text-xs font-bold text-slate-500">
+                    {selectedEvidence.dateKey || "날짜 확인 필요"} · {evidenceTimeLabel(selectedEvidence)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs font-semibold text-slate-700">{selectedEvidence.reason}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedEvidence(null)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-slate-100"
+                aria-label="확인 화면 닫기"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto bg-slate-100 p-2 sm:p-4">
+              <Image
+                src={selectedEvidence.imageUrl}
+                alt={`${competitorDisplayName(selectedEvidence.competitorId)} 판단 확인용 전체 화면`}
+                width={1920}
+                height={1080}
+                unoptimized
+                className="mx-auto h-auto w-full object-contain"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-4 py-2">
+              <p className="text-[10px] font-semibold text-slate-500">
+                {format(new Date(selectedEvidence.capturedAt), "yyyy.MM.dd HH:mm:ss")} 저장
+              </p>
+              <button
+                type="button"
+                onClick={() => void dismissEvidence(selectedEvidence.id)}
+                disabled={dismissingEvidenceId === selectedEvidence.id}
+                className="h-8 rounded border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 disabled:opacity-40"
+              >
+                확인 후 목록에서 지우기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
-import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
+import { launchRpaBrowser, newRpaContext, resolveRpaHeadless } from "./lib/browser.mjs";
 import { parseArgs, requiredArg } from "./lib/cli.mjs";
 import { humanDelay, humanMouseMove } from "./lib/human.mjs";
 import { spaceCloudStorageStatePath } from "./lib/paths.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
+import { spaceCloudBrowserOptions } from "./lib/spacecloud-session.mjs";
 
 function normalizeText(text) {
   return text.replace(/\r/g, "").replace(/[ \t]+/g, " ").trim();
@@ -162,12 +163,16 @@ async function main() {
     throw new Error("SpaceCloud login session is missing. Run `npm run rpa:spacecloud-login` first.");
   }
 
-  const browser = await launchRpaBrowser({ headless: false });
+  const headless = resolveRpaHeadless();
+  const browserOptions = spaceCloudBrowserOptions(headless);
+  console.log(`[SpaceCloud network] Use ${browserOptions.useProxy ? "proxy" : "direct"} session path.`);
+  const browser = await launchRpaBrowser(browserOptions);
 
   try {
     const context = await newRpaContext(browser, {
       storageState: spaceCloudStorageStatePath,
       blockHeavyResources: true,
+      rpaRole: "spacecloud",
     });
     const page = await context.newPage();
 

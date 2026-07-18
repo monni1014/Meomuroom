@@ -1,4 +1,7 @@
 import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 import * as proxyChain from "proxy-chain";
 import { getUpstreamProxyUrl } from "./env.mjs";
 
@@ -7,6 +10,8 @@ const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
 const BLOCKED_FILE_EXTENSIONS = /\.(?:avif|gif|ico|jpe?g|mp3|mp4|ogg|png|svg|ttf|webm|webp|woff2?)($|[?#])/i;
 const BLOCKED_URL_PATTERNS =
   /analytics|googletagmanager|doubleclick|adservice|criteo|hotjar|clarity|amplitude|mixpanel|facebook\.com\/tr|sentry/i;
+const SHARED_BROWSER_STATE_PATH = resolve("rpa/.runtime/browser-host.json");
+const SHARED_BROWSER_START_LOCK_PATH = resolve("rpa/.runtime/browser-host-starting.lock");
 
 function readBooleanEnv(name, fallback) {
   const value = process.env[name]?.trim().toLowerCase();
@@ -62,7 +67,7 @@ async function hasUsableProxyTraffic() {
   }
 }
 
-async function shouldUseProxy({ useProxy, forceProxy }) {
+export async function shouldUseRpaProxy({ useProxy, forceProxy }) {
   if (!useProxy) return false;
   if (forceProxy) return true;
 
@@ -74,8 +79,138 @@ async function shouldUseProxy({ useProxy, forceProxy }) {
   return hasUsableProxyTraffic();
 }
 
-export async function launchRpaBrowser({ headless = false, useProxy = true, forceProxy = false } = {}) {
-  const proxyEnabled = await shouldUseProxy({ useProxy, forceProxy });
+export function resolveRpaHeadless(fallback = process.env.NODE_ENV === "production") {
+  return readBooleanEnv("RPA_HEADLESS", fallback);
+}
+
+function contextRoleFromOptions(options) {
+  if (options.rpaRole) return String(options.rpaRole);
+  const storageState = typeof options.storageState === "string" ? options.storageState.toLowerCase() : "";
+  if (storageState.includes("naver")) return "naver";
+  if (storageState.includes("spacecloud")) return "spacecloud";
+  return "generic";
+}
+
+export async function installRpaResourceBlocking(context) {
+  await context.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
+  await context.route("**/*", async (route) => {
+    const request = route.request();
+    const resourceType = request.resourceType();
+    const url = request.url();
+
+    if (BLOCKED_RESOURCE_TYPES.has(resourceType) || BLOCKED_FILE_EXTENSIONS.test(url)) {
+      await route.abort();
+      return;
+    }
+
+    if (BLOCKED_URL_PATTERNS.test(url)) {
+      await route.abort();
+      return;
+    }
+
+    await route.continue();
+  });
+}
+
+function decorateSharedBrowser(browser, { useProxy, forceProxy }) {
+  browser.__memoroomShared = true;
+  browser.__memoroomUseProxy = useProxy;
+  browser.__memoroomForceProxy = forceProxy;
+  browser.close = async () => {
+    // connectOverCDP creates a separate CDP transport for each RPA process.
+    // Closing only Playwright's client Connection leaves that transport alive,
+    // so the child process never exits even after its work is complete. Close
+    // the server-side CDP transport while leaving the detached Chromium host
+    // and its fixed pages running for the next job.
+    const serverBrowser = browser._connection?.toImpl?.(browser);
+    serverBrowser?._connection?.close();
+
+    if (browser.isConnected()) {
+      await Promise.race([
+        new Promise((resolvePromise) => browser.once("disconnected", resolvePromise)),
+        new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000)),
+      ]);
+    }
+  };
+  return browser;
+}
+
+function readSharedBrowserState() {
+  try {
+    return JSON.parse(readFileSync(SHARED_BROWSER_STATE_PATH, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function connectSharedBrowser({ useProxy, forceProxy }) {
+  const state = readSharedBrowserState();
+  if (!state?.cdpEndpoint) return null;
+
+  try {
+    const browser = await chromium.connectOverCDP(state.cdpEndpoint, { timeout: 2_500 });
+    return decorateSharedBrowser(browser, { useProxy, forceProxy });
+  } catch {
+    return null;
+  }
+}
+
+async function ensureSharedBrowser({ headless, useProxy, forceProxy }) {
+  const connected = await connectSharedBrowser({ useProxy, forceProxy });
+  if (connected) return connected;
+
+  const { mkdirSync, openSync, closeSync, rmSync } = await import("node:fs");
+  mkdirSync(resolve("rpa/.runtime"), { recursive: true });
+
+  let ownsStartLock = false;
+  try {
+    const handle = openSync(SHARED_BROWSER_START_LOCK_PATH, "wx");
+    closeSync(handle);
+    ownsStartLock = true;
+  } catch {
+    // Another RPA client is already starting the host.
+  }
+
+  if (ownsStartLock) {
+    const child = spawn(process.execPath, [
+      resolve("rpa/browser-host.mjs"),
+      `--headless=${headless ? "true" : "false"}`,
+    ], {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+      windowsHide: headless,
+    });
+    child.unref();
+  }
+
+  const deadline = Date.now() + 20_000;
+  try {
+    while (Date.now() < deadline) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+      const browser = await connectSharedBrowser({ useProxy, forceProxy });
+      if (browser) return browser;
+    }
+  } finally {
+    if (ownsStartLock) rmSync(SHARED_BROWSER_START_LOCK_PATH, { force: true });
+  }
+
+  throw new Error("Shared RPA Chromium did not start within 20 seconds.");
+}
+
+export async function launchRpaBrowser({
+  headless = resolveRpaHeadless(),
+  useProxy = true,
+  forceProxy = false,
+  reuse = false,
+} = {}) {
+  if (reuse) {
+    console.log(`[RPA browser] Reuse shared Chromium (${headless ? "headless" : "headed"}).`);
+    return ensureSharedBrowser({ headless, useProxy, forceProxy });
+  }
+
+  const proxyEnabled = await shouldUseRpaProxy({ useProxy, forceProxy });
   let localProxyUrl = null;
 
   if (proxyEnabled) {
@@ -110,7 +245,21 @@ export async function launchRpaBrowser({ headless = false, useProxy = true, forc
 }
 
 export async function newRpaContext(browser, options = {}) {
-  const { blockHeavyResources = true, extraHTTPHeaders, ...contextOptions } = options;
+  const {
+    blockHeavyResources = true,
+    extraHTTPHeaders,
+    rpaRole,
+    reusePage = browser.__memoroomShared === true,
+    ...contextOptions
+  } = options;
+  const role = contextRoleFromOptions({ ...options, rpaRole });
+
+  if (browser.__memoroomShared) {
+    const sharedContext = browser.contexts()[0];
+    if (!sharedContext) throw new Error("Shared RPA Chromium has no persistent context.");
+    return decorateReusableContext(sharedContext, reusePage, role);
+  }
+
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     locale: "ko-KR",
@@ -124,24 +273,51 @@ export async function newRpaContext(browser, options = {}) {
   });
 
   if (blockHeavyResources) {
-    await context.route("**/*", async (route) => {
-      const request = route.request();
-      const resourceType = request.resourceType();
-      const url = request.url();
-
-      if (BLOCKED_RESOURCE_TYPES.has(resourceType) || BLOCKED_FILE_EXTENSIONS.test(url)) {
-        await route.abort();
-        return;
-      }
-
-      if (BLOCKED_URL_PATTERNS.test(url)) {
-        await route.abort();
-        return;
-      }
-
-      await route.continue();
-    });
+    await installRpaResourceBlocking(context);
   }
 
+  return decorateReusableContext(context, reusePage, role);
+}
+
+async function readPageRole(page) {
+  return page.evaluate(() => window.__MEMOROOM_RPA_PAGE_ROLE__ || null).catch(() => null);
+}
+
+async function assignPageRole(page, role) {
+  await page.addInitScript((assignedRole) => {
+    Object.defineProperty(window, "__MEMOROOM_RPA_PAGE_ROLE__", {
+      configurable: true,
+      value: assignedRole,
+    });
+  }, role);
+  await page.evaluate((assignedRole) => {
+    Object.defineProperty(window, "__MEMOROOM_RPA_PAGE_ROLE__", {
+      configurable: true,
+      value: assignedRole,
+    });
+  }, role).catch(() => {});
+}
+
+function decorateReusableContext(context, reusePage, role = "generic") {
+  if (!reusePage || context.__memoroomReusePagePatched) return context;
+
+  const createPage = context.newPage.bind(context);
+  context.newPage = async () => {
+    if (role === "competitor") {
+      const page = await createPage();
+      await assignPageRole(page, role);
+      return page;
+    }
+
+    const pages = context.pages().filter((page) => !page.isClosed());
+    for (const page of pages) {
+      if (await readPageRole(page) === role) return page;
+    }
+
+    const page = await createPage();
+    await assignPageRole(page, role);
+    return page;
+  };
+  context.__memoroomReusePagePatched = true;
   return context;
 }

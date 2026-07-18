@@ -44,6 +44,32 @@ interface Reservation {
   usageLog: UsageLog | null;
 }
 
+const CALENDAR_ROOM_FILTERS = ["all", "머무룸1", "머무룸2", "머무룸3"] as const;
+type CalendarRoomFilter = (typeof CALENDAR_ROOM_FILTERS)[number];
+
+function readCalendarReturnState() {
+  if (typeof window === "undefined") return null;
+
+  const params = new URLSearchParams(window.location.search);
+  const date = params.get("fromDate");
+  const room = params.get("fromRoom");
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+
+  const parsedDate = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+
+  const normalizedRoom = CALENDAR_ROOM_FILTERS.includes(room as CalendarRoomFilter)
+    ? (room as CalendarRoomFilter)
+    : "all";
+
+  return { date, room: normalizedRoom };
+}
+
+function buildCalendarReturnUrl(date: string, room: CalendarRoomFilter) {
+  const params = new URLSearchParams({ date, room });
+  return `/calendar?${params.toString()}`;
+}
+
 export default function UsagePage() {
   const router = useRouter();
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -338,7 +364,21 @@ export default function UsagePage() {
   const handleSave = async () => {
     if (!selectedResId) return alert("기록할 예약을 먼저 선택하세요.");
 
-    if (editDate && editStart && editEnd && editEnd <= editStart) {
+    // 종료 00:00은 같은 날의 시작이 아니라 다음 날 자정(24:00)으로 저장한다.
+    const normalizedEditEnd = editEnd === "00:00" && editStart !== "00:00"
+      ? "24:00"
+      : editEnd;
+    const clockToMinutes = (clock: string) => {
+      const [hours, minutes] = clock.split(":").map(Number);
+      return hours * 60 + minutes;
+    };
+
+    if (
+      editDate
+      && editStart
+      && normalizedEditEnd
+      && clockToMinutes(normalizedEditEnd) <= clockToMinutes(editStart)
+    ) {
       return alert("종료 시간이 시작 시간보다 빨라요. 확인해 주세요.");
     }
 
@@ -376,7 +416,7 @@ export default function UsagePage() {
           isCleanUpBad,
           // 시간 수정 (26시 등은 익일로 변환)
           ...(editDate && editStart ? { startTime: buildISO(editDate, editStart) } : {}),
-          ...(editDate && editEnd ? { endTime: buildISO(editDate, editEnd) } : {}),
+          ...(editDate && normalizedEditEnd ? { endTime: buildISO(editDate, normalizedEditEnd) } : {}),
         }),
       });
 
@@ -388,7 +428,9 @@ export default function UsagePage() {
         fetchReservations(selectedResId);
         
         if (editDate) {
-          router.push(`/calendar?date=${editDate}`);
+          const returnState = readCalendarReturnState();
+          const returnRoom = returnState?.room ?? "all";
+          router.push(buildCalendarReturnUrl(editDate, returnRoom));
         }
       } else {
         alert("이용 기록 저장에 실패했습니다.");
@@ -423,7 +465,7 @@ export default function UsagePage() {
   const roomBadgeColor = (roomName: string) =>
     roomName === "머무룸1" ? "bg-sky-50 text-sky-700"
     : roomName === "머무룸2" ? "bg-purple-50 text-purple-700"
-    : roomName === "머무룸3" ? "bg-emerald-50 text-emerald-700"
+    : roomName === "머무룸3" ? "bg-orange-50 text-orange-700"
     : "bg-slate-100 text-slate-700";
 
   // 한 줄 라벨: 날짜 · 이름 (루트색) (수기)
@@ -589,7 +631,7 @@ export default function UsagePage() {
                   <button
                     type="button"
                     onClick={() => setEditRoomName("머무룸3")}
-                    className={`flex-1 py-2 text-sm font-bold rounded-xl border transition ${editRoomName === "머무룸3" ? "bg-emerald-50 text-emerald-600 border-emerald-500" : "bg-white text-slate-500 border-slate-200"}`}
+                    className={`flex-1 py-2 text-sm font-bold rounded-xl border transition ${editRoomName === "머무룸3" ? "bg-orange-50 text-orange-700 border-orange-500" : "bg-white text-slate-500 border-slate-200"}`}
                   >
                     머무룸 3
                   </button>
@@ -784,6 +826,11 @@ export default function UsagePage() {
 
           <input
             type="text"
+            lang="ko"
+            inputMode="text"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={detail}
             onChange={(e) => setDetail(e.target.value)}
             placeholder={
@@ -920,6 +967,11 @@ export default function UsagePage() {
             </span>
           </label>
           <textarea
+            lang="ko"
+            inputMode="text"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={memo}
             onChange={(e) => setMemo(e.target.value)}
             placeholder="특이사항, 분실물 등을 자유롭게 적어주세요."
@@ -937,6 +989,11 @@ export default function UsagePage() {
             </span>
           </label>
           <textarea
+            lang="ko"
+            inputMode="text"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={complaints}
             onChange={(e) => setComplaints(e.target.value)}
             placeholder="고객 불만사항이 발생한 경우, 나중에 모아보기 위해 여기에 상세히 기록해 주세요."

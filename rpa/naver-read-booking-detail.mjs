@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
+import { launchRpaBrowser, newRpaContext, resolveRpaHeadless } from "./lib/browser.mjs";
 import { optionalEnv } from "./lib/env.mjs";
 import { humanClickElement, humanDelay, humanMouseMove } from "./lib/human.mjs";
 import { naverStorageStatePath } from "./lib/paths.mjs";
@@ -204,10 +204,14 @@ async function main() {
     throw new Error("Naver login session is missing. Run `npm run rpa:naver-login` first.");
   }
 
-  const browser = await launchRpaBrowser({ headless: false });
+  const headless = resolveRpaHeadless();
+  const browser = await launchRpaBrowser({ headless, reuse: headless });
 
   try {
-    const context = await newRpaContext(browser, { storageState: naverStorageStatePath });
+    const context = await newRpaContext(browser, {
+      storageState: naverStorageStatePath,
+      rpaRole: "naver",
+    });
     const page = await context.newPage();
     const bookingId = target.match(/\d{9,12}/)?.[0] || null;
 

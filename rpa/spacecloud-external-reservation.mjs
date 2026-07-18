@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs";
-import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
+import { launchRpaBrowser, newRpaContext, resolveRpaHeadless } from "./lib/browser.mjs";
 import { parseArgs, parseHour, parseRoom, requiredArg } from "./lib/cli.mjs";
 import { optionalEnv } from "./lib/env.mjs";
 import { humanClick, humanClickElement, humanDelay } from "./lib/human.mjs";
 import { spaceCloudStorageStatePath } from "./lib/paths.mjs";
 import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
+import { spaceCloudBrowserOptions } from "./lib/spacecloud-session.mjs";
 
 const TEXT = {
   hostLogout: "\ud638\uc2a4\ud2b8 \ub85c\uadf8\uc544\uc6c3",
@@ -16,12 +17,14 @@ const TEXT = {
   addReservation: "\uc608\uc57d\ucd94\uac00",
   directAdded: "\uc9c1\uc811 \ucd94\uac00\ud55c \uc608\uc57d \uac74\uc785\ub2c8\ub2e4.",
   deleteReservation: "\uc608\uc57d \uc0ad\uc81c",
+  editReservation: "\uc608\uc57d \uc218\uc815",
   confirm: "\ud655\uc778",
   cancel: "\ucde8\uc18c",
   fullDay: "\uc885\uc77c",
   noRepeat: "\ubc18\ubcf5\uc548\ud568",
   room1: "\uba38\ubb34\ub8f8 \ud68c\uc758\uc2e4 \uc608\uc57d\ud558\uae30 1",
   room2: "\uba38\ubb34\ub8f8 \ud68c\uc758\uc2e4 \uc608\uc57d\ud558\uae30 2",
+  room3: "\uba38\ubb34\ub8f8 \ud68c\uc758\uc2e4 \uc608\uc57d\ud558\uae30 3",
 };
 
 const WEEKDAYS = [
@@ -37,6 +40,7 @@ const WEEKDAYS = [
 const ROOM_PRODUCT_NAMES = {
   "1": TEXT.room1,
   "2": TEXT.room2,
+  "3": TEXT.room3,
 };
 
 function usage() {
@@ -45,7 +49,7 @@ function usage() {
     "  npm run rpa:spacecloud-external -- --room=1 --date=2026-07-03 --start=11:00 --end=15:00 --mode=close --booking-number=123 --apply",
     "",
     "Options:",
-    "  --room=1|2",
+    "  --room=1|2|3",
     "  --date=YYYY-MM-DD",
     "  --start=HH:00",
     "  --end=HH:00",
@@ -54,6 +58,8 @@ function usage() {
     "  --customer-name=Name  optional, used as SpaceCloud external reservation name",
     "  --phone=010-0000-0000 optional, used as SpaceCloud external reservation contact",
     "  --allow-still-blocked-after-delete optional, treat open as success when another reservation still blocks the slot",
+    "  --claim-unlabelled-before-delete optional, link one exact unlabelled manual block before deleting it",
+    "  --inspect-calendar optional, print the exact selected product/date cell and exit without editing",
     "  --apply       actually add/delete the SpaceCloud external reservation.",
   ].join("\n");
 }
@@ -85,16 +91,6 @@ function monthKey(dateValue) {
 function formatModalDate(dateValue) {
   const { year, month, day, date } = parseDateValue(dateValue);
   return `${year}. ${String(month).padStart(2, "0")}. ${String(day).padStart(2, "0")} (${WEEKDAYS[date.getDay()]})`;
-}
-
-function formatDetailDate(dateValue) {
-  const { year, month, day, date } = parseDateValue(dateValue);
-  return `${year}.${String(month).padStart(2, "0")}.${String(day).padStart(2, "0")}(${WEEKDAYS[date.getDay()]})`;
-}
-
-function formatLooseDetailDate(dateValue) {
-  const { year, month, day, date } = parseDateValue(dateValue);
-  return `${year}.${month}.${day}(${WEEKDAYS[date.getDay()]})`;
 }
 
 function hourLabel(hour) {
@@ -132,6 +128,32 @@ async function assertLoggedIn(page) {
   if (text.includes(TEXT.login) && !text.includes(TEXT.hostLogout) && !text.includes(TEXT.reservationList)) {
     throw new Error("SpaceCloud login required. Host center session is missing or expired.");
   }
+}
+
+function resetSpaceCloudMutationError(page) {
+  page.__spaceCloudLastApiError = null;
+}
+
+function throwIfSpaceCloudMutationFailed(page, actionLabel) {
+  const apiError = page.__spaceCloudLastApiError;
+  if (!apiError) return;
+
+  if (
+    actionLabel === "external reservation save"
+    && apiError.body?.includes("\ud574\ub2f9 \uae30\uac04\uc5d0 \uc774\ubbf8 \uc608\uc57d\uc774 \uc788\uc2b5\ub2c8\ub2e4")
+  ) {
+    return;
+  }
+
+  if (apiError.status === 401 || apiError.status === 403) {
+    throw new Error(
+      `SpaceCloud login required. ${actionLabel} was rejected with ${apiError.status} ${apiError.url}.`,
+    );
+  }
+
+  throw new Error(
+    `SpaceCloud ${actionLabel} failed with ${apiError.status}: ${apiError.body || apiError.url}`,
+  );
 }
 
 async function clickVisibleText(page, text, timeout = 20_000) {
@@ -486,6 +508,23 @@ async function selectNativeSelectOption(page, optionText) {
   }, optionText);
 }
 
+async function getSelectedProductState(page) {
+  return page.evaluate(({ room1, room2, room3 }) => {
+    const productNames = [room1, room2, room3];
+    const select = [...document.querySelectorAll("select")].find((candidate) => {
+      const optionTexts = [...candidate.options].map((option) => (option.textContent || "").trim());
+      return productNames.every((productName) => optionTexts.includes(productName));
+    });
+
+    if (!select) return { nativeSelectFound: false, selectedText: "", selectedValue: "" };
+    return {
+      nativeSelectFound: true,
+      selectedText: (select.selectedOptions[0]?.textContent || "").trim(),
+      selectedValue: select.value,
+    };
+  }, { room1: TEXT.room1, room2: TEXT.room2, room3: TEXT.room3 });
+}
+
 async function selectCustomOption(page, optionText) {
   const alreadySelected = await page.getByText(optionText, { exact: false }).first().isVisible().catch(() => false);
   if (alreadySelected) {
@@ -576,6 +615,12 @@ async function selectCustomOption(page, optionText) {
 
 async function selectProduct(page, room) {
   const productName = ROOM_PRODUCT_NAMES[room];
+  const currentState = await getSelectedProductState(page);
+
+  if (currentState.nativeSelectFound && currentState.selectedText === productName) {
+    console.log(`SpaceCloud product is already selected: ${productName}`);
+    return;
+  }
 
   if (await selectNativeSelectOption(page, productName)) {
     await humanDelay(page, "after native product select", 1300, 3000);
@@ -583,9 +628,18 @@ async function selectProduct(page, room) {
     throw new Error(`Could not select SpaceCloud product: ${productName}`);
   }
 
-  const selected = await page.locator("body").innerText({ timeout: 10_000 });
-  if (!selected.includes(productName)) {
-    throw new Error(`SpaceCloud product selection was not verified: ${productName}`);
+  const selectedState = await getSelectedProductState(page);
+  if (selectedState.nativeSelectFound && selectedState.selectedText !== productName) {
+    throw new Error(
+      `SpaceCloud product selection mismatch: expected ${productName}, got ${selectedState.selectedText || "(empty)"}.`,
+    );
+  }
+
+  if (!selectedState.nativeSelectFound) {
+    const selected = await page.locator("body").innerText({ timeout: 10_000 });
+    if (!selected.includes(productName)) {
+      throw new Error(`SpaceCloud product selection was not verified: ${productName}`);
+    }
   }
 }
 
@@ -697,27 +751,74 @@ async function navigateToMonth(page, dateValue) {
   throw new Error(`Could not navigate SpaceCloud calendar to ${targetKey}.`);
 }
 
-async function isCalendarDayVisible(page, dateValue) {
-  const { day } = parseDateValue(dateValue);
-  const dayText = String(day).padStart(2, "0");
-  const altDayText = String(day);
+function calendarDayCellIndex(dateValue) {
+  const { year, month, day } = parseDateValue(dateValue);
+  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  return firstWeekday + day - 1;
+}
 
-  return page.evaluate(({ dayText, altDayText }) => {
+async function getCalendarDayCellBox(page, dateValue, { scrollIntoView = false } = {}) {
+  const { day } = parseDateValue(dateValue);
+  const cellIndex = calendarDayCellIndex(dateValue);
+
+  return page.evaluate(({ cellIndex, day, scrollIntoView }) => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
       return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
     }
 
-    return [...document.querySelectorAll("body *")]
+    const weekdayNames = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
+    const table = [...document.querySelectorAll("table")]
       .filter(visible)
-      .some((element) => {
-        const rect = element.getBoundingClientRect();
-        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
-        const hasDay = new RegExp(`^\\s*(${dayText}|${altDayText})(?!\\d)`).test(text);
-        return hasDay && rect.width >= 120 && rect.height >= 80 && rect.y > 420;
+      .find((candidate) => {
+        const headers = [...candidate.querySelectorAll("thead th")]
+          .map((element) => (element.textContent || "").replace(/\s+/g, " ").trim());
+        return headers.length === 7 && headers.every((header, index) => header === weekdayNames[index]);
       });
-  }, { dayText, altDayText }).catch(() => false);
+    if (!table) return null;
+
+    const cells = [...table.querySelectorAll("tbody td")];
+    const cell = cells[cellIndex];
+    if (!cell) return null;
+
+    const dateLabel = cell.querySelector(".date")
+      || [...cell.querySelectorAll("span,div")].find((element) => (element.textContent || "").trim() === String(day));
+    if (!dateLabel || Number((dateLabel.textContent || "").trim()) !== day) return null;
+
+    if (scrollIntoView) {
+      const initialRect = cell.getBoundingClientRect();
+      if (initialRect.top < 0 || initialRect.bottom > window.innerHeight) {
+        cell.scrollIntoView({ block: "center", inline: "nearest" });
+      }
+    }
+
+    const rect = cell.getBoundingClientRect();
+    return {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      cellIndex,
+      dayText: (dateLabel.textContent || "").trim(),
+      cellText: (cell.innerText || cell.textContent || "").replace(/\s+/g, " ").trim(),
+    };
+  }, { cellIndex, day, scrollIntoView }).catch(() => null);
+}
+
+async function getCalendarDiagnostics(page, dateValue) {
+  const selectedProduct = await getSelectedProductState(page);
+  const targetCell = await getCalendarDayCellBox(page, dateValue, { scrollIntoView: false });
+  return {
+    selectedProduct,
+    targetMonth: monthKey(dateValue),
+    targetDate: dateValue,
+    targetCell,
+  };
+}
+
+async function isCalendarDayVisible(page, dateValue) {
+  return Boolean(await getCalendarDayCellBox(page, dateValue));
 }
 
 async function waitForCalendarDay(page, dateValue, contextLabel) {
@@ -729,53 +830,6 @@ async function waitForCalendarDay(page, dateValue, contextLabel) {
 
   await saveScreenshot(page, `spacecloud-external-${contextLabel}-calendar-not-ready`);
   throw new Error(`SpaceCloud calendar data did not load for ${dateValue} before ${contextLabel}.`);
-}
-
-async function selectCalendarDay(page, dateValue) {
-  const { day } = parseDateValue(dateValue);
-  const dayText = String(day).padStart(2, "0");
-  const altDayText = String(day);
-
-  const box = await page.evaluate(({ dayText, altDayText }) => {
-    function visible(element) {
-      const style = window.getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
-      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-    }
-
-    const candidates = [...document.querySelectorAll("body *")]
-      .filter(visible)
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
-        const hasDay = new RegExp(`^\\s*(${dayText}|${altDayText})(?!\\d)`).test(text);
-        return {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-          text,
-          hasDay,
-          area: rect.width * rect.height,
-        };
-      })
-      .filter((item) =>
-        item.hasDay
-        && item.width >= 120
-        && item.height >= 80
-        && item.y > 420
-        && item.y < window.innerHeight - 40
-      )
-      .sort((a, b) => a.area - b.area);
-
-    return candidates[0] || null;
-  }, { dayText, altDayText });
-
-  if (!box) throw new Error(`Could not find SpaceCloud calendar day: ${dateValue}`);
-
-  await humanDelay(page, `before SpaceCloud calendar day ${dateValue} click`, 900, 2200);
-  await humanClick(page, box.x + Math.min(34, box.width / 2), box.y + Math.min(32, box.height / 3), `SpaceCloud calendar day ${dateValue}`);
-  await humanDelay(page, `after SpaceCloud calendar day ${dateValue} click`, 900, 2200);
 }
 
 async function clickAddReservation(page) {
@@ -808,7 +862,7 @@ async function getModalDateInputValue(page) {
           return { element, rect, text, area: rect.width * rect.height };
         })
         .filter((item) =>
-          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
           && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
           && item.text.includes("\uc608\uc57d\uc2dc\uac04")
         )
@@ -861,7 +915,7 @@ async function findModalDateInputBox(page) {
           return { element, rect, text, area: rect.width * rect.height };
         })
         .filter((item) =>
-          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
           && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
           && item.text.includes("\uc608\uc57d\uc2dc\uac04")
         )
@@ -976,147 +1030,10 @@ async function navigateModalDatePickerToMonth(page, dateValue) {
 }
 
 async function clickModalDatePickerDay(page, dateValue) {
-  const { day } = parseDateValue(dateValue);
+  const { year, month, day } = parseDateValue(dateValue);
   const dayText = String(day).padStart(2, "0");
-  const altDayText = String(day);
 
-  const dayBox = await page.evaluate(({ dayText, altDayText }) => {
-    function visible(element) {
-      const style = window.getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
-      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-    }
-
-    const pickerCandidates = [...document.querySelectorAll("div,section,article")]
-      .filter(visible)
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
-        const monthMatch = text.match(/\b(20\d{2})\.(\d{1,2})\b/);
-        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, text, monthMatch, area: rect.width * rect.height };
-      })
-      .filter((item) =>
-        item.monthMatch
-        && item.text.includes("\uc624\ub298")
-        && item.text.includes("\uc120\ud0dd")
-        && item.width >= 260
-        && item.width <= 640
-        && item.height >= 220
-        && item.height <= 560
-      )
-      .sort((a, b) => a.area - b.area);
-
-    const picker = pickerCandidates[0];
-    if (!picker) return null;
-
-    function clickableBoxFor(element, picker) {
-      let current = element;
-      let best = null;
-
-      for (let i = 0; i < 5 && current; i += 1) {
-        const rect = current.getBoundingClientRect();
-        const text = (current.textContent || "").replace(/\s+/g, " ").trim();
-        const style = window.getComputedStyle(current);
-        const role = current.getAttribute("role") || "";
-        const tagName = current.tagName.toLowerCase();
-        const isClickish = tagName === "button"
-          || tagName === "a"
-          || role === "button"
-          || style.cursor === "pointer"
-          || typeof current.onclick === "function";
-
-        if (
-          (text === dayText || text === altDayText)
-          && rect.x >= picker.x
-          && rect.y >= picker.y
-          && rect.x + rect.width <= picker.x + picker.width
-          && rect.y + rect.height <= picker.y + picker.height
-          && rect.width >= 14
-          && rect.width <= 90
-          && rect.height >= 14
-          && rect.height <= 90
-        ) {
-          best = {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-            text,
-            isClickish,
-            area: rect.width * rect.height,
-          };
-        }
-
-        if (current.parentElement && current.parentElement.contains(picker.element)) break;
-        current = current.parentElement;
-      }
-
-      return best;
-    }
-
-    const candidates = [...document.querySelectorAll("body *")]
-      .filter(visible)
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
-        const style = window.getComputedStyle(element);
-        const color = style.color.match(/\d+/g)?.map(Number) || [];
-        const isDimmed = color.length >= 3 && color[0] > 150 && color[1] > 150 && color[2] > 150;
-        const clickBox = clickableBoxFor(element, picker);
-        return {
-          tagName: element.tagName,
-          role: element.getAttribute("role") || "",
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-          text,
-          isDimmed,
-          clickBox,
-          area: rect.width * rect.height,
-        };
-      })
-      .filter((item) =>
-        (item.text === dayText || item.text === altDayText)
-        && !item.isDimmed
-        && item.x >= picker.x
-        && item.y >= picker.y
-        && item.x + item.width <= picker.x + picker.width
-        && item.y + item.height <= picker.y + picker.height
-        && item.width >= 12
-        && item.width <= 70
-        && item.height >= 12
-        && item.height <= 70
-      )
-      .map((item) => item.clickBox || item)
-      .sort((a, b) =>
-        Number(b.isClickish) - Number(a.isClickish)
-        || b.area - a.area
-      );
-
-    return candidates[0] || null;
-  }, { dayText, altDayText });
-
-  if (!dayBox) throw new Error(`Could not find SpaceCloud modal date picker day: ${dayText}`);
-
-  await humanDelay(page, `before modal date picker day ${dayText} click`, 700, 1700);
-  await humanClick(page, dayBox.x + dayBox.width / 2, dayBox.y + dayBox.height / 2, `modal date picker day ${dayText}`);
-  await humanDelay(page, "after modal date picker day click", 900, 2000);
-
-  const expected = formatModalDate(dateValue).replace(/\s+/g, "");
-  for (const [offsetX, offsetY] of [[0, 0], [-5, 0], [5, 0], [0, -5], [0, 5]]) {
-    const selected = (await getModalDateInputValue(page)).replace(/\s+/g, "") === expected;
-    if (selected) return;
-
-    await page.mouse.click(
-      dayBox.x + dayBox.width / 2 + offsetX,
-      dayBox.y + dayBox.height / 2 + offsetY,
-      { delay: 90 },
-    );
-    await humanDelay(page, `after precise modal day ${dayText} click`, 220, 520);
-  }
-
-  const clickedByDom = await page.evaluate(({ dayText, altDayText }) => {
+  const dayBox = await page.evaluate(({ year, month, day }) => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -1133,6 +1050,8 @@ async function clickModalDatePickerDay(page, dateValue) {
       })
       .filter((item) =>
         item.monthMatch
+        && Number(item.monthMatch[1]) === year
+        && Number(item.monthMatch[2]) === month
         && item.text.includes("\uc624\ub298")
         && item.text.includes("\uc120\ud0dd")
         && item.rect.width >= 260
@@ -1143,62 +1062,53 @@ async function clickModalDatePickerDay(page, dateValue) {
       .sort((a, b) => a.area - b.area);
 
     const picker = pickerCandidates[0];
-    if (!picker) return false;
+    if (!picker) return null;
 
-    const candidates = [...document.querySelectorAll("body *")]
+    const expectedIndex = new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + day - 1;
+    const tableCandidates = [...picker.element.querySelectorAll("table")]
       .filter(visible)
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
-        const style = window.getComputedStyle(element);
-        const color = style.color.match(/\d+/g)?.map(Number) || [];
-        const isDimmed = color.length >= 3 && color[0] > 150 && color[1] > 150 && color[2] > 150;
-        return { element, rect, text, isDimmed, area: rect.width * rect.height };
+      .map((table) => {
+        const cells = [...table.querySelectorAll("td")]
+          .filter(visible)
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+            return { element, rect, text };
+          })
+          .filter((cell) => /^\d{1,2}$/.test(cell.text) && cell.rect.width >= 18 && cell.rect.height >= 18)
+          .sort((a, b) => Math.abs(a.rect.y - b.rect.y) > 3 ? a.rect.y - b.rect.y : a.rect.x - b.rect.x);
+        return { table, cells };
       })
-      .filter((item) =>
-        (item.text === dayText || item.text === altDayText)
-        && !item.isDimmed
-        && item.rect.x >= picker.rect.x
-        && item.rect.y >= picker.rect.y
-        && item.rect.x + item.rect.width <= picker.rect.x + picker.rect.width
-        && item.rect.y + item.rect.height <= picker.rect.y + picker.rect.height
-        && item.rect.width >= 8
-        && item.rect.width <= 80
-        && item.rect.height >= 8
-        && item.rect.height <= 80
-      )
-      .sort((a, b) => b.area - a.area);
+      .filter((candidate) => candidate.cells.length >= 28 && candidate.cells.length <= 42)
+      .sort((a, b) => b.cells.length - a.cells.length);
 
-    const target = candidates[0]?.element;
-    if (!target) return false;
-
-    let clickable = target;
-    for (let i = 0; i < 4 && clickable.parentElement; i += 1) {
-      const parent = clickable.parentElement;
-      const parentRect = parent.getBoundingClientRect();
-      const parentText = (parent.textContent || "").replace(/\s+/g, " ").trim();
-      if (
-        (parentText === dayText || parentText === altDayText)
-        && parentRect.x >= picker.rect.x
-        && parentRect.y >= picker.rect.y
-        && parentRect.x + parentRect.width <= picker.rect.x + picker.rect.width
-        && parentRect.y + parentRect.height <= picker.rect.y + picker.rect.height
-        && parentRect.width <= 90
-        && parentRect.height <= 90
-      ) {
-        clickable = parent;
-      }
+    for (const candidate of tableCandidates) {
+      const cell = candidate.cells[expectedIndex];
+      if (!cell || Number(cell.text) !== day) continue;
+      const hit = document.elementFromPoint(
+        cell.rect.x + cell.rect.width / 2,
+        cell.rect.y + cell.rect.height / 2,
+      );
+      return {
+        x: cell.rect.x,
+        y: cell.rect.y,
+        width: cell.rect.width,
+        height: cell.rect.height,
+        text: cell.text,
+        gridIndex: expectedIndex,
+        hitText: (hit?.textContent || "").replace(/\s+/g, " ").trim(),
+      };
     }
 
-    clickable.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));
-    clickable.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-    clickable.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-    clickable.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-    return true;
-  }, { dayText, altDayText });
+    return null;
+  }, { year, month, day });
 
-  if (!clickedByDom) throw new Error(`Could not DOM-click SpaceCloud modal date picker day: ${dayText}`);
-  await humanDelay(page, "after modal date picker DOM day click", 500, 1200);
+  if (!dayBox) throw new Error(`Could not find SpaceCloud modal date picker day: ${dayText}`);
+  console.log("SpaceCloud date grid target:", JSON.stringify(dayBox));
+
+  await humanDelay(page, `before modal date picker day ${dayText} click`, 450, 1000);
+  await humanClick(page, dayBox.x + dayBox.width / 2, dayBox.y + dayBox.height / 2, `modal date picker day ${dayText}`);
+  await humanDelay(page, "after modal date picker day click", 500, 1100);
 }
 
 async function setModalDateDirectly(page, dateValue) {
@@ -1219,7 +1129,7 @@ async function setModalDateDirectly(page, dateValue) {
           return { element, rect, text, area: rect.width * rect.height };
         })
         .filter((item) =>
-          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
           && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
           && item.text.includes("\uc608\uc57d\uc2dc\uac04")
         )
@@ -1302,7 +1212,7 @@ async function clickModalTextButton(page, text, timeout = 20_000) {
           return { element, rect, text, area: rect.width * rect.height };
         })
         .filter((item) =>
-          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
           && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
           && item.text.includes("\uc608\uc57d\uc2dc\uac04")
           && item.rect.width >= 360
@@ -1385,7 +1295,7 @@ async function fillInputByIndex(page, index, value) {
           return { element, rect, text, area: rect.width * rect.height };
         })
         .filter((item) =>
-          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00")
+          item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
           && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
           && item.text.includes("\uc608\uc57d\uc2dc\uac04")
           && item.rect.width >= 360
@@ -1559,7 +1469,7 @@ async function waitForCalendarTimeEntry(page, { dateValue, startHour, endHour },
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const entry = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
-    if (entry) return entry;
+    if (entry?.fullyCovered) return entry;
     await humanDelay(page, `wait for SpaceCloud ${contextLabel} time entry`, 650, 1100);
   }
 
@@ -1666,9 +1576,100 @@ async function verifyTargetPeriodBlocked(page, {
   console.log("SpaceCloud existing target block was verified from a freshly loaded calendar.");
 }
 
+function isClaimableManualExternalReservation(popupText) {
+  const normalizedText = popupText.normalize("NFKC").replace(/\s+/g, " ");
+  const compactText = normalizedText.replace(/\s+/g, "");
+  const hasBookingMarker = /\ub124\uc774\ubc84\uc608\uc57d\ubc88\ud638[:\uff1a]?\d+/.test(compactText);
+  const hasPlaceholderName = /\uc608\uc57d\uc790\uba85\s*[:\uff1a]?\s*\uc774\ub984\s*\uc5c6\uc74c/.test(normalizedText);
+  const hasPlaceholderPhone = /\uc804\ud654\ubc88\ud638\s*[:\uff1a]?\s*010\s*-\s*0000\s*-\s*0000/.test(normalizedText);
+  const hasEmptyMemo = /\uba54\ubaa8\s*[:\uff1a]?\s*(?:-|\uc5c6\uc74c)(?:\s|$)/.test(normalizedText);
+
+  return !hasBookingMarker && hasPlaceholderName && hasPlaceholderPhone && hasEmptyMemo;
+}
+
+async function claimManualExternalReservation(page, {
+  room,
+  dateValue,
+  startHour,
+  endHour,
+  marker,
+  customerName,
+  phone,
+  apply,
+}) {
+  const opened = await findAndOpenExternalReservation(page, {
+    dateValue,
+    startHour,
+    endHour,
+    marker,
+    customerName,
+    phone,
+    timeOnly: true,
+  });
+  if (!opened) return null;
+
+  const popupText = await page.locator("body").innerText({ timeout: 10_000 }).catch(() => "");
+  if (!isClaimableManualExternalReservation(popupText)) {
+    await saveScreenshot(page, "spacecloud-external-manual-block-ambiguous");
+    throw new Error(
+      `SpaceCloud exact-time external reservation already has identifying information. Not overwriting it automatically: ${dateValue} ${startHour}:00-${endHour}:00.`,
+    );
+  }
+
+  await saveScreenshot(page, "spacecloud-external-manual-block-before-claim");
+  if (!apply) {
+    await page.keyboard.press("Escape").catch(() => {});
+    console.log("Matching unlabelled manual SpaceCloud block was found. Add --apply to attach Naver identity.");
+    return { ok: true, alreadyClosed: true, manualBlockNeedsIdentity: true, dryRun: true };
+  }
+
+  await clickVisibleText(page, TEXT.editReservation, 20_000);
+  await page.waitForFunction(
+    () => {
+      const text = document.body?.innerText || "";
+      return text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
+        && text.includes("\uc608\uc57d\ub0a0\uc9dc")
+        && text.includes("\uc608\uc57d\uc2dc\uac04");
+    },
+    null,
+    { timeout: 20_000 },
+  );
+  await humanDelay(page, "after SpaceCloud manual block edit open", 500, 1200);
+
+  await fillInputByIndex(page, 1, customerName || marker);
+  if (phone) await fillInputByIndex(page, 2, phone);
+  await fillInputByIndex(page, 3, marker);
+  await saveScreenshot(page, "spacecloud-external-manual-block-claimed-filled");
+  resetSpaceCloudMutationError(page);
+  await clickModalTextButton(page, TEXT.confirm, 20_000);
+  await humanDelay(page, "after SpaceCloud manual block identity save", 700, 1600);
+  throwIfSpaceCloudMutationFailed(page, "manual block identity save");
+
+  await verifyExternalReservationAdded(page, {
+    room,
+    dateValue,
+    startHour,
+    endHour,
+    marker,
+    customerName,
+    phone,
+  });
+
+  console.log("SpaceCloud manual block was linked to the Naver reservation and verified.");
+  return { ok: true, alreadyClosed: true, manualBlockClaimed: true, dryRun: false };
+}
+
 async function addExternalReservation(page, { room, dateValue, startHour, endHour, marker, customerName, phone, apply, skipCalendarPrecheck = false }) {
   if (!skipCalendarPrecheck) {
-    const alreadyAdded = await findAndOpenExternalReservation(page, { dateValue, startHour, endHour, marker, customerName, phone });
+    const alreadyAdded = await findAndOpenExternalReservation(page, {
+      dateValue,
+      startHour,
+      endHour,
+      marker,
+      customerName,
+      phone,
+      strictIdentity: true,
+    });
     if (alreadyAdded) {
       await saveScreenshot(page, "spacecloud-external-already-added");
       await page.keyboard.press("Escape").catch(() => {});
@@ -1677,11 +1678,29 @@ async function addExternalReservation(page, { room, dateValue, startHour, endHou
       return { ok: true, alreadyClosed: true, dryRun: !apply };
     }
 
+    const claimedManualBlock = await claimManualExternalReservation(page, {
+      room,
+      dateValue,
+      startHour,
+      endHour,
+      marker,
+      customerName,
+      phone,
+      apply,
+    });
+    if (claimedManualBlock) return claimedManualBlock;
+
     const alreadyBlocked = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
-    if (alreadyBlocked) {
+    if (alreadyBlocked?.fullyCovered) {
       await saveScreenshot(page, "spacecloud-external-already-blocked");
       console.log("SpaceCloud target period already appears blocked. Treat close as success.");
       return { ok: true, alreadyClosed: true, manualOrExistingBlock: true, dryRun: !apply };
+    }
+    if (alreadyBlocked?.hasOverlap) {
+      await saveScreenshot(page, "spacecloud-external-partially-blocked");
+      throw new Error(
+        `SpaceCloud target period is only partially blocked: ${dateValue} ${startHour}:00-${endHour}:00. Not treating partial coverage as success.`,
+      );
     }
   }
 
@@ -1703,7 +1722,10 @@ async function addExternalReservation(page, { room, dateValue, startHour, endHou
     return { ok: true, dryRun: true };
   }
 
+  resetSpaceCloudMutationError(page);
   await clickModalTextButton(page, TEXT.confirm, 20_000);
+  await humanDelay(page, "after SpaceCloud external save response", 500, 1000);
+  throwIfSpaceCloudMutationFailed(page, "external reservation save");
   try {
     await page.waitForFunction(
       () => !(document.body?.innerText || "").includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00"),
@@ -1716,6 +1738,28 @@ async function addExternalReservation(page, { room, dateValue, startHour, endHou
       console.log("SpaceCloud says the target period is already reserved. Verify the calendar before treating close as success.");
       await saveScreenshot(page, "spacecloud-external-already-reserved");
       await page.keyboard.press("Escape").catch(() => {});
+
+      // The calendar can be stale during the initial precheck. If a person
+      // already added an unlabelled external block for this exact period,
+      // attach the Naver identity now so a later cancellation can delete only
+      // the block that belongs to this reservation.
+      await reopenCalendarForVerification(page, {
+        room,
+        dateValue,
+        contextLabel: "existing SpaceCloud block identity claim",
+      });
+      const claimedManualBlock = await claimManualExternalReservation(page, {
+        room,
+        dateValue,
+        startHour,
+        endHour,
+        marker,
+        customerName,
+        phone,
+        apply,
+      });
+      if (claimedManualBlock) return claimedManualBlock;
+
       await verifyTargetPeriodBlocked(page, {
         room,
         dateValue,
@@ -1753,28 +1797,16 @@ async function findAndOpenExternalReservation(page, {
   customerName,
   phone,
   strictIdentity = false,
+  timeOnly = false,
 }) {
-  const { day } = parseDateValue(dateValue);
-  const dayText = String(day).padStart(2, "0");
-  const altDayText = String(day);
+  const targetCell = await getCalendarDayCellBox(page, dateValue, { scrollIntoView: true });
+  if (!targetCell) return false;
 
-  const candidates = await page.evaluate(({ dayText, altDayText, startHour, endHour }) => {
+  const candidates = await page.evaluate(({ targetCell, startHour, endHour }) => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
       return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-    }
-
-    function cellFor(element) {
-      let current = element;
-      for (let i = 0; i < 8 && current; i += 1) {
-        const rect = current.getBoundingClientRect();
-        const text = (current.textContent || "").replace(/\s+/g, " ").trim();
-        const hasDay = new RegExp(`^\\s*(${dayText}|${altDayText})(?!\\d)`).test(text);
-        if (hasDay && rect.width > 120 && rect.height > 80 && rect.y > 420) return current;
-        current = current.parentElement;
-      }
-      return null;
     }
 
     function matchesTargetTime(text) {
@@ -1783,23 +1815,32 @@ async function findAndOpenExternalReservation(page, {
       return matches.some((match) => Number(match[1]) === startHour && Number(match[2]) === endHour);
     }
 
+    function isInsideTargetCell(rect) {
+      const centerX = rect.x + rect.width / 2;
+      const centerY = rect.y + rect.height / 2;
+      return centerX >= targetCell.x
+        && centerX <= targetCell.x + targetCell.width
+        && centerY >= targetCell.y
+        && centerY <= targetCell.y + targetCell.height;
+    }
+
     const entries = [...document.querySelectorAll("body *")]
       .filter(visible)
       .map((element) => {
         const rect = element.getBoundingClientRect();
         const text = (element.textContent || "").replace(/\s+/g, " ").trim();
-        const cell = cellFor(element);
         return {
           x: rect.x,
           y: rect.y,
           width: rect.width,
           height: rect.height,
           text,
-          inTargetCell: Boolean(cell),
+          inTargetCell: isInsideTargetCell(rect),
         };
       })
       .filter((entry) =>
         matchesTargetTime(entry.text)
+        && entry.text.replace(/\s+/g, "").startsWith("\ucd94")
         && entry.inTargetCell
         && entry.y > 420
         && entry.width < 220
@@ -1812,8 +1853,10 @@ async function findAndOpenExternalReservation(page, {
         return aExact - bExact || (a.width * a.height) - (b.width * b.height);
       });
 
-    return entries.slice(0, 8);
-  }, { dayText, altDayText, startHour, endHour });
+    // A calendar item has several nested elements with the same text. Clicking
+    // more than one candidate only reopens the same detail popup repeatedly.
+    return entries.slice(0, 1);
+  }, { targetCell, startHour, endHour });
 
   for (const candidate of candidates) {
     await humanDelay(page, "before SpaceCloud external item click", 900, 2200);
@@ -1830,6 +1873,7 @@ async function findAndOpenExternalReservation(page, {
       customerName,
       phone,
       strictIdentity,
+      timeOnly,
     })) {
       return true;
     }
@@ -1855,19 +1899,28 @@ function matchesExternalReservationPopup(popupText, {
   customerName,
   phone,
   strictIdentity = false,
+  timeOnly = false,
 }) {
-  const compactText = popupText.replace(/\s+/g, "");
+  const normalizedText = popupText.normalize("NFKC").replace(/\s+/g, " ");
+  const compactText = normalizedText.replace(/\s+/g, "");
   const compactMarker = marker.replace(/\s+/g, "");
   const compactPhone = phone.replace(/\D/g, "");
   const compactDigits = compactText.replace(/\D/g, "");
-  const detailDate = formatDetailDate(dateValue).replace(/\s+/g, "");
-  const looseDetailDate = formatLooseDetailDate(dateValue).replace(/\s+/g, "");
+  const { year, month, day } = parseDateValue(dateValue);
+  const detailDate = `${year}.${String(month).padStart(2, "0")}.${String(day).padStart(2, "0")}`;
+  const looseDetailDate = `${year}.${month}.${day}`;
   const directAdded = TEXT.directAdded.replace(/\s+/g, "");
 
-  const dateMatches = compactText.includes(detailDate) || compactText.includes(looseDetailDate);
+  const escapedYear = String(year).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const datePattern = new RegExp(`${escapedYear}\\s*[.\\-/]\\s*0?${month}\\s*[.\\-/]\\s*0?${day}`);
+  const timePattern = new RegExp(`${startHour}\\s*:\\s*00\\s*[~～-]\\s*${endHour}\\s*:\\s*00`);
+  const dateMatches = compactText.includes(detailDate)
+    || compactText.includes(looseDetailDate)
+    || datePattern.test(normalizedText);
   const timeMatches = compactText.includes(`${startHour}:00~${endHour}:00`)
     || compactText.includes(`${String(startHour).padStart(2, "0")}:00~${String(endHour).padStart(2, "0")}:00`)
-    || compactText.includes(`${startHour}~${endHour}`);
+    || compactText.includes(`${startHour}~${endHour}`)
+    || timePattern.test(normalizedText);
   const markerMatches = compactText.includes(compactMarker) || popupText.includes(marker);
   const customerMatches = !customerName || popupText.includes(customerName);
   const phoneMatches = !compactPhone || compactDigits.includes(compactPhone);
@@ -1877,46 +1930,45 @@ function matchesExternalReservationPopup(popupText, {
       || (customerName ? customerMatches : false)
       || (compactPhone ? phoneMatches : false);
 
-  return compactText.includes(directAdded)
-    && identityMatches
+  const directAddedMatches = compactText.includes(directAdded)
+    || /\uc9c1\uc811\s*\ucd94\uac00\ud55c\s*\uc608\uc57d\s*\uac74\uc785\ub2c8\ub2e4[.]?/.test(normalizedText);
+
+  return directAddedMatches
+    && (timeOnly || identityMatches)
     && dateMatches
     && timeMatches;
 }
 
 async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
-  const { day } = parseDateValue(dateValue);
-  const dayText = String(day).padStart(2, "0");
-  const altDayText = String(day);
+  const targetCell = await getCalendarDayCellBox(page, dateValue, { scrollIntoView: true });
+  if (!targetCell) return null;
 
-  return page.evaluate(({ dayText, altDayText, startHour, endHour }) => {
+  return page.evaluate(({ targetCell, startHour, endHour }) => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
       return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
     }
 
-    function cellFor(element) {
-      let current = element;
-      for (let i = 0; i < 8 && current; i += 1) {
-        const rect = current.getBoundingClientRect();
-        const text = (current.textContent || "").replace(/\s+/g, " ").trim();
-        const hasDay = new RegExp(`^\\s*(${dayText}|${altDayText})(?!\\d)`).test(text);
-        if (hasDay && rect.width > 120 && rect.height > 80 && rect.y > 420) return current;
-        current = current.parentElement;
-      }
-      return null;
+    function timeRanges(compactText) {
+      return [...compactText.matchAll(/(\d{1,2})\s*~\s*(\d{1,2})/g)]
+        .map((match) => ({ start: Number(match[1]), end: Number(match[2]) }))
+        .filter((range) =>
+          Number.isFinite(range.start)
+          && Number.isFinite(range.end)
+          && range.start >= 0
+          && range.end <= 24
+          && range.start < range.end
+        );
     }
 
-    function overlapsTargetTime(compactText) {
-      const matches = [...compactText.matchAll(/(\d{1,2})\s*~\s*(\d{1,2})/g)];
-      return matches.some((match) => {
-        const entryStart = Number(match[1]);
-        const entryEnd = Number(match[2]);
-        return Number.isFinite(entryStart)
-          && Number.isFinite(entryEnd)
-          && entryStart < endHour
-          && entryEnd > startHour;
-      });
+    function isInsideTargetCell(rect) {
+      const centerX = rect.x + rect.width / 2;
+      const centerY = rect.y + rect.height / 2;
+      return centerX >= targetCell.x
+        && centerX <= targetCell.x + targetCell.width
+        && centerY >= targetCell.y
+        && centerY <= targetCell.y + targetCell.height;
     }
 
     const entries = [...document.querySelectorAll("body *")]
@@ -1925,7 +1977,6 @@ async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
         const rect = element.getBoundingClientRect();
         const text = (element.textContent || "").replace(/\s+/g, " ").trim();
         const compactText = text.replace(/\s+/g, "");
-        const cell = cellFor(element);
         return {
           x: rect.x,
           y: rect.y,
@@ -1933,20 +1984,47 @@ async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
           height: rect.height,
           text,
           compactText,
-          inTargetCell: Boolean(cell),
+          ranges: timeRanges(compactText),
+          inTargetCell: isInsideTargetCell(rect),
         };
       })
       .filter((entry) =>
         entry.inTargetCell
-        && overlapsTargetTime(entry.compactText)
+        && entry.ranges.some((range) => range.start < endHour && range.end > startHour)
         && entry.y > 420
         && entry.width < 260
         && entry.height < 90
       )
       .sort((a, b) => (a.width * a.height) - (b.width * b.height));
 
-    return entries[0] || null;
-  }, { dayText, altDayText, startHour, endHour });
+    if (entries.length === 0) return null;
+
+    const uniqueRanges = new Map();
+    for (const entry of entries) {
+      for (const range of entry.ranges) {
+        if (range.start < endHour && range.end > startHour) {
+          uniqueRanges.set(`${range.start}-${range.end}`, range);
+        }
+      }
+    }
+
+    const intervals = [...uniqueRanges.values()]
+      .sort((a, b) => a.start - b.start || a.end - b.end);
+    let coveredUntil = startHour;
+    for (const interval of intervals) {
+      if (interval.end <= coveredUntil) continue;
+      if (interval.start > coveredUntil) break;
+      coveredUntil = Math.max(coveredUntil, interval.end);
+      if (coveredUntil >= endHour) break;
+    }
+
+    return {
+      ...entries[0],
+      intervals,
+      hasOverlap: intervals.length > 0,
+      fullyCovered: coveredUntil >= endHour,
+    };
+  }, { targetCell, startHour, endHour });
 }
 
 async function deleteExternalReservation(page, {
@@ -1959,6 +2037,7 @@ async function deleteExternalReservation(page, {
   phone,
   apply,
   allowStillBlockedAfterDelete = false,
+  claimUnlabelledBeforeDelete = false,
 }) {
   let opened = await findAndOpenExternalReservation(page, {
     dateValue,
@@ -1969,6 +2048,45 @@ async function deleteExternalReservation(page, {
     phone,
     strictIdentity: true,
   });
+
+  if (!opened && claimUnlabelledBeforeDelete) {
+    const claimed = await claimManualExternalReservation(page, {
+      room,
+      dateValue,
+      startHour,
+      endHour,
+      marker,
+      customerName,
+      phone,
+      apply,
+    });
+
+    if (claimed?.manualBlockNeedsIdentity && claimed.dryRun) {
+      return {
+        ok: true,
+        alreadyOpen: false,
+        wouldClaimAndDeleteManualBlock: true,
+        dryRun: true,
+      };
+    }
+
+    if (claimed) {
+      opened = await findAndOpenExternalReservation(page, {
+        dateValue,
+        startHour,
+        endHour,
+        marker,
+        customerName,
+        phone,
+        strictIdentity: true,
+      });
+      if (!opened) {
+        throw new Error(
+          `SpaceCloud manual block was linked, but could not be reopened for safe deletion: ${dateValue} ${startHour}:00-${endHour}:00.`,
+        );
+      }
+    }
+  }
 
   if (!opened) {
     const stillBlocked = await findCalendarTimeEntry(page, { dateValue, startHour, endHour });
@@ -2022,6 +2140,7 @@ async function deleteExternalReservation(page, {
     await dialog.accept();
   });
 
+  resetSpaceCloudMutationError(page);
   await clickVisibleText(page, TEXT.deleteReservation, 20_000);
   await humanDelay(page, "after SpaceCloud delete click", 800, 1800);
 
@@ -2030,6 +2149,7 @@ async function deleteExternalReservation(page, {
   }
 
   await humanDelay(page, "after SpaceCloud external delete", 900, 2200);
+  throwIfSpaceCloudMutationFailed(page, "external reservation delete");
   await saveScreenshot(page, "spacecloud-external-after-delete");
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -2092,13 +2212,15 @@ async function main() {
   const room = parseRoom(requiredArg(args, "room"));
   const dateValue = requiredArg(args, "date");
   const startHour = parseHour(requiredArg(args, "start"), "--start");
-  const endHour = parseHour(requiredArg(args, "end"), "--end");
+  const endHour = parseHour(requiredArg(args, "end"), "--end", true);
   const mode = args.mode || "close";
   const bookingNumber = requiredArg(args, "booking-number");
   const customerName = args["customer-name"] || "";
   const phone = args.phone || "";
   const apply = args.apply === "true";
+  const inspectCalendar = args["inspect-calendar"] === "true";
   const allowStillBlockedAfterDelete = args["allow-still-blocked-after-delete"] === "true";
+  const claimUnlabelledBeforeDelete = args["claim-unlabelled-before-delete"] === "true";
 
   if (mode !== "close" && mode !== "open") throw new Error("--mode must be close or open");
   if (endHour <= startHour) throw new Error("--end must be after --start");
@@ -2115,16 +2237,21 @@ async function main() {
     timeoutMs: 12 * 60 * 1000,
     staleMs: 15 * 60 * 1000,
   });
-  const browser = await launchRpaBrowser({ headless: false });
+  const headless = resolveRpaHeadless();
+  const browserOptions = spaceCloudBrowserOptions(headless);
+  console.log(`[SpaceCloud network] Use ${browserOptions.useProxy ? "proxy" : "direct"} session path.`);
+  const browser = await launchRpaBrowser(browserOptions);
   let page;
 
   try {
     const context = await newRpaContext(browser, {
       storageState: spaceCloudStorageStatePath,
       blockHeavyResources: true,
+      rpaRole: "spacecloud",
     });
     page = await context.newPage();
     page.__spaceCloudLastErrorBody = "";
+    page.__spaceCloudLastApiError = null;
     page.on("console", (message) => {
       if (["error", "warning"].includes(message.type())) {
         console.log(`[SpaceCloud browser ${message.type()}] ${message.text().slice(0, 500)}`);
@@ -2142,6 +2269,13 @@ async function main() {
         if (response.status() >= 400) {
           const body = await response.text().catch(() => "");
           page.__spaceCloudLastErrorBody = body;
+          if (/^https:\/\/api\.spacecloud\.kr\/partner\//i.test(response.url())) {
+            page.__spaceCloudLastApiError = {
+              status: response.status(),
+              url: response.url(),
+              body,
+            };
+          }
           if (body) console.log(`[SpaceCloud response body] ${body.slice(0, 1000)}`);
         }
       }
@@ -2153,15 +2287,20 @@ async function main() {
     await assertCalendarView(page, "product selection");
     await selectProduct(page, room);
 
-    if (mode === "open") {
-      await assertCalendarView(page, "month navigation");
-      await navigateToMonth(page, dateValue);
-      await waitForCalendarDay(page, dateValue, "delete target");
-      await assertCalendarView(page, "date selection");
-    } else {
-      await assertCalendarView(page, "add reservation");
-    }
+    await assertCalendarView(page, "month navigation");
+    await navigateToMonth(page, dateValue);
+    await waitForCalendarDay(page, dateValue, mode === "open" ? "delete target" : "existing block precheck");
+    await assertCalendarView(page, mode === "open" ? "date selection" : "add reservation precheck");
     await saveScreenshot(page, "spacecloud-external-02-calendar");
+
+    if (inspectCalendar) {
+      console.log(JSON.stringify({
+        ok: true,
+        inspectOnly: true,
+        ...(await getCalendarDiagnostics(page, dateValue)),
+      }, null, 2));
+      return;
+    }
 
     const result = mode === "close"
       ? await addExternalReservation(page, {
@@ -2173,7 +2312,7 @@ async function main() {
         customerName,
         phone,
         apply,
-        skipCalendarPrecheck: true,
+        skipCalendarPrecheck: false,
       })
       : await deleteExternalReservation(page, {
         room,
@@ -2185,6 +2324,7 @@ async function main() {
         phone,
         apply,
         allowStillBlockedAfterDelete,
+        claimUnlabelledBeforeDelete,
       });
 
     console.log(JSON.stringify({

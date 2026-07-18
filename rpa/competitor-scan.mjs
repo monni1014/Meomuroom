@@ -1,10 +1,104 @@
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
 import { parseArgs } from "./lib/cli.mjs";
 import { humanClickElement } from "./lib/human.mjs";
+import { readFile } from "node:fs/promises";
+import { saveScreenshot } from "./lib/screenshot.mjs";
 
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
 const TRACKED_START_HOUR = 8;
 const TRACKED_END_HOUR = 24;
+
+function previousStateKey(competitorId, targetKey, hour) {
+  return `${competitorId}|${targetKey}|${hour}`;
+}
+
+async function loadPreviousStates(filePath) {
+  if (!filePath) return new Map();
+  const rows = JSON.parse(await readFile(filePath, "utf8"));
+  if (!Array.isArray(rows)) throw new Error("Previous competitor states must be an array");
+  return new Map(rows.map((row) => [
+    previousStateKey(row.competitorId, row.dateKey, row.hour),
+    { state: row.state, pendingState: row.pendingState || null },
+  ]));
+}
+
+function evidenceRange(hours) {
+  if (hours.length === 0) return { startHour: null, endHour: null };
+  return {
+    startHour: Math.min(...hours),
+    endHour: Math.max(...hours) + 1,
+  };
+}
+
+function detectEvidenceReason(competitorId, targetKey, observations, previousStates) {
+  const unknownHours = observations
+    .filter((observation) => observation.observedState === "UNKNOWN")
+    .map((observation) => observation.hour);
+  if (unknownHours.length > 0) {
+    return {
+      reasonCode: "SLOT_READ_UNCERTAIN",
+      reason: "One or more time slots could not be read from the public booking page.",
+      ...evidenceRange(unknownHours),
+    };
+  }
+
+  const cutoffBlockedHours = observations
+    .filter((observation) => {
+      const previous = previousStates.get(previousStateKey(competitorId, targetKey, observation.hour));
+      return previous?.state === "BOOKED"
+        && previous.pendingState === "AVAILABLE"
+        && observation.observedState === "POLICY_CLOSED";
+    })
+    .map((observation) => observation.hour);
+  if (cutoffBlockedHours.length > 0) {
+    return {
+      reasonCode: "CUTOFF_BLOCKED_CONFIRMATION",
+      reason: "The booking cutoff hid a slot while a cancellation confirmation was pending.",
+      ...evidenceRange(cutoffBlockedHours),
+    };
+  }
+
+  const cancellationHours = observations
+    .filter((observation) => {
+      const previous = previousStates.get(previousStateKey(competitorId, targetKey, observation.hour));
+      return previous?.state === "BOOKED" && observation.observedState === "AVAILABLE";
+    })
+    .map((observation) => observation.hour);
+  if (cancellationHours.length > 0) {
+    return {
+      reasonCode: "CANCELLATION_PENDING_CONFIRMATION",
+      reason: "A previously booked slot appeared available and needs a second scan for confirmation.",
+      ...evidenceRange(cancellationHours),
+    };
+  }
+
+  return null;
+}
+
+async function captureEvidence(page, competitorId, targetKey, reason) {
+  try {
+    const imagePath = await saveScreenshot(
+      page,
+      `competitor-evidence-${competitorId}-${targetKey || "page"}-${reason.reasonCode.toLowerCase()}`,
+    );
+    return {
+      competitorId,
+      dateKey: targetKey || null,
+      startHour: reason.startHour ?? null,
+      endHour: reason.endHour ?? null,
+      reasonCode: reason.reasonCode,
+      reason: reason.reason,
+      imagePath,
+      capturedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error(
+      `[Competitor] Evidence screenshot failed for ${competitorId} ${targetKey || "page"}:`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
 
 function environmentMinutes(name, fallback) {
   const value = Number(process.env[name]);
@@ -142,15 +236,26 @@ async function selectDate(page, targetKey) {
   const button = buttons.nth(index);
   if (await button.isDisabled()) return false;
 
+  // Selecting a date makes Naver scroll down to the time choices. Bring the
+  // next calendar date back into the viewport before using coordinate-based
+  // human clicking; otherwise the click can land at the top edge of the page.
+  await button.scrollIntoViewIfNeeded({ timeout: 10_000 });
+  await page.waitForTimeout(200);
   await humanClickElement(page, button, `competitor calendar date ${targetKey}`);
-  await page.waitForFunction(
-    ({ expectedDay }) => {
-      const selected = document.querySelector(".calendar_date.selected .num")?.textContent?.trim();
-      return selected === String(expectedDay);
-    },
-    { expectedDay: day },
-    { timeout: 20_000 },
-  );
+  try {
+    await page.waitForFunction(
+      ({ expectedDay }) => {
+        const selected = document.querySelector(".calendar_date.selected .num")?.textContent?.trim();
+        return selected === String(expectedDay);
+      },
+      { expectedDay: day },
+      { timeout: 20_000 },
+    );
+  } catch (error) {
+    throw new Error(
+      `Calendar date ${targetKey} was clicked but not selected: ${error instanceof Error ? error.message : error}`,
+    );
+  }
   await page.waitForTimeout(250);
   return true;
 }
@@ -215,24 +320,78 @@ function buildObservations(competitor, targetKey, rawSlots, checkedAt) {
   return observations;
 }
 
-async function scanCompetitor(context, competitor, targetDates, demoHoldMs = 0) {
+async function scanCompetitor(context, competitor, targetDates, previousStates, demoHoldMs = 0) {
   const page = await context.newPage();
   const observations = [];
+  const evidence = [];
+  const errors = [];
 
-  try {
+  const openCompetitorPage = async () => {
     await page.goto(competitor.url, { timeout: 60_000, waitUntil: "domcontentloaded" });
     await waitForCalendar(page);
+  };
 
-    for (const targetKey of targetDates) {
-      const selectable = await selectDate(page, targetKey);
-      const checkedAt = new Date();
-      const rawSlots = selectable ? await readVisibleSlots(page) : [];
-      observations.push(...buildObservations(competitor, targetKey, rawSlots, checkedAt));
+  try {
+    try {
+      await openCompetitorPage();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const reason = {
+        reasonCode: "COMPETITOR_PAGE_ERROR",
+        reason: `The competitor booking page could not be opened or read: ${message}`,
+        startHour: null,
+        endHour: null,
+      };
+      const captured = await captureEvidence(page, competitor.id, null, reason);
+      if (captured) evidence.push(captured);
+      errors.push({ competitorId: competitor.id, dateKey: null, message });
+      return { observations, evidence, errors };
+    }
+
+    for (let index = 0; index < targetDates.length; index += 1) {
+      const targetKey = targetDates[index];
+      try {
+        const selectable = await selectDate(page, targetKey);
+        const checkedAt = new Date();
+        const rawSlots = selectable ? await readVisibleSlots(page) : [];
+        const dateObservations = buildObservations(competitor, targetKey, rawSlots, checkedAt);
+        observations.push(...dateObservations);
+
+        const reason = detectEvidenceReason(competitor.id, targetKey, dateObservations, previousStates);
+        if (reason) {
+          const captured = await captureEvidence(page, competitor.id, targetKey, reason);
+          if (captured) evidence.push(captured);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const reason = {
+          reasonCode: "DATE_SCAN_ERROR",
+          reason: `The requested date or its time slots could not be read: ${message}`,
+          startHour: null,
+          endHour: null,
+        };
+        const captured = await captureEvidence(page, competitor.id, targetKey, reason);
+        if (captured) evidence.push(captured);
+        errors.push({ competitorId: competitor.id, dateKey: targetKey, message });
+
+        if (index < targetDates.length - 1) {
+          try {
+            await openCompetitorPage();
+          } catch (recoveryError) {
+            errors.push({
+              competitorId: competitor.id,
+              dateKey: targetDates[index + 1],
+              message: `Page recovery failed: ${recoveryError instanceof Error ? recoveryError.message : recoveryError}`,
+            });
+            break;
+          }
+        }
+      }
     }
 
     if (demoHoldMs > 0) await page.waitForTimeout(demoHoldMs);
 
-    return observations;
+    return { observations, evidence, errors };
   } finally {
     await page.close();
   }
@@ -246,6 +405,7 @@ async function main() {
   const startKey = requiredDateKey(args.start, "--start");
   const endKey = requiredDateKey(args.end, "--end");
   if (startKey > endKey) throw new Error("--start must not be after --end");
+  const previousStates = await loadPreviousStates(args["previous-states"]);
 
   const requestedIds = args.competitor
     ? new Set(String(args.competitor).split(",").map((value) => value.trim()).filter(Boolean))
@@ -256,18 +416,36 @@ async function main() {
   if (competitors.length === 0) throw new Error("No matching competitors were selected");
 
   const targetDates = datesBetween(startKey, endKey);
-  const browser = await launchRpaBrowser({ headless: !headed, useProxy: false });
+  const browser = await launchRpaBrowser({
+    headless: !headed,
+    useProxy: false,
+    reuse: !headed,
+  });
   const observations = [];
+  const evidence = [];
   const errors = [];
 
   try {
-    const context = await newRpaContext(browser, { blockHeavyResources: true });
+    const context = await newRpaContext(browser, {
+      blockHeavyResources: true,
+      rpaRole: "competitor",
+    });
     for (const competitor of competitors) {
       try {
-        observations.push(...await scanCompetitor(context, competitor, targetDates, demoHoldMs));
+        const scanned = await scanCompetitor(
+          context,
+          competitor,
+          targetDates,
+          previousStates,
+          demoHoldMs,
+        );
+        observations.push(...scanned.observations);
+        evidence.push(...scanned.evidence);
+        errors.push(...scanned.errors);
       } catch (error) {
         errors.push({
           competitorId: competitor.id,
+          dateKey: null,
           message: error instanceof Error ? error.message : String(error),
         });
       }
@@ -276,7 +454,7 @@ async function main() {
     await browser.close();
   }
 
-  console.log(`${RESULT_PREFIX}${JSON.stringify({ startKey, endKey, observations, errors })}`);
+  console.log(`${RESULT_PREFIX}${JSON.stringify({ startKey, endKey, observations, evidence, errors })}`);
 }
 
 main().catch((error) => {

@@ -1,9 +1,12 @@
 import { createInterface } from "node:readline/promises";
+import { rename, rm } from "node:fs/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
 import { optionalEnv } from "./lib/env.mjs";
 import { ensureParentDir, spaceCloudStorageStatePath } from "./lib/paths.mjs";
+import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
+import { saveSpaceCloudSessionMeta } from "./lib/spacecloud-session.mjs";
 
 function hasArg(name) {
   return process.argv.includes(name);
@@ -12,9 +15,15 @@ function hasArg(name) {
 async function main() {
   const startUrl = optionalEnv("SPACECLOUD_HOST_HOME_URL", "https://www.spacecloud.kr/");
   const useProxy = !hasArg("--no-proxy");
-  const browser = await launchRpaBrowser({ headless: false, useProxy });
+  const releaseLoginLock = await acquireProcessLock("rpa/.locks/spacecloud-login.lock", {
+    label: "SpaceCloud login",
+    staleMs: 15 * 60 * 1000,
+    failIfLocked: true,
+  });
+  let browser;
 
   try {
+    browser = await launchRpaBrowser({ headless: false, useProxy });
     const context = await newRpaContext(browser, { blockHeavyResources: false });
     const page = await context.newPage();
 
@@ -34,18 +43,42 @@ async function main() {
     await rl.question("\nPress Enter after login succeeds or an error is visible...");
     rl.close();
 
+    // Verify the saved session against the host reservation page, not just the
+    // browser screen where the user happened to press Enter.
+    await page.goto("https://partner.spacecloud.kr/reservation/", {
+      timeout: 60_000,
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForTimeout(3_000);
+
     const screenshot = await saveScreenshot(page, "spacecloud-login-check");
     const currentUrl = page.url();
     const bodyText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    const normalizedBody = bodyText.replace(/\s+/g, " ").trim();
+    const isLoggedIn =
+      /호스트\s*로그아웃/.test(normalizedBody) ||
+      (/예약\s*관리\s*리스트/.test(normalizedBody) && !/호스트\s*로그인/.test(normalizedBody));
     console.log(`\nCurrent URL: ${currentUrl}`);
     console.log(`Screenshot: ${screenshot}`);
-    console.log(`Visible text sample: ${bodyText.slice(0, 500).replace(/\s+/g, " ")}`);
+    console.log(`Visible text sample: ${normalizedBody.slice(0, 500)}`);
+
+    if (!isLoggedIn) {
+      throw new Error(
+        "SpaceCloud host login was not confirmed. Log in until '호스트 로그아웃' is visible, then press Enter.",
+      );
+    }
 
     ensureParentDir(spaceCloudStorageStatePath);
-    await context.storageState({ path: spaceCloudStorageStatePath });
+    const temporaryStatePath = `${spaceCloudStorageStatePath}.${process.pid}.tmp`;
+    await context.storageState({ path: temporaryStatePath });
+    await rm(spaceCloudStorageStatePath, { force: true });
+    await rename(temporaryStatePath, spaceCloudStorageStatePath);
+    const sessionMeta = saveSpaceCloudSessionMeta({ useProxy });
     console.log(`\nSaved SpaceCloud login session: ${spaceCloudStorageStatePath}`);
+    console.log(`SpaceCloud session network: ${sessionMeta.networkMode}`);
   } finally {
-    await browser.close();
+    await browser?.close().catch(() => {});
+    await releaseLoginLock();
   }
 }
 

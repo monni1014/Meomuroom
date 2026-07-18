@@ -179,6 +179,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const monthlyGuests = sumGuests(activeMonthly);
   const room1Guests = sumGuests(activeMonthly.filter(r => r.roomName === "머무룸1"));
   const room2Guests = sumGuests(activeMonthly.filter(r => r.roomName === "머무룸2"));
+  const room3Guests = sumGuests(activeMonthly.filter(r => r.roomName === "머무룸3"));
   // 건수는 "성사된 예약" 기준 → 노쇼는 포함(슬롯 판매됨), 일반 취소만 제외
   const countedMonthly = thisMonthReservations.filter(r => r.status !== "CANCELLED" || r.isNoShow);
   // 총 예약 시간 (성사된 건 기준, 공간별 분리)
@@ -187,33 +188,40 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const monthHours = sumHours(countedMonthly);
   const room1Hours = sumHours(countedMonthly.filter(r => r.roomName === "머무룸1"));
   const room2Hours = sumHours(countedMonthly.filter(r => r.roomName === "머무룸2"));
+  const room3Hours = sumHours(countedMonthly.filter(r => r.roomName === "머무룸3"));
   // 매출 = 캘린더에 표시되는 최종금액(price) 합계. extraPrice는 추가금 사유/금액 기록용이며 중복 합산하지 않는다.
   const monthlyRevenue = thisMonthReservations.reduce((sum, res) => sum + res.price, 0);
   const sumPrice = (list: typeof thisMonthReservations) => list.reduce((s, r) => s + r.price, 0);
-  const room1Revenue = `${sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸1")).toLocaleString()}원`;
-  const room2Revenue = `${sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸2")).toLocaleString()}원`;
+  const room1Revenue = sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸1")).toLocaleString();
+  const room2Revenue = sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸2")).toLocaleString();
+  const room3Revenue = sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸3")).toLocaleString();
 
   const revenueText = `${monthlyRevenue.toLocaleString()}원`;
 
   const room1Count = countedMonthly.filter(r => r.roomName === "머무룸1").length;
   const room2Count = countedMonthly.filter(r => r.roomName === "머무룸2").length;
+  const room3Count = countedMonthly.filter(r => r.roomName === "머무룸3").length;
 
   const activeWeekly = thisWeekReservations.filter(r => r.status !== "CANCELLED");
   const weeklyGuests = sumGuests(activeWeekly);
   const wRoom1Guests = sumGuests(activeWeekly.filter(r => r.roomName === "머무룸1"));
   const wRoom2Guests = sumGuests(activeWeekly.filter(r => r.roomName === "머무룸2"));
+  const wRoom3Guests = sumGuests(activeWeekly.filter(r => r.roomName === "머무룸3"));
   const countedWeekly = thisWeekReservations.filter(r => r.status !== "CANCELLED" || r.isNoShow);
   const weeklyRevenue = thisWeekReservations.reduce((sum, res) => sum + res.price, 0);
-  const wRoom1Revenue = `${sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸1")).toLocaleString()}원`;
-  const wRoom2Revenue = `${sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸2")).toLocaleString()}원`;
+  const wRoom1Revenue = sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸1")).toLocaleString();
+  const wRoom2Revenue = sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸2")).toLocaleString();
+  const wRoom3Revenue = sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸3")).toLocaleString();
 
   const wRevenueText = `${weeklyRevenue.toLocaleString()}원`;
 
   const wRoom1Count = countedWeekly.filter(r => r.roomName === "머무룸1").length;
   const wRoom2Count = countedWeekly.filter(r => r.roomName === "머무룸2").length;
+  const wRoom3Count = countedWeekly.filter(r => r.roomName === "머무룸3").length;
   const weekHours = sumHours(countedWeekly);
   const wRoom1Hours = sumHours(countedWeekly.filter(r => r.roomName === "머무룸1"));
   const wRoom2Hours = sumHours(countedWeekly.filter(r => r.roomName === "머무룸2"));
+  const wRoom3Hours = sumHours(countedWeekly.filter(r => r.roomName === "머무룸3"));
 
   // Determine week number for the title
   let weekNum = 1;
@@ -270,8 +278,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-sm font-medium text-slate-500">총 예약 시간</p>
               <p className="text-2xl font-semibold text-slate-900">{monthHours}시간</p>
-              <p className="text-xs text-slate-400">
-                <span className="text-sky-600">룸1</span> {room1Hours} · <span className="text-purple-600">룸2</span> {room2Hours}
+              <p className="text-center text-xs text-slate-400">
+                <span className="text-sky-600">룸1</span> {room1Hours} · <span className="text-purple-600">룸2</span> {room2Hours} · <span className="text-orange-600">룸3</span> {room3Hours}
               </p>
             </div>
 
@@ -281,8 +289,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-sm font-medium text-slate-500">예약 건수</p>
               <p className="text-2xl font-semibold text-slate-900">{countedMonthly.length}건</p>
-              <p className="text-xs text-slate-400">
-                <span className="text-sky-600">룸1</span> {room1Count} · <span className="text-purple-600">룸2</span> {room2Count}
+              <p className="text-center text-xs text-slate-400">
+                <span className="text-sky-600">룸1</span> {room1Count} · <span className="text-purple-600">룸2</span> {room2Count} · <span className="text-orange-600">룸3</span> {room3Count}
               </p>
             </div>
 
@@ -292,8 +300,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-sm font-medium text-slate-500">월 이용객</p>
               <p className="text-2xl font-semibold text-slate-900">{monthlyGuests}명</p>
-              <p className="text-xs text-slate-400">
-                <span className="text-sky-600">룸1</span> {room1Guests} · <span className="text-purple-600">룸2</span> {room2Guests}
+              <p className="text-center text-xs text-slate-400">
+                <span className="text-sky-600">룸1</span> {room1Guests} · <span className="text-purple-600">룸2</span> {room2Guests} · <span className="text-orange-600">룸3</span> {room3Guests}
               </p>
             </div>
 
@@ -303,8 +311,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-sm font-medium text-slate-500">월 매출</p>
               <p className="text-xl font-semibold tabular-nums text-slate-900 sm:text-2xl">{revenueText}</p>
-              <p className="text-center text-xs text-slate-400">
-                <span className="text-sky-600">룸1</span> {room1Revenue} · <span className="text-purple-600">룸2</span> {room2Revenue}
+              <p className="whitespace-nowrap text-center text-[10px] tabular-nums text-slate-400 sm:text-xs">
+                <span className="text-sky-600">룸1</span> {room1Revenue} · <span className="text-purple-600">룸2</span> {room2Revenue} · <span className="text-orange-600">룸3</span> {room3Revenue}
               </p>
             </div>
           </div>
@@ -325,8 +333,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-xs font-medium text-slate-500">총 예약 시간</p>
               <p className="text-xl font-bold text-slate-800">{weekHours}시간</p>
-              <p className="text-[11px] text-slate-400">
-                <span className="text-sky-600">룸1</span> {wRoom1Hours} · <span className="text-purple-600">룸2</span> {wRoom2Hours}
+              <p className="text-center text-[11px] text-slate-400">
+                <span className="text-sky-600">룸1</span> {wRoom1Hours} · <span className="text-purple-600">룸2</span> {wRoom2Hours} · <span className="text-orange-600">룸3</span> {wRoom3Hours}
               </p>
             </div>
 
@@ -336,8 +344,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-xs font-medium text-slate-500">예약 건수</p>
               <p className="text-xl font-bold text-slate-800">{countedWeekly.length}건</p>
-              <p className="text-[11px] text-slate-400">
-                <span className="text-sky-600">룸1</span> {wRoom1Count} · <span className="text-purple-600">룸2</span> {wRoom2Count}
+              <p className="text-center text-[11px] text-slate-400">
+                <span className="text-sky-600">룸1</span> {wRoom1Count} · <span className="text-purple-600">룸2</span> {wRoom2Count} · <span className="text-orange-600">룸3</span> {wRoom3Count}
               </p>
             </div>
 
@@ -347,8 +355,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-xs font-medium text-slate-500">주 이용객</p>
               <p className="text-xl font-bold text-slate-800">{weeklyGuests}명</p>
-              <p className="text-[11px] text-slate-400">
-                <span className="text-sky-600">룸1</span> {wRoom1Guests} · <span className="text-purple-600">룸2</span> {wRoom2Guests}
+              <p className="text-center text-[11px] text-slate-400">
+                <span className="text-sky-600">룸1</span> {wRoom1Guests} · <span className="text-purple-600">룸2</span> {wRoom2Guests} · <span className="text-orange-600">룸3</span> {wRoom3Guests}
               </p>
             </div>
 
@@ -358,8 +366,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               </div>
               <p className="text-xs font-medium text-slate-500">주 매출</p>
               <p className="text-xl font-bold text-slate-800">{wRevenueText}</p>
-              <p className="text-[11px] text-slate-400">
-                <span className="text-sky-600">룸1</span> {wRoom1Revenue} · <span className="text-purple-600">룸2</span> {wRoom2Revenue}
+              <p className="whitespace-nowrap text-center text-[10px] tabular-nums text-slate-400 sm:text-[11px]">
+                <span className="text-sky-600">룸1</span> {wRoom1Revenue} · <span className="text-purple-600">룸2</span> {wRoom2Revenue} · <span className="text-orange-600">룸3</span> {wRoom3Revenue}
               </p>
             </div>
           </div>

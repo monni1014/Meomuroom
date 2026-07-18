@@ -23,6 +23,7 @@ const FAST_SPACECLOUD_SLOT_RPA_ENV = {
 const ROOM_PRODUCT_URL: Record<string, string> = {
   "1": "https://partner.booking.naver.com/bizes/1473933/biz-items/6982316/detail",
   "2": "https://partner.booking.naver.com/bizes/1473933/biz-items/7007523/detail",
+  "3": "https://partner.booking.naver.com/bizes/1473933/biz-items/7858758/detail",
 };
 
 const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
@@ -45,7 +46,7 @@ type NaverDetailResult = {
 
 type NormalizedNaverReservation = {
   bookingNumber: string;
-  room: "1" | "2";
+  room: "1" | "2" | "3";
   roomName: string;
   customerName: string;
   phone: string | null;
@@ -93,6 +94,18 @@ function toClock(date: Date) {
   return `${map.hour}:${map.minute}`;
 }
 
+function toSlotEndClock(startTime: Date, endTime: Date) {
+  const endClock = toClock(endTime);
+  if (
+    endClock === "00:00"
+    && endTime.getTime() > startTime.getTime()
+    && toKstDateValue(startTime) !== toKstDateValue(endTime)
+  ) {
+    return "24:00";
+  }
+  return endClock;
+}
+
 function parseAmount(value?: string | null) {
   if (!value) return 0;
   return Number(value.replace(/[^\d]/g, "")) || 0;
@@ -114,13 +127,18 @@ function parseHeadCount(value?: string | null) {
   return Number(value.replace(/[^\d]/g, "")) || 1;
 }
 
-function parseRoom(productName?: string | null): "1" | "2" {
+function parseRoom(productName?: string | null): "1" | "2" | "3" {
+  if (productName?.includes("3")) return "3";
   if (productName?.includes("2")) return "2";
-  return "1";
+  if (productName?.includes("1")) return "1";
+  throw new Error(`Unknown Naver room product: ${productName || "(empty)"}`);
 }
 
-function parseRoomFromRoomName(roomName?: string | null): "1" | "2" {
-  return roomName?.includes("2") ? "2" : "1";
+function parseRoomFromRoomName(roomName?: string | null): "1" | "2" | "3" {
+  if (roomName === "머무룸3") return "3";
+  if (roomName === "머무룸2") return "2";
+  if (roomName === "머무룸1") return "1";
+  throw new Error(`Unknown reservation room: ${roomName || "(empty)"}`);
 }
 
 function parseKoreanTimePrefix(prefix: string, hourText: string, minuteText: string) {
@@ -146,10 +164,17 @@ function parseNaverDateTime(dateText?: string | null, timeText?: string | null) 
   const end = parseKoreanTimePrefix(timeMatch[4], timeMatch[5], timeMatch[6]);
   const dateValue = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
 
-  return {
-    startTime: new Date(`${dateValue}T${String(start.hour).padStart(2, "0")}:${String(start.minute).padStart(2, "0")}:00+09:00`),
-    endTime: new Date(`${dateValue}T${String(end.hour).padStart(2, "0")}:${String(end.minute).padStart(2, "0")}:00+09:00`),
-  };
+  const startTime = new Date(`${dateValue}T${String(start.hour).padStart(2, "0")}:${String(start.minute).padStart(2, "0")}:00+09:00`);
+  const endTime = new Date(`${dateValue}T${String(end.hour).padStart(2, "0")}:${String(end.minute).padStart(2, "0")}:00+09:00`);
+  // Naver's booking list represents a midnight endpoint as 23:59.
+  if (end.hour === 23 && end.minute === 59) {
+    endTime.setMinutes(endTime.getMinutes() + 1);
+  }
+  if (endTime.getTime() <= startTime.getTime()) {
+    endTime.setDate(endTime.getDate() + 1);
+  }
+
+  return { startTime, endTime };
 }
 
 function extractBookingId(subject: string, text: string, html?: string | false) {
@@ -256,7 +281,7 @@ function normalizeDetail(detail: NaverDetailResult, fallbackDiscount = 0): Norma
     endTime,
     dateValue: toKstDateValue(startTime),
     startClock: toClock(startTime),
-    endClock: toClock(endTime),
+    endClock: toSlotEndClock(startTime, endTime),
     price: parseAmount(detail.priceText),
     discount: fallbackDiscount,
     headCount: parseHeadCount(detail.quantity),
@@ -279,7 +304,7 @@ function normalizeParsedReservation(parsed: ParsedReservation, bookingId?: strin
     endTime: parsed.endTime,
     dateValue: toKstDateValue(parsed.startTime),
     startClock: toClock(parsed.startTime),
-    endClock: toClock(parsed.endTime),
+    endClock: toSlotEndClock(parsed.startTime, parsed.endTime),
     price: parsed.isCancelled ? (parsed.refundFee ?? 0) : parsed.price,
     discount: parsed.discount ?? 0,
     headCount: parsed.headCount,
@@ -478,8 +503,10 @@ async function cancelNaverReservation(
 function canSetSlot(item: NormalizedNaverReservation) {
   return item.startClock.endsWith(":00")
     && item.endClock.endsWith(":00")
-    && item.endClock !== "00:00"
-    && toKstDateValue(item.startTime) === toKstDateValue(item.endTime);
+    && (
+      toKstDateValue(item.startTime) === toKstDateValue(item.endTime)
+      || item.endClock === "24:00"
+    );
 }
 
 function cloneSlotItem(item: NormalizedNaverReservation, segment: SlotSegment): NormalizedNaverReservation {
@@ -489,7 +516,7 @@ function cloneSlotItem(item: NormalizedNaverReservation, segment: SlotSegment): 
     endTime: segment.endTime,
     dateValue: toKstDateValue(segment.startTime),
     startClock: toClock(segment.startTime),
-    endClock: toClock(segment.endTime),
+    endClock: toSlotEndClock(segment.startTime, segment.endTime),
   };
 }
 
@@ -597,7 +624,7 @@ function normalizeReservationForSlotRecheck(reservation: {
     endTime: reservation.endTime,
     dateValue: toKstDateValue(reservation.startTime),
     startClock: toClock(reservation.startTime),
-    endClock: toClock(reservation.endTime),
+    endClock: toSlotEndClock(reservation.startTime, reservation.endTime),
     price: reservation.price,
     discount: reservation.discount,
     headCount: reservation.usageLog?.reservedHeadCount || reservation.usageLog?.headCount || 1,
@@ -690,7 +717,10 @@ async function setSpaceCloudExternalReservation(
   item: NormalizedNaverReservation,
   mode: "close" | "open",
   reservationId?: string,
-  options: { allowStillBlockedAfterDelete?: boolean } = {},
+  options: {
+    allowStillBlockedAfterDelete?: boolean;
+    claimUnlabelledBeforeDelete?: boolean;
+  } = {},
 ) {
   if (!canSetSlot(item)) {
     const reason = `Unsupported SpaceCloud external reservation time ${item.dateValue} ${item.startClock}-${item.endClock}`;
@@ -712,6 +742,7 @@ async function setSpaceCloudExternalReservation(
       "--apply",
     ];
     if (options.allowStillBlockedAfterDelete) args.push("--allow-still-blocked-after-delete");
+    if (options.claimUnlabelledBeforeDelete) args.push("--claim-unlabelled-before-delete");
     if (item.customerName) args.push(`--customer-name=${item.customerName}`);
     if (item.phone) args.push(`--phone=${item.phone}`);
 
@@ -732,6 +763,7 @@ async function runSpaceCloudSlotAction(
   item: NormalizedNaverReservation,
   mode: "close" | "open",
   reservationId: string,
+  options: { claimUnlabelledBeforeDelete?: boolean } = {},
 ): Promise<SlotActionResult> {
   if (mode === "close") {
     return setSpaceCloudExternalReservation(item, mode, reservationId);
@@ -740,6 +772,7 @@ async function runSpaceCloudSlotAction(
   const overlaps = await findConfirmedSlotOverlaps(item, reservationId);
   const openResult = await setSpaceCloudExternalReservation(item, mode, reservationId, {
     allowStillBlockedAfterDelete: overlaps.length > 0,
+    claimUnlabelledBeforeDelete: options.claimUnlabelledBeforeDelete,
   });
   if (!openResult.ok) return openResult;
   if (overlaps.length === 0) return openResult;
@@ -800,6 +833,7 @@ async function syncNaverAndSpaceCloudSlots(
   mode: "close" | "open",
   reservationId: string,
   bookingLabel: string,
+  options: { claimUnlabelledBeforeDelete?: boolean } = {},
 ) {
   console.log(`[NaverRPA] Start parallel slot ${mode}: ${bookingLabel}`);
   const naverItems = await buildNaverSlotItems(item, mode, reservationId);
@@ -807,7 +841,11 @@ async function syncNaverAndSpaceCloudSlots(
 
   const [naverResult, spaceCloudResult] = await Promise.allSettled([
     runSlotItemBatch(naverItems, (slotItem) => setNaverSlot(slotItem, mode), "Naver slot"),
-    runSlotItemBatch(spaceCloudItems, (slotItem) => runSpaceCloudSlotAction(slotItem, mode, reservationId), "SpaceCloud external reservation"),
+    runSlotItemBatch(
+      spaceCloudItems,
+      (slotItem) => runSpaceCloudSlotAction(slotItem, mode, reservationId, options),
+      "SpaceCloud external reservation",
+    ),
   ]);
 
   const naverSlot = settledSlotResult(naverResult);
@@ -843,7 +881,7 @@ export async function recheckNaverSlotRpaIssues(limit = 1) {
   const candidates = await prisma.reservation.findMany({
     where: {
       memo: { contains: RPA_CHECK_MARKER },
-      roomName: { in: ["머무룸1", "머무룸2"] },
+      roomName: { in: ["머무룸1", "머무룸2", "머무룸3"] },
       endTime: { gte: new Date(now - 24 * 60 * 60 * 1000) },
     },
     include: { usageLog: true },
@@ -1017,6 +1055,7 @@ export async function processNaverEmailWithRpa({
   html,
   parsedReservation,
   receivedAt,
+  supersededConfirmationJobs,
 }: {
   messageId: string;
   subject: string;
@@ -1024,6 +1063,7 @@ export async function processNaverEmailWithRpa({
   html?: string | false;
   parsedReservation: ParsedReservation;
   receivedAt?: Date;
+  supersededConfirmationJobs?: unknown[];
 }) {
   const bookingId = extractBookingId(subject, text, html);
   if (!bookingId && !parsedReservation.isCancelled) {
@@ -1059,6 +1099,9 @@ export async function processNaverEmailWithRpa({
         "open",
         result.reservation.id,
         bookingId || normalized.bookingNumber,
+        {
+          claimUnlabelledBeforeDelete: Boolean(supersededConfirmationJobs?.length),
+        },
       );
     } else {
       console.log(`[NaverRPA] Reservation already cancelled. Skip slot open: ${result.reservation.id}`);

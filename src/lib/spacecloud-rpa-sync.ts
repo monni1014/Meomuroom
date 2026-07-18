@@ -17,6 +17,7 @@ const FAST_NAVER_SLOT_RPA_ENV = {
 const NAVER_ROOM_PRODUCT_URL: Record<string, string> = {
   "1": "https://partner.booking.naver.com/bizes/1473933/biz-items/6982316/detail",
   "2": "https://partner.booking.naver.com/bizes/1473933/biz-items/7007523/detail",
+  "3": "https://partner.booking.naver.com/bizes/1473933/biz-items/7858758/detail",
 };
 
 type SpaceCloudDetailResult = {
@@ -74,8 +75,23 @@ function toClock(date: Date) {
   return `${map.hour}:${map.minute}`;
 }
 
+function toSlotEndClock(startTime: Date, endTime: Date) {
+  const endClock = toClock(endTime);
+  if (
+    endClock === "00:00"
+    && endTime.getTime() > startTime.getTime()
+    && toKstDateValue(startTime) !== toKstDateValue(endTime)
+  ) {
+    return "24:00";
+  }
+  return endClock;
+}
+
 function parseRoomNumber(roomName: string) {
-  return roomName.includes("2") ? "2" : "1";
+  if (roomName === "머무룸3") return "3";
+  if (roomName === "머무룸2") return "2";
+  if (roomName === "머무룸1") return "1";
+  throw new Error(`Unknown SpaceCloud reservation room: ${roomName || "(empty)"}`);
 }
 
 function normalizeUrl(url: string) {
@@ -159,18 +175,20 @@ async function readSpaceCloudDetail(url: string) {
 
 function canSetNaverSlot(item: ReturnType<typeof mergeDetail>) {
   const startClock = toClock(item.startTime);
-  const endClock = toClock(item.endTime);
+  const endClock = toSlotEndClock(item.startTime, item.endTime);
   return startClock.endsWith(":00")
     && endClock.endsWith(":00")
-    && endClock !== "00:00"
-    && toKstDateValue(item.startTime) === toKstDateValue(item.endTime);
+    && (
+      toKstDateValue(item.startTime) === toKstDateValue(item.endTime)
+      || endClock === "24:00"
+    );
 }
 
 async function setNaverSlotForSpaceCloud(item: ReturnType<typeof mergeDetail>, mode: "close" | "open", reservationId: string) {
   const room = parseRoomNumber(item.roomName);
   const dateValue = toKstDateValue(item.startTime);
   const startClock = toClock(item.startTime);
-  const endClock = toClock(item.endTime);
+  const endClock = toSlotEndClock(item.startTime, item.endTime);
 
   if (!canSetNaverSlot(item)) {
     const reason = `Unsupported Naver slot time from SpaceCloud ${dateValue} ${startClock}-${endClock}`;

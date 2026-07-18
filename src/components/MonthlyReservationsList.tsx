@@ -6,15 +6,41 @@ import { UNCATEGORIZED_LABEL } from "@/lib/categories";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export default function MonthlyReservationsList({ reservations }: { reservations: any[] }) {
+interface MonthlyReservation {
+  id: string;
+  source: string;
+  roomName: string;
+  customerName: string | null;
+  startTime: Date | string;
+  endTime: Date | string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  status: string;
+  price: number;
+  discount: number;
+  emailId: string | null;
+  paymentMethod: string | null;
+  isPaid: boolean;
+  memo: string | null;
+  usageLog: {
+    headCount: number;
+    purpose: string | null;
+    detail: string | null;
+  } | null;
+}
+
+export default function MonthlyReservationsList({ reservations }: { reservations: MonthlyReservation[] }) {
   const router = useRouter();
   const [showAll, setShowAll] = useState(false);
   
   const now = new Date();
-  const validReservations = reservations.filter((r: any) => r.status !== "CANCELLED");
-  const upcoming = validReservations.filter((r: any) => new Date(r.endTime) >= now).sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-  const passed = validReservations.filter((r: any) => new Date(r.endTime) < now).sort((a: any, b: any) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+  const validReservations = reservations.filter((reservation) => reservation.status !== "CANCELLED");
+  const upcoming = validReservations
+    .filter((reservation) => new Date(reservation.endTime) >= now)
+    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  const passed = validReservations
+    .filter((reservation) => new Date(reservation.endTime) < now)
+    .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
   const displayList = [...upcoming, ...passed];
 
   const getSourceDisplay = (source: string) => {
@@ -61,7 +87,8 @@ export default function MonthlyReservationsList({ reservations }: { reservations
             res.source === "spacecloud" ? "bg-indigo-50 text-indigo-700" : "bg-amber-50 text-amber-700";
           const roomColors =
             res.roomName === "머무룸1" ? "bg-sky-50 text-sky-700" :
-            res.roomName === "머무룸2" ? "bg-purple-50 text-purple-700" : "bg-teal-50 text-teal-700";
+              res.roomName === "머무룸2" ? "bg-purple-50 text-purple-700" :
+                res.roomName === "머무룸3" ? "bg-orange-50 text-orange-700" : "bg-slate-100 text-slate-700";
 
           return (
             <div

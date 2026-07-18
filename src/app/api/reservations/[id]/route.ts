@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeCustomerType } from "@/lib/customer-types";
 
+const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
+
+function parseReservationDate(value: unknown) {
+  const date = typeof value === "string" || value instanceof Date ? new Date(value) : new Date(Number.NaN);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> }
@@ -9,7 +16,11 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const { customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow } = body;
+    const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow } = body;
+
+    if (roomName !== undefined && !VALID_ROOM_NAMES.has(roomName)) {
+      return NextResponse.json({ error: "Invalid roomName" }, { status: 400 });
+    }
 
     // First check if reservation exists
     const existing = await prisma.reservation.findUnique({
@@ -21,14 +32,24 @@ export async function PATCH(
       return NextResponse.json({ error: "Reservation not found" }, { status: 404 });
     }
 
+    const parsedStartTime = startTime !== undefined ? parseReservationDate(startTime) : existing.startTime;
+    const parsedEndTime = endTime !== undefined ? parseReservationDate(endTime) : existing.endTime;
+    if (!parsedStartTime || !parsedEndTime) {
+      return NextResponse.json({ error: "Invalid startTime or endTime" }, { status: 400 });
+    }
+    if (parsedEndTime.getTime() <= parsedStartTime.getTime()) {
+      return NextResponse.json({ error: "endTime must be later than startTime" }, { status: 400 });
+    }
+
     // Prepare update data
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateData: any = {};
+    if (source !== undefined) updateData.source = source;
     if (customerName !== undefined) updateData.customerName = customerName;
     if (customerType !== undefined) updateData.customerType = normalizeCustomerType(customerType);
     if (phone !== undefined) updateData.phone = phone;
-    if (startTime !== undefined) updateData.startTime = new Date(startTime);
-    if (endTime !== undefined) updateData.endTime = new Date(endTime);
+    if (startTime !== undefined) updateData.startTime = parsedStartTime;
+    if (endTime !== undefined) updateData.endTime = parsedEndTime;
     if (price !== undefined) updateData.price = Number(price);
     if (discount !== undefined) updateData.discount = Number(discount);
     if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod;
@@ -46,7 +67,7 @@ export async function PATCH(
       startTime !== undefined ||
       endTime !== undefined ||
       roomName !== undefined;
-    const nextStartTime = startTime !== undefined ? new Date(startTime) : existing.startTime;
+    const nextStartTime = parsedStartTime;
     const nextStatus = status !== undefined ? status : existing.status;
 
     if (notificationRelevantChanged && nextStatus === "CONFIRMED" && nextStartTime.getTime() > Date.now()) {

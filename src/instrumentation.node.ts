@@ -1,4 +1,9 @@
 export async function registerNodeInstrumentation() {
+  if (process.env.DISABLE_BACKGROUND_JOBS === "1") {
+    console.log("[Cron] Background jobs disabled for this server process");
+    return;
+  }
+
   const g = globalThis as unknown as { __emailSyncCronStarted?: boolean };
   if (g.__emailSyncCronStarted) return;
   g.__emailSyncCronStarted = true;

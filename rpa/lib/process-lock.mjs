@@ -9,12 +9,31 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function processIsRunning(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    // EPERM means the process exists but this account cannot signal it.
+    if (error?.code === "EPERM") return true;
+    return null;
+  }
+}
+
 async function removeStaleLock(lockPath, staleMs) {
   try {
     const info = await stat(lockPath);
-    if (Date.now() - info.mtimeMs < staleMs) return false;
-
     const content = await readFile(lockPath, "utf8").catch(() => "");
+    const pidMatch = /(?:^|\n)pid=(\d+)(?:\n|$)/.exec(content);
+    const lockPid = pidMatch ? Number(pidMatch[1]) : null;
+    const lockOwnerRunning = processIsRunning(lockPid);
+    const oldEnough = Date.now() - info.mtimeMs >= staleMs;
+
+    if (lockOwnerRunning !== false && !oldEnough) return false;
+
     console.log(`Remove stale RPA lock: ${lockPath}${content ? ` (${content.trim()})` : ""}`);
     await rm(lockPath, { force: true });
     return true;
@@ -28,6 +47,7 @@ export async function acquireProcessLock(lockPath, {
   label = "RPA task",
   timeoutMs = 12 * 60 * 1000,
   staleMs = 15 * 60 * 1000,
+  failIfLocked = false,
 } = {}) {
   await mkdir(dirname(lockPath), { recursive: true });
   const startedAt = Date.now();
@@ -46,7 +66,11 @@ export async function acquireProcessLock(lockPath, {
       };
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
-      await removeStaleLock(lockPath, staleMs);
+      const removed = await removeStaleLock(lockPath, staleMs);
+
+      if (failIfLocked && !removed) {
+        throw new Error(`${label} is already running. Use the existing login window.`);
+      }
 
       if (Date.now() - startedAt > timeoutMs) {
         throw new Error(`${label} lock timeout. Another RPA task is still running: ${lockPath}`);

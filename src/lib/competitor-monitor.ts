@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createAdminAlert, resolveAdminAlertsByType } from "@/lib/admin-alerts";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 const execFileAsync = promisify(execFile);
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
 const ALERT_TYPE = "COMPETITOR_MONITOR";
+const STALE_SCAN_MINUTES = 15;
 
 export type CompetitorScanMode =
   | "today"
@@ -29,7 +33,19 @@ type ScannerResult = {
   startKey: string;
   endKey: string;
   observations: ScannerObservation[];
-  errors: Array<{ competitorId: string; message: string }>;
+  evidence: ScannerEvidence[];
+  errors: Array<{ competitorId: string; dateKey?: string | null; message: string }>;
+};
+
+type ScannerEvidence = {
+  competitorId: string;
+  dateKey: string | null;
+  startHour: number | null;
+  endHour: number | null;
+  reasonCode: string;
+  reason: string;
+  imagePath: string;
+  capturedAt: string;
 };
 
 type RunOptions = {
@@ -115,21 +131,234 @@ function parseScannerResult(stdout: string) {
     .split(/\r?\n/)
     .find((entry) => entry.startsWith(RESULT_PREFIX));
   if (!line) throw new Error(`Competitor scanner returned no result. stdout=${stdout.slice(-800)}`);
-  return JSON.parse(line.slice(RESULT_PREFIX.length)) as ScannerResult;
+  const parsed = JSON.parse(line.slice(RESULT_PREFIX.length)) as Partial<ScannerResult>;
+  if (!parsed.startKey || !parsed.endKey || !Array.isArray(parsed.observations)) {
+    throw new Error("Competitor scanner returned an invalid result");
+  }
+  return {
+    startKey: parsed.startKey,
+    endKey: parsed.endKey,
+    observations: parsed.observations,
+    evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
+    errors: Array.isArray(parsed.errors) ? parsed.errors : [],
+  };
 }
 
 async function executeScanner(startKey: string, endKey: string) {
-  const result = await execFileAsync(
-    process.execPath,
-    ["rpa/competitor-scan.mjs", `--start=${startKey}`, `--end=${endKey}`],
-    {
-      cwd: process.cwd(),
-      env: process.env,
-      timeout: 12 * 60 * 1000,
-      maxBuffer: 1024 * 1024 * 8,
+  const previousStates = await prisma.competitorSlot.findMany({
+    where: { dateKey: { gte: startKey, lte: endKey } },
+    select: {
+      competitorId: true,
+      dateKey: true,
+      hour: true,
+      state: true,
+      pendingState: true,
     },
+  });
+  const stateFile = resolve(
+    process.cwd(),
+    "rpa/.runtime",
+    `competitor-previous-states-${randomUUID()}.json`,
   );
-  return parseScannerResult(result.stdout);
+  await mkdir(dirname(stateFile), { recursive: true });
+  await writeFile(stateFile, JSON.stringify(previousStates), "utf8");
+
+  try {
+    const result = await execFileAsync(
+      process.execPath,
+      [
+        "rpa/competitor-scan.mjs",
+        `--start=${startKey}`,
+        `--end=${endKey}`,
+        `--previous-states=${stateFile}`,
+      ],
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        timeout: 12 * 60 * 1000,
+        maxBuffer: 1024 * 1024 * 8,
+      },
+    );
+    return parseScannerResult(result.stdout);
+  } finally {
+    await unlink(stateFile).catch(() => undefined);
+  }
+}
+
+const EVIDENCE_REASON_LABELS: Record<string, string> = {
+  SLOT_READ_UNCERTAIN: "시간 슬롯 일부를 읽지 못했습니다.",
+  CANCELLATION_PENDING_CONFIRMATION: "기존 예약 시간이 열려 보여 취소 여부를 다시 확인해야 합니다.",
+  CUTOFF_BLOCKED_CONFIRMATION: "당일 예약 마감 때문에 취소 여부를 화면에서 확정할 수 없습니다.",
+  DATE_SCAN_ERROR: "해당 날짜 또는 시간 화면을 정상적으로 읽지 못했습니다.",
+  COMPETITOR_PAGE_ERROR: "경쟁사 예약 페이지를 정상적으로 열지 못했습니다.",
+};
+
+function normalizeEvidenceImagePath(imagePath: string) {
+  const root = resolve(process.cwd(), "rpa/screenshots");
+  const absolutePath = isAbsolute(imagePath)
+    ? resolve(imagePath)
+    : resolve(process.cwd(), imagePath);
+  const fromRoot = relative(root, absolutePath);
+  if (fromRoot.startsWith("..") || isAbsolute(fromRoot)) {
+    throw new Error(`Competitor evidence path is outside the screenshot directory: ${imagePath}`);
+  }
+  return relative(process.cwd(), absolutePath).replaceAll("\\", "/");
+}
+
+async function discardEvidenceImage(imagePath: string) {
+  try {
+    const normalized = normalizeEvidenceImagePath(imagePath);
+    await unlink(resolve(process.cwd(), normalized));
+  } catch {
+    // The database keeps the first capture for a repeated issue. Cleanup is best-effort.
+  }
+}
+
+async function rangeEvidenceResolved(evidence: Pick<
+  ScannerEvidence,
+  "reasonCode" | "competitorId" | "dateKey" | "startHour" | "endHour"
+>) {
+  if (
+    !["CANCELLATION_PENDING_CONFIRMATION", "CUTOFF_BLOCKED_CONFIRMATION"].includes(evidence.reasonCode)
+    || !evidence.dateKey
+    || evidence.startHour === null
+    || evidence.endHour === null
+  ) return false;
+
+  const slots = await prisma.competitorSlot.findMany({
+    where: {
+      competitorId: evidence.competitorId,
+      dateKey: evidence.dateKey,
+      hour: { gte: evidence.startHour, lt: evidence.endHour },
+    },
+    select: { state: true, pendingState: true },
+  });
+  return slots.length === evidence.endHour - evidence.startHour
+    && slots.every((slot) => slot.pendingState === null && ["AVAILABLE", "BOOKED"].includes(slot.state));
+}
+
+async function persistScannerEvidence(scanId: string, result: ScannerResult) {
+  for (const evidence of result.evidence || []) {
+    try {
+      const imagePath = normalizeEvidenceImagePath(evidence.imagePath);
+      const capturedAt = new Date(evidence.capturedAt);
+      const resolved = await rangeEvidenceResolved(evidence);
+      const existing = await prisma.competitorEvidence.findFirst({
+        where: {
+          status: "OPEN",
+          competitorId: evidence.competitorId,
+          dateKey: evidence.dateKey,
+          startHour: evidence.startHour,
+          endHour: evidence.endHour,
+          reasonCode: evidence.reasonCode,
+        },
+        orderBy: { capturedAt: "desc" },
+      });
+
+      if (existing) {
+        await prisma.competitorEvidence.update({
+          where: { id: existing.id },
+          data: {
+            scanId,
+            status: resolved ? "RESOLVED" : "OPEN",
+            lastSeenAt: capturedAt,
+            resolvedAt: resolved ? capturedAt : null,
+          },
+        });
+        await discardEvidenceImage(imagePath);
+        continue;
+      }
+
+      await prisma.competitorEvidence.create({
+        data: {
+          scanId,
+          competitorId: evidence.competitorId,
+          dateKey: evidence.dateKey,
+          startHour: evidence.startHour,
+          endHour: evidence.endHour,
+          reasonCode: evidence.reasonCode,
+          reason: EVIDENCE_REASON_LABELS[evidence.reasonCode] || evidence.reason,
+          imagePath,
+          status: resolved ? "RESOLVED" : "OPEN",
+          capturedAt,
+          lastSeenAt: capturedAt,
+          resolvedAt: resolved ? capturedAt : null,
+        },
+      });
+    } catch (error) {
+      console.error("[Competitor] Failed to persist evidence:", error);
+      await discardEvidenceImage(evidence.imagePath);
+    }
+  }
+}
+
+async function resolveRecoveredEvidence(result: ScannerResult) {
+  const successfulDays = new Set(
+    result.observations.map((observation) => `${observation.competitorId}|${observation.dateKey}`),
+  );
+  const uncertainDays = new Set(
+    result.observations
+      .filter((observation) => observation.observedState === "UNKNOWN")
+      .map((observation) => `${observation.competitorId}|${observation.dateKey}`),
+  );
+  const failedDays = new Set(
+    result.errors
+      .filter((error) => error.dateKey)
+      .map((error) => `${error.competitorId}|${error.dateKey}`),
+  );
+  const now = new Date();
+
+  for (const key of successfulDays) {
+    if (uncertainDays.has(key)) continue;
+    const [competitorId, dateKey] = key.split("|");
+    await prisma.competitorEvidence.updateMany({
+      where: {
+        status: "OPEN",
+        competitorId,
+        dateKey,
+        reasonCode: "SLOT_READ_UNCERTAIN",
+      },
+      data: { status: "RESOLVED", resolvedAt: now },
+    });
+    if (!failedDays.has(key)) {
+      await prisma.competitorEvidence.updateMany({
+        where: {
+          status: "OPEN",
+          competitorId,
+          dateKey,
+          reasonCode: "DATE_SCAN_ERROR",
+        },
+        data: { status: "RESOLVED", resolvedAt: now },
+      });
+    }
+  }
+
+  for (const competitorId of new Set(result.observations.map((observation) => observation.competitorId))) {
+    const competitorFailed = result.errors.some((error) => error.competitorId === competitorId);
+    if (!competitorFailed) {
+      await prisma.competitorEvidence.updateMany({
+        where: { status: "OPEN", competitorId, reasonCode: "COMPETITOR_PAGE_ERROR" },
+        data: { status: "RESOLVED", resolvedAt: now },
+      });
+    }
+  }
+
+  const pendingRangeEvidence = await prisma.competitorEvidence.findMany({
+    where: {
+      status: "OPEN",
+      reasonCode: { in: ["CANCELLATION_PENDING_CONFIRMATION", "CUTOFF_BLOCKED_CONFIRMATION"] },
+      dateKey: { not: null },
+    },
+  });
+  for (const evidence of pendingRangeEvidence) {
+    const key = `${evidence.competitorId}|${evidence.dateKey}`;
+    if (!successfulDays.has(key) || uncertainDays.has(key) || failedDays.has(key)) continue;
+    if (!await rangeEvidenceResolved(evidence)) continue;
+    await prisma.competitorEvidence.update({
+      where: { id: evidence.id },
+      data: { status: "RESOLVED", resolvedAt: now },
+    });
+  }
 }
 
 type ExistingSlot = Awaited<ReturnType<typeof prisma.competitorSlot.findMany>>[number];
@@ -149,14 +378,23 @@ function resolveState(current: ExistingSlot | undefined, observation: ScannerObs
     if (current?.state === "BOOKED") {
       state = "BOOKED";
       reason = "POLICY_CLOSED_PRESERVED_BOOKING";
+      pendingState = current.pendingState;
+      pendingCount = current.pendingCount;
+      pendingSince = current.pendingSince;
     } else if (current?.state === "AVAILABLE") {
       state = "AVAILABLE";
       reason = "POLICY_CLOSED_PRESERVED_AVAILABILITY";
+      pendingState = current.pendingState;
+      pendingCount = current.pendingCount;
+      pendingSince = current.pendingSince;
     }
   } else if (observation.observedState === "UNKNOWN") {
     if (current && ["AVAILABLE", "BOOKED", "POLICY_CLOSED"].includes(current.state)) {
       state = current.state;
       reason = "TRANSIENT_UNKNOWN_PRESERVED_PREVIOUS_STATE";
+      pendingState = current.pendingState;
+      pendingCount = current.pendingCount;
+      pendingSince = current.pendingSince;
     }
   } else if (current?.state === "BOOKED" && observation.observedState === "AVAILABLE") {
     const previousPendingCount = current.pendingState === "AVAILABLE" ? current.pendingCount : 0;
@@ -464,6 +702,21 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
 
 async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
   const range = resolveRange(options);
+
+  // The scanner itself has a 12-minute hard timeout. Any older RUNNING row
+  // belongs to an interrupted server/request and must not remain active.
+  await prisma.competitorScan.updateMany({
+    where: {
+      status: "RUNNING",
+      startedAt: { lt: new Date(Date.now() - STALE_SCAN_MINUTES * 60_000) },
+    },
+    data: {
+      status: "FAILED",
+      error: "Competitor scan was interrupted before completion.",
+      finishedAt: new Date(),
+    },
+  });
+
   if (options.skipIfRecentMinutes && options.skipIfRecentMinutes > 0) {
     const recent = await prisma.competitorScan.findFirst({
       where: {
@@ -486,6 +739,8 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
   try {
     const scannerResult = await executeScanner(range.startKey, range.endKey);
     const changes = await persistScannerResult(scan.id, scannerResult);
+    await persistScannerEvidence(scan.id, scannerResult);
+    await resolveRecoveredEvidence(scannerResult);
     const status = scannerResult.observations.length === 0
       ? "FAILED"
       : scannerResult.errors.length > 0

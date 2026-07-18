@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
+import { launchRpaBrowser, newRpaContext, resolveRpaHeadless } from "./lib/browser.mjs";
 import { parseArgs, parseHour, parseRoom, requiredArg } from "./lib/cli.mjs";
 import { optionalEnv } from "./lib/env.mjs";
 import { humanClick, humanClickElement, humanDelay } from "./lib/human.mjs";
@@ -12,6 +12,7 @@ const BIZ_ITEMS_URL = "https://partner.booking.naver.com/bizes/1473933/biz-items
 const TEXT = {
   product1: "\uba38\ubb34\ub8f8 \uc608\uc57d\ud558\uae30 1",
   product2: "\uba38\ubb34\ub8f8 \uc608\uc57d\ud558\uae30 2",
+  product3: "\uba38\ubb34\ub8f8 \uc608\uc57d\ud558\uae30 3",
   schedule: "\uc77c\uc815\uc124\uc815",
   preview: "\ubbf8\ub9ac\ubcf4\uae30",
   delete: "\uc0ad\uc81c",
@@ -33,6 +34,7 @@ const WEEKDAYS = [
 const ROOM_PRODUCT_NAMES = {
   "1": TEXT.product1,
   "2": TEXT.product2,
+  "3": TEXT.product3,
 };
 
 function randomInt(min, max) {
@@ -51,7 +53,7 @@ function usage() {
     "  npm run rpa:naver-slots -- --room=1 --date=2026-06-29 --start=09:00 --end=11:00 --mode=close --product-url=...",
     "",
     "Options:",
-    "  --room=1|2",
+    "  --room=1|2|3",
     "  --date=YYYY-MM-DD",
     "  --start=HH:00",
     "  --end=HH:00",
@@ -153,13 +155,14 @@ async function isProductDetailVisible(page, url) {
 
 async function isProductListVisible(page) {
   return page.evaluate(
-    ({ product1, product2 }) => {
+    ({ product1, product2, product3 }) => {
       const text = document.body?.innerText || "";
       return text.includes(product1)
         && text.includes(product2)
+        && text.includes(product3)
         && !/20\d{2}\.\d{1,2}\.\d{1,2}\s*~/.test(text);
     },
-    { product1: TEXT.product1, product2: TEXT.product2 }
+    { product1: TEXT.product1, product2: TEXT.product2, product3: TEXT.product3 }
   );
 }
 
@@ -961,7 +964,7 @@ async function main() {
   const room = parseRoom(requiredArg(args, "room"));
   const dateValue = requiredArg(args, "date");
   const startHour = parseHour(requiredArg(args, "start"), "--start");
-  const endHour = parseHour(requiredArg(args, "end"), "--end");
+  const endHour = parseHour(requiredArg(args, "end"), "--end", true);
   const mode = args.mode || "close";
   const apply = args.apply === "true";
   const productUrl = args["product-url"] || optionalEnv(`NAVER_ROOM${room}_PRODUCT_URL`, "");
@@ -993,9 +996,11 @@ async function main() {
   let page;
 
   try {
-    browser = await launchRpaBrowser({ headless: false });
+    const headless = resolveRpaHeadless();
+    browser = await launchRpaBrowser({ headless, reuse: headless });
     const context = await newRpaContext(browser, {
       storageState: naverStorageStatePath,
+      rpaRole: "naver",
     });
     page = await context.newPage();
 

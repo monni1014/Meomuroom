@@ -72,7 +72,7 @@ export default function RpaStatusBadge({
     const naverSlotIssue = hasNaverSlotIssue(memo);
     const spaceCloudSlotIssue = hasSpaceCloudSlotIssue(memo);
 
-    if (naverSlotIssue || spaceCloudSlotIssue) {
+    if ((naverSlotIssue || spaceCloudSlotIssue) && !hasLoginIssue(memo)) {
       return (
         <>
           {naverSlotIssue && (

@@ -15,8 +15,9 @@
     "rpa:naver-screenshot": "node rpa/naver-screenshot.mjs",
     "rpa:naver-inspect-products": "node rpa/naver-inspect-products.mjs",
     "rpa:naver-inspect-product-detail": "node rpa/naver-inspect-product-detail.mjs",
-    "rpa:spacecloud-login": "node rpa/spacecloud-login.mjs",
+    "rpa:spacecloud-login": "node rpa/spacecloud-login.mjs --no-proxy",
     "rpa:spacecloud-login-local": "node rpa/spacecloud-login.mjs --no-proxy",
+    "rpa:spacecloud-login-proxy": "node rpa/spacecloud-login.mjs",
     "rpa:spacecloud-read-detail": "node rpa/spacecloud-read-reservation-detail.mjs",
     "rpa:spacecloud-external": "node rpa/spacecloud-external-reservation.mjs",
     "rpa:competitors": "node rpa/competitor-scan.mjs"

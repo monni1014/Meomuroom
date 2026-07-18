@@ -4,11 +4,11 @@ import {
   reconcileNaverReservationsWithoutCancelEmail,
   recheckNaverSlotRpaIssues,
 } from "./naver-rpa-sync";
-import { prisma } from "./prisma";
+import { markEmailProcessed } from "./processed-email";
 import { markRpaJobCheckRequired } from "./rpa-reservation-state";
 import { processSpaceCloudEmailWithRpa } from "./spacecloud-rpa-sync";
 
-type RpaEmailJob = {
+export type RpaEmailJob = {
   messageId: string;
   source: "naver" | "spacecloud";
   subject: string;
@@ -186,21 +186,6 @@ function getState() {
   return g.__memoroomRpaQueue;
 }
 
-async function markEmailProcessed(messageId: string, source?: string | null, reservationId?: string | null) {
-  await prisma.processedEmail.upsert({
-    where: { messageId },
-    update: {
-      source: source || undefined,
-      reservationId: reservationId || undefined,
-    },
-    create: {
-      messageId,
-      source: source || undefined,
-      reservationId: reservationId || undefined,
-    },
-  });
-}
-
 function clearRetryTimer(state: RpaQueueState, messageId: string) {
   const timer = state.retryTimers.get(messageId);
   if (timer) clearTimeout(timer);
@@ -238,13 +223,23 @@ export function isRpaEmailJobActive(messageId: string) {
 }
 
 export function enqueueRpaEmailJob(job: RpaEmailJob) {
-  const state = getState();
-  if (isRpaEmailJobActive(job.messageId)) return false;
+  return enqueueRpaEmailJobs([job]) > 0;
+}
 
-  const queued = pushJobByPriority(state, job);
-  if (queued) state.activeIds.add(job.messageId);
+export function enqueueRpaEmailJobs(jobs: RpaEmailJob[]) {
+  const state = getState();
+  let accepted = 0;
+
+  for (const job of jobs) {
+    if (isRpaEmailJobActive(job.messageId)) continue;
+
+    const queued = pushJobByPriority(state, job);
+    if (queued) state.activeIds.add(job.messageId);
+    if (queued || state.supersededConfirmationIds.has(job.messageId)) accepted += 1;
+  }
+
   void drainRpaEmailQueue();
-  return true;
+  return accepted;
 }
 
 async function drainRpaEmailQueue() {

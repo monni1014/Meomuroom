@@ -83,7 +83,7 @@ function groupSlotEvents(events: SlotEvent[]) {
 
 export async function getCompetitorSnapshots(year: number, month: number) {
   const { startKey, endKey } = monthRange(year, month);
-  const [slots, slotEvents, latestScan] = await Promise.all([
+  const [slots, slotEvents, latestScan, evidence] = await Promise.all([
     prisma.competitorSlot.findMany({
       where: {
         competitorId: { in: [...COMPETITOR_IDS] },
@@ -115,6 +115,29 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       },
     }),
     prisma.competitorScan.findFirst({ orderBy: { startedAt: "desc" } }),
+    prisma.competitorEvidence.findMany({
+      where: {
+        dismissedAt: null,
+        OR: [
+          { dateKey: { gte: startKey, lte: endKey } },
+          { dateKey: null, status: "OPEN" },
+        ],
+      },
+      orderBy: { capturedAt: "desc" },
+      take: 12,
+      select: {
+        id: true,
+        competitorId: true,
+        dateKey: true,
+        startHour: true,
+        endHour: true,
+        reasonCode: true,
+        reason: true,
+        status: true,
+        capturedAt: true,
+        lastSeenAt: true,
+      },
+    }),
   ]);
 
   const days: Record<string, Record<string, {
@@ -164,6 +187,30 @@ export async function getCompetitorSnapshots(year: number, month: number) {
           segments.push({ startHour: hour, endHour: hour, groupKey });
         } else {
           previous.endHour = hour;
+        }
+      }
+
+      // 시너지는 최소 예약 시간이 2시간이다. 기존 예약에 나중에 붙은
+      // 1시간 구간은 독립 예약이 될 수 없으므로 기존 예약의 연장으로 묶는다.
+      if (competitorId === "synergy") {
+        for (let index = 0; index < segments.length; index += 1) {
+          const segment = segments[index];
+          if (segment.endHour - segment.startHour + 1 !== 1) continue;
+
+          const previous = segments[index - 1];
+          if (previous && previous.endHour + 1 === segment.startHour) {
+            previous.endHour = segment.endHour;
+            segments.splice(index, 1);
+            index -= 1;
+            continue;
+          }
+
+          const next = segments[index + 1];
+          if (next && segment.endHour + 1 === next.startHour) {
+            next.startHour = segment.startHour;
+            segments.splice(index, 1);
+            index -= 1;
+          }
         }
       }
 
@@ -236,7 +283,10 @@ export async function getCompetitorSnapshots(year: number, month: number) {
   return {
     days,
     cancellations: groupedEvents.filter((event) => (
-      event.eventType === "CANCELLED" && event.dateKey >= startKey && event.dateKey <= endKey
+      event.eventType === "CANCELLED"
+      && event.feeRate !== 0
+      && event.dateKey >= startKey
+      && event.dateKey <= endKey
     )).map((event) => ({
       competitorId: event.competitorId,
       dateKey: event.dateKey,
@@ -254,6 +304,19 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       startHour: event.startHour,
       endHour: event.endHour,
       occurredAt: event.occurredAt,
+    })),
+    evidence: evidence.map((item) => ({
+      id: item.id,
+      competitorId: item.competitorId,
+      dateKey: item.dateKey,
+      startHour: item.startHour,
+      endHour: item.endHour,
+      reasonCode: item.reasonCode,
+      reason: item.reason,
+      status: item.status,
+      capturedAt: item.capturedAt.toISOString(),
+      lastSeenAt: item.lastSeenAt.toISOString(),
+      imageUrl: `/api/competitors/evidence/${item.id}/image`,
     })),
     latestScan: latestScan
       ? {

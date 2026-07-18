@@ -73,20 +73,24 @@ interface ManualTableCell {
 
 const ROOMS = ["머무룸1", "머무룸2", "머무룸3"] as const;
 type RoomName = (typeof ROOMS)[number];
-const HOURS = Array.from({ length: 17 }, (_, i) => i + 8);
+// 월간표는 영업시간 기준으로 08시부터 다음 날 02시까지 표시한다.
+// 자정 이후 00시와 01시는 각각 24시와 25시 칸을 사용한다.
+const HOURS = Array.from({ length: 18 }, (_, i) => i + 8);
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const FIRST_BUSINESS_YEAR = 2025;
+const ROOM3_GRAND_OPEN_DATE = "2026-07-15";
 
 function startHour(reservation: Reservation) {
   const start = new Date(reservation.startTime);
-  return start.getHours() + start.getMinutes() / 60;
+  const hour = start.getHours() + start.getMinutes() / 60;
+  return hour < 2 ? hour + 24 : hour;
 }
 
 function endHour(reservation: Reservation) {
   const start = new Date(reservation.startTime);
   const end = new Date(reservation.endTime);
-  if (!isSameDay(start, end) && end.getHours() === 0 && end.getMinutes() === 0) return 24;
-  return end.getHours() + end.getMinutes() / 60;
+  const elapsedHours = Math.max(0, (end.getTime() - start.getTime()) / (1000 * 60 * 60));
+  return startHour(reservation) + elapsedHours;
 }
 
 function durationHours(reservation: Reservation) {
@@ -585,7 +589,7 @@ export default function MonthlyTableView() {
               ? "bg-amber-100 text-amber-950"
               : room === "머무룸2"
                 ? "bg-sky-100 text-sky-950"
-                : "bg-emerald-100 text-emerald-950";
+                : "bg-orange-100 text-orange-950";
 
             return (
               <section key={room} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -618,6 +622,17 @@ export default function MonthlyTableView() {
                         const dayRevenue = dayReservations.reduce((sum, reservation) => sum + reservation.price, 0);
                         const dayRevenueTitle = revenueTooltip(dayReservations);
                         const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                        const isRoom3GrandOpening = room === "머무룸3"
+                          && format(day, "yyyy-MM-dd") === ROOM3_GRAND_OPEN_DATE;
+                        const grandOpeningLabelStartHour = isRoom3GrandOpening
+                          ? HOURS.slice(0, -1)
+                              .filter((hour, index) => (
+                                HOURS[index + 1] === hour + 1
+                                && overlappingReservations(dayReservations, hour).length === 0
+                                && overlappingReservations(dayReservations, hour + 1).length === 0
+                              ))
+                              .sort((a, b) => Math.abs(a + 0.5 - 16) - Math.abs(b + 0.5 - 16))[0]
+                          : undefined;
 
                         return (
                           <tr key={`${room}-${day.toISOString()}`} className={MONTHLY_GRID_BODY_ROW_CLASS}>
@@ -631,6 +646,13 @@ export default function MonthlyTableView() {
                               const cellReservations = overlappingReservationsForCell(dayReservations, hour);
                               const primary = cellReservations[0];
                               const label = primary ? cellLabel(primary, hour) : "";
+                              const grandOpeningLabel = !primary && grandOpeningLabelStartHour !== undefined
+                                ? hour === grandOpeningLabelStartHour
+                                  ? "Grand"
+                                  : hour === grandOpeningLabelStartHour + 1
+                                    ? "Open"
+                                    : ""
+                                : "";
                               const editableKey = `hour-${hour}`;
                               const manualKey = manualCellKey(room, day, editableKey);
                               const manualCell = manualCells[manualKey] || emptyManualCell();
@@ -665,7 +687,11 @@ export default function MonthlyTableView() {
                                   }}
                                   className={cn(
                                     "relative h-6 overflow-visible border border-slate-300 p-0 text-center align-middle font-semibold",
-                                    manualClass || (primary ? cellStyle(primary, isWeekend) : "bg-white text-slate-500"),
+                                    manualClass || (primary
+                                      ? cellStyle(primary, isWeekend)
+                                      : isRoom3GrandOpening
+                                        ? "bg-orange-100 text-orange-950"
+                                        : "bg-white text-slate-500"),
                                     paintSelection !== null && "cursor-crosshair",
                                     isPriceCell && paintSelection === null && "cursor-pointer",
                                     hasMemo && "hover:z-40 focus-within:z-40"
@@ -681,7 +707,7 @@ export default function MonthlyTableView() {
                                   <EditableTableCellInput
                                     ariaLabel={`${room} ${format(day, "MM월 dd일")} ${hour}시 수동 입력`}
                                     value={manualCell.value}
-                                    placeholder={label}
+                                    placeholder={label || grandOpeningLabel}
                                     disabled={paintSelection !== null}
                                     onChange={(value) => updateManualCell(room, day, editableKey, { value })}
                                     onCommit={(value) => updateManualCell(room, day, editableKey, { value })}

@@ -1,8 +1,8 @@
-import { format, parse } from 'date-fns';
+import { parse } from 'date-fns';
 
 export interface ParsedReservation {
   source: string;       // "naver" | "spacecloud"
-  roomName: string;     // "머무룸1" | "머무룸2"
+  roomName: string;     // "머무룸1" | "머무룸2" | "머무룸3"
   customerName: string; // 고객명
   startTime: Date;
   endTime: Date;
@@ -14,6 +14,13 @@ export interface ParsedReservation {
   refundFee?: number;     // 환불수수료 (취소 시 매출로 반영)
 }
 
+function parseRoomName(source: string) {
+  if (/(머무룸\s*(?:회의실\s*)?3|3호점|예약하기\s*3)/.test(source)) return "머무룸3";
+  if (/(머무룸\s*(?:회의실\s*)?2|2호점|예약하기\s*2)/.test(source)) return "머무룸2";
+  if (/(머무룸\s*(?:회의실\s*)?1|1호점|예약하기\s*1)/.test(source)) return "머무룸1";
+  return "공간확인필요";
+}
+
 /**
  * 스페이스클라우드 메일 파서
  */
@@ -21,12 +28,7 @@ export function parseSpaceCloudEmail(subject: string, text: string, messageId: s
   try {
     // 1. 공간 추출 ("예약하기 1/2/3" - 제목 또는 본문 머리글에 등장)
     const roomSource = `${subject} ${text}`;
-    let roomName = "머무룸1";
-    if (/(머무룸\s*(?:회의실\s*)?2|2호점|예약하기\s*2)/.test(roomSource)) {
-      roomName = "머무룸2";
-    } else if (/(머무룸\s*(?:회의실\s*)?3|3호점|예약하기\s*3)/.test(roomSource)) {
-      roomName = "머무룸3";
-    }
+    const roomName = parseRoomName(roomSource);
 
     // 2. 예약내용 (시간) 추출: "2026/06/11 17시 - 21시"
     const timeMatch = text.match(/예약내용\s+(\d{4}\/\d{2}\/\d{2})\s+(\d+)시\s*-\s*(\d+)시/);
@@ -38,6 +40,9 @@ export function parseSpaceCloudEmail(subject: string, text: string, messageId: s
 
     const startTime = parse(`${dateStr} ${startHour}:00`, 'yyyy/MM/dd HH:mm', new Date());
     const endTime = parse(`${dateStr} ${endHour}:00`, 'yyyy/MM/dd HH:mm', new Date());
+    if (endTime.getTime() <= startTime.getTime()) {
+      endTime.setDate(endTime.getDate() + 1);
+    }
 
     // 3. 인원 추출: "예약인원 5명" 또는 "이용인원 10명" 둘 다 지원
     const headMatch = text.match(/(?:예약인원|이용인원)\s+(\d+)명/);
@@ -84,12 +89,7 @@ export function parseSpaceCloudEmail(subject: string, text: string, messageId: s
 export function parseNaverEmail(subject: string, text: string, messageId: string): ParsedReservation | null {
   try {
     const roomSource = `${subject} ${text}`;
-    let roomName = "머무룸1";
-    if (/(머무룸\s*(?:회의실\s*)?2|2호점|예약하기\s*2)/.test(roomSource)) {
-      roomName = "머무룸2";
-    } else if (/(머무룸\s*(?:회의실\s*)?3|3호점|예약하기\s*3)/.test(roomSource)) {
-      roomName = "머무룸3";
-    }
+    const roomName = parseRoomName(roomSource);
 
     // 2. 금액 및 인원 추출
     //    기본형: "결제금액 머무룸 예약하기 1(1) 24,000원"
@@ -141,6 +141,13 @@ export function parseNaverEmail(subject: string, text: string, messageId: string
 
     const startTime = new Date(`${dateStr} ${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00`);
     const endTime = new Date(`${dateStr} ${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`);
+    // Naver may expose a midnight endpoint as 23:59 in list/email text.
+    if (endHour === 23 && endMin === 59) {
+      endTime.setMinutes(endTime.getMinutes() + 1);
+    }
+    if (endTime.getTime() <= startTime.getTime()) {
+      endTime.setDate(endTime.getDate() + 1);
+    }
 
     // 4. 예약자명 추출: "예약자명 양*우님"
     const nameMatch = text.match(/예약자명\s+([^\n]+)님/);

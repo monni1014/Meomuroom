@@ -57,7 +57,8 @@ export const DEFAULT_MESSAGE_TEMPLATES = [
 function roomTemplateKey(roomName: string) {
   if (roomName.includes("3")) return "머무룸3";
   if (roomName.includes("2")) return "머무룸2";
-  return "머무룸1";
+  if (roomName.includes("1")) return "머무룸1";
+  throw new Error(`Unknown room name for message template: ${roomName}`);
 }
 
 function defaultTemplate(roomName: string) {

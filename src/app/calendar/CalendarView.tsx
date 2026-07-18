@@ -53,14 +53,82 @@ interface Reservation {
   usageLog: UsageLog | null;
 }
 
+const ROOM_FILTERS = ["all", "머무룸1", "머무룸2", "머무룸3"] as const;
+type RoomFilter = (typeof ROOM_FILTERS)[number];
+
+function normalizeRoomFilter(value: string | null): RoomFilter {
+  return ROOM_FILTERS.includes(value as RoomFilter) ? (value as RoomFilter) : "all";
+}
+
+function calendarDateFromParam(value: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date();
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function parseClockMinutes(value: string) {
+  const [hourText, minuteText] = value.split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 26 || minute < 0 || minute > 59) {
+    return Number.NaN;
+  }
+
+  return hour * 60 + minute;
+}
+
+function normalizeEndClock(startClock: string, endClock: string) {
+  const startMinutes = parseClockMinutes(startClock);
+  const endMinutes = parseClockMinutes(endClock);
+
+  if (endMinutes === 0 && startMinutes > 0) {
+    return "24:00";
+  }
+
+  return endClock;
+}
+
+function buildLocalDateTime(dateText: string, clockText: string) {
+  const [year, month, day] = dateText.split("-").map(Number);
+  const minutes = parseClockMinutes(clockText);
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+
+  return new Date(year, month - 1, day, hour, minute, 0, 0);
+}
+
+function formatClock(totalMinutes: number) {
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function extendedEndClock(start: Date, end: Date) {
+  const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+  const totalMinutes = start.getHours() * 60 + start.getMinutes() + durationMinutes;
+
+  if (durationMinutes > 0 && totalMinutes <= 26 * 60) {
+    return formatClock(totalMinutes);
+  }
+
+  return `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatDuration(start: Date, end: Date) {
+  const totalMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return minutes === 0 ? `${hours}시간` : `${hours}시간 ${minutes}분`;
+}
+
 export default function CalendarPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
-  const initialDate = (() => {
-    const parsed = dateParam ? new Date(dateParam) : null;
-    return parsed && !isNaN(parsed.getTime()) ? parsed : new Date();
-  })();
+  const initialDate = calendarDateFromParam(dateParam);
+  const initialRoomFilter = normalizeRoomFilter(searchParams.get("room"));
 
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [selectedDate, setSelectedDate] = useState<Date>(initialDate);
@@ -69,7 +137,7 @@ export default function CalendarPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [roomFilter, setRoomFilter] = useState<string>("all");
+  const [roomFilter, setRoomFilter] = useState<RoomFilter>(initialRoomFilter);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
   const [editId, setEditId] = useState<string | null>(null);
@@ -118,6 +186,13 @@ export default function CalendarPage() {
     return () => clearInterval(id);
   }, []);
 
+  const replaceCalendarState = (date: Date, room: RoomFilter) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("date", format(date, "yyyy-MM-dd"));
+    params.set("room", room);
+    window.history.replaceState(null, "", `/calendar?${params.toString()}`);
+  };
+
   const handleSyncEmails = async () => {
     setIsSyncing(true);
     setSyncMessage(null);
@@ -159,28 +234,40 @@ export default function CalendarPage() {
     if (!formName.trim()) return alert("예약자명을 입력하세요.");
     if (formDates.length === 0) return alert("예약 일자를 하나 이상 선택하세요.");
 
+    const normalizedEndTime = normalizeEndClock(formStartTime, formEndTime);
+    const startMinutes = parseClockMinutes(formStartTime);
+    const endMinutes = parseClockMinutes(normalizedEndTime);
+    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || endMinutes <= startMinutes) {
+      return alert("종료 시간은 시작 시간보다 늦어야 합니다.");
+    }
+
     try {
       setIsSubmitting(true);
 
-      const buildPayload = (dateStr: string) => ({
-        source: formSource,
-        roomName: formRoom,
-        customerName: formName,
-        customerType,
-        phone: formPhone.trim() || null,
-        startTime: `${dateStr}T${formStartTime}:00`,
-        endTime: `${dateStr}T${formEndTime}:00`,
-        price: parseInt(formPrice.replace(/,/g, ''), 10) || 0,
-        discount: discount,
-        paymentMethod: paymentMethod,
-        isPaid,
-        isCleanUpBad,
-        memo: memo.trim() || null,
-        complaints: complaints.trim() || null,
-        headCount: parseInt(formGuests, 10) || 1,
-        purpose: formPurpose || null,
-        detail: formDetail.trim() || null,
-      });
+      const buildPayload = (dateStr: string) => {
+        const startDateTime = buildLocalDateTime(dateStr, formStartTime);
+        const endDateTime = buildLocalDateTime(dateStr, normalizedEndTime);
+
+        return {
+          source: formSource,
+          roomName: formRoom,
+          customerName: formName,
+          customerType,
+          phone: formPhone.trim() || null,
+          startTime: startDateTime.toISOString(),
+          endTime: endDateTime.toISOString(),
+          price: parseInt(formPrice.replace(/,/g, ''), 10) || 0,
+          discount: discount,
+          paymentMethod: paymentMethod,
+          isPaid,
+          isCleanUpBad,
+          memo: memo.trim() || null,
+          complaints: complaints.trim() || null,
+          headCount: parseInt(formGuests, 10) || 1,
+          purpose: formPurpose || null,
+          detail: formDetail.trim() || null,
+        };
+      };
 
       if (modalMode === "edit" && editId) {
         const res = await fetch(`/api/reservations/${editId}`, {
@@ -235,7 +322,7 @@ export default function CalendarPage() {
     setFormRoom(res.roomName || "머무룸1");
     setFormDates([format(s, "yyyy-MM-dd")]);
     setFormStartTime(hhmm(s));
-    setFormEndTime(hhmm(e));
+    setFormEndTime(extendedEndClock(s, e));
     setFormPrice(res.price ? res.price.toLocaleString() : "0");
     setDiscount(res.discount || 0);
     setPaymentMethod(res.paymentMethod || "온라인");
@@ -368,7 +455,7 @@ export default function CalendarPage() {
       case "머무룸2":
         return "bg-purple-50 text-purple-700 border border-purple-100";
       case "머무룸3":
-        return "bg-emerald-50 text-emerald-700 border border-emerald-100";
+        return "bg-orange-50 text-orange-700 border border-orange-200";
       default:
         return "bg-slate-50 text-slate-700 border border-slate-100";
     }
@@ -422,10 +509,13 @@ export default function CalendarPage() {
 
       {/* Room Filter Tabs */}
       <div className="flex flex-wrap gap-2">
-        {["all", "머무룸1", "머무룸2", "머무룸3"].map((room) => (
+        {ROOM_FILTERS.map((room) => (
           <button
             key={room}
-            onClick={() => setRoomFilter(room)}
+            onClick={() => {
+              setRoomFilter(room);
+              replaceCalendarState(selectedDate, room);
+            }}
             className={cn(
               "px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border",
               roomFilter === room
@@ -492,7 +582,10 @@ export default function CalendarPage() {
             return (
               <button
                 key={day.toISOString()}
-                onClick={() => setSelectedDate(day)}
+                onClick={() => {
+                  setSelectedDate(day);
+                  replaceCalendarState(day, roomFilter);
+                }}
                 className={cn(
                   "flex flex-col items-center justify-between p-1.5 min-h-[55px] rounded-xl relative transition-all active:scale-95",
                   isSelected
@@ -561,12 +654,21 @@ export default function CalendarPage() {
               const start = new Date(res.startTime);
               const end = new Date(res.endTime);
               const formatTime = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+              const displayEndTime = extendedEndClock(start, end);
               const isCancelled = res.status === "CANCELLED";
 
               return (
                 <div
                   key={res.id}
-                  onDoubleClick={() => router.push(`/usage?selected=${res.id}`)}
+                  onDoubleClick={() => {
+                    replaceCalendarState(selectedDate, roomFilter);
+                    const params = new URLSearchParams({
+                      selected: res.id,
+                      fromDate: format(selectedDate, "yyyy-MM-dd"),
+                      fromRoom: roomFilter,
+                    });
+                    router.push(`/usage?${params.toString()}`);
+                  }}
                   title="더블클릭하면 이용현황에서 수정"
                   className={cn(
                     "relative p-4 pr-10 rounded-xl border flex justify-between items-start gap-2 cursor-pointer select-none",
@@ -643,7 +745,7 @@ export default function CalendarPage() {
                     <div className="grid grid-cols-2 gap-y-1 gap-x-4 text-xs text-slate-500">
                       <p className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5" />
-                        <span>{formatTime(start)} - {formatTime(end)} ({Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60))}시간)</span>
+                        <span>{formatTime(start)} - {displayEndTime} ({formatDuration(start, end)})</span>
                       </p>
                       <p className="flex items-center gap-1">
                         <User className="w-3.5 h-3.5" />
@@ -786,6 +888,11 @@ export default function CalendarPage() {
                   <input
                     type="text"
                     required
+                    lang="ko"
+                    inputMode="text"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     placeholder="김철수"
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
@@ -882,12 +989,12 @@ export default function CalendarPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500">시작 시간</label>
-                  <TimeSelect value={formStartTime} onChange={setFormStartTime} />
+                  <TimeSelect value={formStartTime} onChange={setFormStartTime} maxHour={23} />
                 </div>
 
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500">종료 시간</label>
-                  <TimeSelect value={formEndTime} onChange={setFormEndTime} />
+                  <TimeSelect value={formEndTime} onChange={setFormEndTime} maxHour={26} />
                 </div>
               </div>
 
@@ -923,6 +1030,11 @@ export default function CalendarPage() {
                 <label className="text-xs font-bold text-slate-500">세부내용 (선택 입력)</label>
                 <input
                   type="text"
+                  lang="ko"
+                  inputMode="text"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={formDetail}
                   onChange={(e) => setFormDetail(e.target.value)}
                   placeholder="예: 보험교육, 유튜브 촬영"
@@ -933,6 +1045,11 @@ export default function CalendarPage() {
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500">비고 (자유 입력)</label>
                 <textarea
+                  lang="ko"
+                  inputMode="text"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={memo}
                   onChange={(e) => setMemo(e.target.value)}
                   placeholder="예약 관련 메모나 참고사항을 자유롭게 적어주세요."
@@ -990,6 +1107,11 @@ export default function CalendarPage() {
               <div className="space-y-1">
                 <label className="text-xs font-bold text-rose-500">고객 불만사항 (CS 기록)</label>
                 <textarea
+                  lang="ko"
+                  inputMode="text"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={complaints}
                   onChange={(e) => setComplaints(e.target.value)}
                   placeholder="고객 불만사항이 발생한 경우, 여기에 상세히 기록해 주세요."

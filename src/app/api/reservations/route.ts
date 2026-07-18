@@ -4,6 +4,13 @@ import { normalizeCustomerType } from "@/lib/customer-types";
 
 export const dynamic = "force-dynamic";
 
+const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
+
+function parseReservationDate(value: unknown) {
+  const date = typeof value === "string" || value instanceof Date ? new Date(value) : new Date(Number.NaN);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export async function GET() {
   try {
     const reservations = await prisma.reservation.findMany({
@@ -26,6 +33,19 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { source, roomName, customerName, customerType, phone, startTime, endTime, price, headCount, coffeeCount, purpose, detail, paymentMethod, isPaid, memo, discount } = body;
 
+    if (!VALID_ROOM_NAMES.has(roomName)) {
+      return NextResponse.json({ error: "A valid roomName is required" }, { status: 400 });
+    }
+
+    const parsedStartTime = parseReservationDate(startTime);
+    const parsedEndTime = parseReservationDate(endTime);
+    if (!parsedStartTime || !parsedEndTime) {
+      return NextResponse.json({ error: "Valid startTime and endTime are required" }, { status: 400 });
+    }
+    if (parsedEndTime.getTime() <= parsedStartTime.getTime()) {
+      return NextResponse.json({ error: "endTime must be later than startTime" }, { status: 400 });
+    }
+
     // Check if the same person (by name or phone) has a previous 'isCleanUpBad' record
     let autoCleanUpBad = false;
     if (customerName || phone) {
@@ -46,12 +66,12 @@ export async function POST(request: NextRequest) {
     const reservation = await prisma.reservation.create({
       data: {
         source: source || "manual",
-        roomName: roomName || "머무룸1",
+        roomName,
         customerName: customerName || "미지정",
         customerType: normalizeCustomerType(customerType),
         phone: phone || null,
-        startTime: new Date(startTime),
-        endTime: new Date(endTime),
+        startTime: parsedStartTime,
+        endTime: parsedEndTime,
         price: Number(price) || 0,
         discount: Number(discount) || 0,
         paymentMethod: paymentMethod || "온라인",

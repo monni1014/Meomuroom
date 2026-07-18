@@ -46,7 +46,8 @@ export default function TodayReservationsList({ reservations }: { reservations: 
             res.source === "spacecloud" ? "bg-indigo-50 hover:bg-indigo-100 text-indigo-700" : "bg-amber-50 hover:bg-amber-100 text-amber-700";
         const roomColors =
           res.roomName === "머무룸1" ? "bg-sky-50 text-sky-700" :
-            res.roomName === "머무룸2" ? "bg-purple-50 text-purple-700" : "bg-teal-50 text-teal-700";
+            res.roomName === "머무룸2" ? "bg-purple-50 text-purple-700" :
+              res.roomName === "머무룸3" ? "bg-orange-50 text-orange-700" : "bg-slate-100 text-slate-700";
 
         return (
           <div
