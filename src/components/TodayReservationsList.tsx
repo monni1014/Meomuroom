@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { UNCATEGORIZED_LABEL } from "@/lib/categories";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
+import { getKstDateKey, getKstDateParts } from "@/lib/kst-time";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default function TodayReservationsList({ reservations }: { reservations: any[] }) {
@@ -19,9 +20,11 @@ export default function TodayReservationsList({ reservations }: { reservations: 
 
   const formatTimeRange = (start: Date, end: Date) => {
     const pad = (n: number) => n.toString().padStart(2, "0");
-    const m = `${start.getMonth() + 1}/${start.getDate()}`;
-    const startStr = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
-    const endStr = `${pad(end.getHours())}:${pad(end.getMinutes())}`;
+    const startParts = getKstDateParts(start);
+    const endParts = getKstDateParts(end);
+    const m = `${startParts.month}/${startParts.day}`;
+    const startStr = `${pad(startParts.hour)}:${pad(startParts.minute)}`;
+    const endStr = `${pad(endParts.hour)}:${pad(endParts.minute)}`;
     return `[${m}] ${startStr} - ${endStr}`;
   };
 
@@ -53,7 +56,7 @@ export default function TodayReservationsList({ reservations }: { reservations: 
           <div
             key={res.id}
             onDoubleClick={() => {
-              const dateStr = new Date(res.startTime).toISOString().split('T')[0];
+              const dateStr = getKstDateKey(new Date(res.startTime));
               router.push(`/calendar?date=${dateStr}`);
             }}
             title="더블클릭하면 캘린더로 이동합니다"

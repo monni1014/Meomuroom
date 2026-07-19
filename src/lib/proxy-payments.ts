@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import type { ProxyPaymentCurrency, ProxyPaymentRecord } from "@/lib/proxy-payment-types";
+import { getKstDateKey } from "@/lib/kst-time";
 
 const SUPPORTED_CURRENCIES = new Set<ProxyPaymentCurrency>(["USD", "KRW"]);
 
 function dateOnly(value: Date | null) {
-  return value ? value.toISOString().slice(0, 10) : null;
+  return value ? getKstDateKey(value) : null;
 }
 
 function parseDateOnly(value: unknown, fieldName: string, required: true): Date;

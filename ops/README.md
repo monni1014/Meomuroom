@@ -28,3 +28,16 @@ node scripts/reconcile-spacecloud-manual-blocks.mjs --plan --full
 ```
 
 There is no scheduled server reboot.
+
+## Database backup
+
+`memoroom-db-backup.timer` creates an online SQLite backup four times per day
+at 00:30, 06:30, 12:30, and 18:30 Asia/Seoul time. The backup script validates
+SQLite integrity, uploads through the encrypted `memoroom-crypt` rclone
+remote, downloads the uploaded file, and verifies its SHA-256 hash.
+
+- Local retention: 7 days
+- Encrypted Google Drive retention: 30 days
+- Script install path: `/usr/local/sbin/memoroom-db-backup`
+- Local backup path: `/var/backups/memoroom`
+- rclone config path: `/root/.config/rclone/rclone.conf`

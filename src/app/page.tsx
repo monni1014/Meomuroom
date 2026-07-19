@@ -7,10 +7,11 @@ import TodayReservationsList from "@/components/TodayReservationsList";
 import WeekFilter from "@/components/WeekFilter";
 import MonthFilter from "@/components/MonthFilter";
 import DismissibleAdminAlerts from "@/components/DismissibleAdminAlerts";
+import { addKstMonths, createKstDate, getKstDateParts, getKstDayRange, startOfKstMonth } from "@/lib/kst-time";
 
 export const dynamic = "force-dynamic";
 
-const SERVICE_START_MONTH = new Date(2025, 7, 1); // 2025년 8월
+const SERVICE_START_MONTH = createKstDate(2025, 8, 1);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function pad2(n: number) {
@@ -18,33 +19,37 @@ function pad2(n: number) {
 }
 
 function monthKey(date: Date) {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+  const parts = getKstDateParts(date);
+  return `${parts.year}-${pad2(parts.month)}`;
 }
 
 function dateKey(date: Date) {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  const parts = getKstDateParts(date);
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
 }
 
 function parseMonthParam(value: string | undefined, fallback: Date) {
   const match = value?.match(/^(20\d{2})-(0[1-9]|1[0-2])$/);
-  if (!match) return new Date(fallback.getFullYear(), fallback.getMonth(), 1);
-  return new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  if (!match) return startOfKstMonth(fallback);
+  return createKstDate(Number(match[1]), Number(match[2]), 1);
 }
 
 function parseDateParam(value: string | undefined) {
   const match = value?.match(/^(20\d{2})-(\d{2})-(\d{2})$/);
   if (!match) return null;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  date.setHours(0, 0, 0, 0);
-  return Number.isNaN(date.getTime()) ? null : date;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = createKstDate(year, month, day);
+  const parts = getKstDateParts(date);
+  return parts.year === year && parts.month === month && parts.day === day ? date : null;
 }
 
 function startOfWeekMonday(date: Date) {
-  const result = new Date(date);
-  result.setHours(0, 0, 0, 0);
-  const day = result.getDay();
-  result.setDate(result.getDate() - day + (day === 0 ? -6 : 1));
-  return result;
+  const parts = getKstDateParts(date);
+  const dayOfWeek = new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+  const offset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  return new Date(createKstDate(parts.year, parts.month, parts.day).getTime() + offset * DAY_MS);
 }
 
 function maxDate(a: Date, b: Date) {
@@ -58,16 +63,17 @@ function minDate(a: Date, b: Date) {
 function buildMonthOptions(start: Date, end: Date, selected: Date) {
   const rangeStart = new Date(Math.min(start.getTime(), selected.getTime()));
   const rangeEnd = new Date(Math.max(end.getTime(), selected.getTime()));
-  const current = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
-  const last = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
+  let current = startOfKstMonth(rangeStart);
+  const last = startOfKstMonth(rangeEnd);
   const options: { value: string; label: string }[] = [];
 
   while (current <= last) {
+    const parts = getKstDateParts(current);
     options.push({
       value: monthKey(current),
-      label: `${current.getFullYear()}년 ${current.getMonth() + 1}월`,
+      label: `${parts.year}년 ${parts.month}월`,
     });
-    current.setMonth(current.getMonth() + 1);
+    current = addKstMonths(current, 1);
   }
 
   return options;
@@ -79,27 +85,26 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const weekStartParam = searchParams.weekStart as string | undefined;
   const monthParam = searchParams.month as string | undefined;
 
-  // Get current date boundaries for Today
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const endOfToday = new Date();
-  endOfToday.setHours(23, 59, 59, 999);
+  // Always use explicit Korea Standard Time boundaries, independent of server timezone.
+  const now = new Date();
+  const { start: startOfToday, end: endOfToday } = getKstDayRange(now);
 
-  const currentMonthStart = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
+  const currentMonthStart = startOfKstMonth(now);
   const selectedMonthStart = parseMonthParam(monthParam, currentMonthStart);
-  const selectedMonthEnd = new Date(selectedMonthStart.getFullYear(), selectedMonthStart.getMonth() + 1, 0, 23, 59, 59, 999);
+  const selectedMonthEnd = new Date(addKstMonths(selectedMonthStart, 1).getTime() - 1);
   const selectedMonthKey = monthKey(selectedMonthStart);
-  const selectedMonthLabel = `${selectedMonthStart.getFullYear()}년 ${selectedMonthStart.getMonth() + 1}월`;
+  const selectedMonthParts = getKstDateParts(selectedMonthStart);
+  const selectedMonthLabel = `${selectedMonthParts.year}년 ${selectedMonthParts.month}월`;
 
   const reservationBounds = await prisma.reservation.aggregate({
     _min: { startTime: true },
     _max: { startTime: true },
   });
   const firstDataMonth = reservationBounds._min.startTime
-    ? minDate(new Date(reservationBounds._min.startTime.getFullYear(), reservationBounds._min.startTime.getMonth(), 1), SERVICE_START_MONTH)
+    ? minDate(startOfKstMonth(reservationBounds._min.startTime), SERVICE_START_MONTH)
     : SERVICE_START_MONTH;
   const lastDataMonth = reservationBounds._max.startTime
-    ? maxDate(new Date(reservationBounds._max.startTime.getFullYear(), reservationBounds._max.startTime.getMonth(), 1), currentMonthStart)
+    ? maxDate(startOfKstMonth(reservationBounds._max.startTime), currentMonthStart)
     : currentMonthStart;
   const monthOptions = buildMonthOptions(firstDataMonth, lastDataMonth, selectedMonthStart);
   const activeAlerts = await prisma.adminAlert.findMany({
@@ -153,8 +158,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
     ? parsedWeekStart
     : defaultWeekStart;
 
-  const rawEndOfSelectedWeek = new Date(weekStartForFilter.getTime() + 6 * DAY_MS);
-  rawEndOfSelectedWeek.setHours(23, 59, 59, 999);
+  const rawEndOfSelectedWeek = new Date(weekStartForFilter.getTime() + 7 * DAY_MS - 1);
 
   const startOfSelectedWeek = maxDate(weekStartForFilter, selectedMonthStart);
   const endOfSelectedWeek = minDate(rawEndOfSelectedWeek, selectedMonthEnd);
@@ -226,13 +230,12 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   // Determine week number for the title
   let weekNum = 1;
   const currentWeekIter = new Date(firstWeekStartOfMonth);
-  currentWeekIter.setHours(0, 0, 0, 0);
 
   while (currentWeekIter <= selectedMonthEnd) {
     if (currentWeekIter.getTime() === weekStartForFilter.getTime()) {
       break;
     }
-    currentWeekIter.setDate(currentWeekIter.getDate() + 7);
+    currentWeekIter.setTime(currentWeekIter.getTime() + 7 * DAY_MS);
     weekNum++;
   }
 
@@ -321,7 +324,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
         {/* Weekly Stats */}
         <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-slate-900">{selectedMonthStart.getMonth() + 1}월 {weekNum}주차 현황</h2>
+            <h2 className="text-lg font-semibold text-slate-900">{selectedMonthParts.month}월 {weekNum}주차 현황</h2>
             <div className="bg-slate-100 rounded-lg px-2 py-1">
               <WeekFilter currentWeekStart={startOfSelectedWeekStr} monthStart={dateKey(selectedMonthStart)} />
             </div>

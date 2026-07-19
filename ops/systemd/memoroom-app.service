@@ -10,6 +10,7 @@ User=memoroom
 Group=memoroom
 WorkingDirectory=/srv/memoroom/app
 Environment=NODE_ENV=production
+Environment=TZ=Asia/Seoul
 Environment=NEXT_TELEMETRY_DISABLED=1
 Environment=HOME=/srv/memoroom
 Environment=XDG_CONFIG_HOME=/srv/memoroom/.config

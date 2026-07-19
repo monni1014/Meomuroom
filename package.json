@@ -8,6 +8,7 @@
     "start": "next start --port=3000 --hostname=0.0.0.0",
     "lint": "eslint",
     "test:email-timezones": "node --experimental-strip-types scripts/test-email-parser-timezones.mjs",
+    "test:kst-time": "node --experimental-strip-types scripts/test-kst-day-boundaries.mjs",
     "rpa:configure-proxy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-rpa-proxy.ps1",
     "rpa:test-proxy": "node rpa/test-proxy.mjs",
     "rpa:proxy-status": "node rpa/proxy-seller-status.mjs",

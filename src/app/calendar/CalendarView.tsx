@@ -10,6 +10,7 @@ import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "
 import TimeSelect from "@/components/TimeSelect";
 import MultiDatePicker from "@/components/MultiDatePicker";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
+import { createKstDate, getKstDateParts } from "@/lib/kst-time";
 import MessageStatusBadge from "@/components/MessageStatusBadge";
 
 interface UsageLog {
@@ -95,7 +96,7 @@ function buildLocalDateTime(dateText: string, clockText: string) {
   const hour = Math.floor(minutes / 60);
   const minute = minutes % 60;
 
-  return new Date(year, month - 1, day, hour, minute, 0, 0);
+  return createKstDate(year, month, day, hour, minute);
 }
 
 function formatClock(totalMinutes: number) {
@@ -106,13 +107,15 @@ function formatClock(totalMinutes: number) {
 
 function extendedEndClock(start: Date, end: Date) {
   const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
-  const totalMinutes = start.getHours() * 60 + start.getMinutes() + durationMinutes;
+  const startParts = getKstDateParts(start);
+  const endParts = getKstDateParts(end);
+  const totalMinutes = startParts.hour * 60 + startParts.minute + durationMinutes;
 
   if (durationMinutes > 0 && totalMinutes <= 26 * 60) {
     return formatClock(totalMinutes);
   }
 
-  return `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
+  return `${String(endParts.hour).padStart(2, "0")}:${String(endParts.minute).padStart(2, "0")}`;
 }
 
 function formatDuration(start: Date, end: Date) {

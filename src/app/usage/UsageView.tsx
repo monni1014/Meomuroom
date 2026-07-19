@@ -7,6 +7,7 @@ import { MAJOR_CATEGORIES, SUB_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/cat
 import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "@/lib/customer-types";
 import TimeSelect from "@/components/TimeSelect";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
+import { createKstDate, getKstDateKey, getKstDateParts, isKstWeekend } from "@/lib/kst-time";
 
 interface UsageLog {
   id: string;
@@ -102,12 +103,11 @@ export default function UsagePage() {
   // ISO → 날짜/시간 입력값 (로컬 기준)
   const pad2 = (n: number) => String(n).padStart(2, "0");
   const toDateInput = (iso: string) => {
-    const d = new Date(iso);
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    return getKstDateKey(new Date(iso));
   };
   const toTimeInput = (iso: string) => {
-    const d = new Date(iso);
-    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    const parts = getKstDateParts(new Date(iso));
+    return `${pad2(parts.hour)}:${pad2(parts.minute)}`;
   };
 
   const fetchReservations = async (preserveId?: string) => {
@@ -163,12 +163,12 @@ export default function UsagePage() {
           let initialRate = 0;
           const sDate = new Date(defaultRes.startTime);
           if (defaultRes.source === "naver") {
-            const isWeekend = sDate.getDay() === 0 || sDate.getDay() === 6;
+            const isWeekend = isKstWeekend(sDate);
             initialRate = isWeekend ? 2500 : 2000;
           } else if (defaultRes.source === "spacecloud") {
-            const isWeekend = sDate.getDay() === 0 || sDate.getDay() === 6;
+            const isWeekend = isKstWeekend(sDate);
             const holidays = ["01-01", "02-16", "02-17", "02-18", "03-01", "03-02", "05-05", "05-24", "05-25", "06-06", "08-15", "09-24", "09-25", "09-26", "10-03", "10-09", "12-25"];
-            const isHoliday = holidays.includes(defaultRes.startTime.substring(5, 10));
+            const isHoliday = holidays.includes(getKstDateKey(sDate).slice(5));
             initialRate = (isWeekend || isHoliday) ? 3000 : 2500;
           }
           const eDate = new Date(defaultRes.endTime);
@@ -208,12 +208,12 @@ export default function UsagePage() {
       let initialRate = 0;
       const sDate = new Date(found.startTime);
       if (found.source === "naver") {
-        const isWeekend = sDate.getDay() === 0 || sDate.getDay() === 6;
+        const isWeekend = isKstWeekend(sDate);
         initialRate = isWeekend ? 2500 : 2000;
       } else if (found.source === "spacecloud") {
-        const isWeekend = sDate.getDay() === 0 || sDate.getDay() === 6;
+        const isWeekend = isKstWeekend(sDate);
         const holidays = ["01-01", "02-16", "02-17", "02-18", "03-01", "03-02", "05-05", "05-24", "05-25", "06-06", "08-15", "09-24", "09-25", "09-26", "10-03", "10-09", "12-25"];
-        const isHoliday = holidays.includes(found.startTime.substring(5, 10));
+        const isHoliday = holidays.includes(getKstDateKey(sDate).slice(5));
         initialRate = (isWeekend || isHoliday) ? 3000 : 2500;
       } else {
         initialRate = 2000;
@@ -386,7 +386,7 @@ export default function UsagePage() {
     const buildISO = (dateStr: string, timeStr: string) => {
       const [y, mo, d] = dateStr.split("-").map(Number);
       const [hh, mi] = timeStr.split(":").map(Number);
-      return new Date(y, mo - 1, d, hh || 0, mi || 0, 0, 0).toISOString();
+      return createKstDate(y, mo, d, hh || 0, mi || 0).toISOString();
     };
     const finalPrice = originalPrice + extraPrice;
 
@@ -486,12 +486,8 @@ export default function UsagePage() {
 
   // Human readable date string formatting
   const formatDateLabel = (startTimeStr: string) => {
-    const d = new Date(startTimeStr);
-    const months = d.getMonth() + 1;
-    const dates = d.getDate();
-    const hours = d.getHours().toString().padStart(2, "0");
-    const mins = d.getMinutes().toString().padStart(2, "0");
-    return `${months}/${dates} ${hours}:${mins}`;
+    const parts = getKstDateParts(new Date(startTimeStr));
+    return `${parts.month}/${parts.day} ${pad2(parts.hour)}:${pad2(parts.minute)}`;
   };
 
   // Last 5 modified logs for displaying recent actions safely

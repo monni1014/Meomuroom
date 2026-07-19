@@ -12,10 +12,13 @@ All notable changes to Memoroom are documented in this file. Versions follow
 - Competitor monitoring schedules, evidence capture, and proxy-backed status checks.
 - Proxy status, expiry, payment-history, and cost management in Settings.
 - systemd service and reconciliation timer templates for production operations.
+- Encrypted, verified Google Drive backups for the production SQLite database.
 - Login-session validation and SpaceCloud diagnostic tooling.
 
 ### Fixed
 
+- Dashboard, calendar, usage, monthly-table, proxy-payment, and server runtime
+  date boundaries now consistently use Asia/Seoul time.
 - Explicit Korea Standard Time parsing for Naver and SpaceCloud reservation emails.
 - Naver cancellation matching and cleanup of detached pending cancellation jobs.
 - RPA process locking, browser cleanup, and duplicate execution prevention.

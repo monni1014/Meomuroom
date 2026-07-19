@@ -5,6 +5,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameM
 import { ChevronLeft, ChevronRight, MessageSquareText, RefreshCw, Save, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { getKstDateParts } from "@/lib/kst-time";
 import { EditableTableCellInput } from "@/components/EditableTableCellInput";
 import {
   MONTHLY_GRID_BODY_ROW_CLASS,
@@ -232,7 +233,7 @@ function buildYearOptions(currentYear: number, reservations: Reservation[]) {
       currentYear,
       currentYear + 1,
       ...reservations
-        .map((reservation) => new Date(reservation.startTime).getFullYear())
+        .map((reservation) => getKstDateParts(new Date(reservation.startTime)).year)
         .filter((year) => year >= FIRST_BUSINESS_YEAR),
     ])
   )
