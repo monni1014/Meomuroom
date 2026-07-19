@@ -63,20 +63,39 @@ function usage() {
   ].join("\n");
 }
 
+function parseDateParts(dateValue) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue);
+  if (!match) throw new Error("--date must be YYYY-MM-DD");
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() + 1 !== month
+    || date.getUTCDate() !== day
+  ) {
+    throw new Error("--date is invalid");
+  }
+
+  return { year, month, day, weekday: date.getUTCDay() };
+}
+
 function formatKoreanDateLabel(dateValue) {
-  const date = new Date(`${dateValue}T00:00:00+09:00`);
-  return `${date.getMonth() + 1}.${date.getDate()}(${WEEKDAYS[date.getDay()]})`;
+  const { month, day, weekday } = parseDateParts(dateValue);
+  return `${month}.${day}(${WEEKDAYS[weekday]})`;
 }
 
 function formatPanelDateTitle(dateValue) {
-  const date = new Date(`${dateValue}T00:00:00+09:00`);
-  const yy = String(date.getFullYear()).slice(2);
-  return `${yy}.${date.getMonth() + 1}.${date.getDate()}(${WEEKDAYS[date.getDay()]})`;
+  const { year, month, day, weekday } = parseDateParts(dateValue);
+  const yy = String(year).slice(2);
+  return `${yy}.${month}.${day}(${WEEKDAYS[weekday]})`;
 }
 
 function formatShortMonthDay(dateValue) {
-  const date = new Date(`${dateValue}T00:00:00+09:00`);
-  return `${date.getMonth() + 1}.${date.getDate()}`;
+  const { month, day } = parseDateParts(dateValue);
+  return `${month}.${day}`;
 }
 
 function toScheduleUrl(productUrl) {

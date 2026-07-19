@@ -1,6 +1,10 @@
 export async function registerNodeInstrumentation() {
-  if (process.env.DISABLE_BACKGROUND_JOBS === "1") {
-    console.log("[Cron] Background jobs disabled for this server process");
+  const serverWorkersEnabled =
+    process.platform === "linux" &&
+    process.env.RPA_EXECUTION_ENABLED?.trim().toLowerCase() === "true";
+
+  if (process.env.DISABLE_BACKGROUND_JOBS === "1" || !serverWorkersEnabled) {
+    console.log("[Cron] Background jobs disabled on this host");
     return;
   }
 
@@ -11,12 +15,12 @@ export async function registerNodeInstrumentation() {
   const { schedule } = await import("node-cron");
   const { syncEmails } = await import("@/lib/email-sync");
   const { enqueueNaverStatusReconcile } = await import("@/lib/rpa-job-queue");
-  const { checkIproyalTrafficAndAlert } = await import("@/lib/iproyal-traffic");
+  const { checkProxySellerStatusAndAlert } = await import("@/lib/proxy-seller");
   const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
   const { runCompetitorScan } = await import("@/lib/competitor-monitor");
 
   let running = false;
-  let proxyTrafficRunning = false;
+  let proxyStatusRunning = false;
   let naverStatusReconcileRunning = false;
   let notificationRunning = false;
   let competitorScanRunning = false;
@@ -40,22 +44,20 @@ export async function registerNodeInstrumentation() {
     }
   }
 
-  async function runProxyTrafficCheck(label: string) {
-    if (proxyTrafficRunning) {
-      console.log(`[Cron] Previous proxy traffic check is still running. Skipping ${label}.`);
+  async function runProxyStatusCheck(label: string) {
+    if (proxyStatusRunning) {
+      console.log(`[Cron] Previous ISP proxy status check is still running. Skipping ${label}.`);
       return;
     }
 
-    proxyTrafficRunning = true;
+    proxyStatusRunning = true;
     try {
-      const result = await checkIproyalTrafficAndAlert();
-      if (result.severity !== "NOT_CONFIGURED") {
-        console.log(`[Cron] IPRoyal traffic check done (${label}): ${result.message}`);
-      }
+      const result = await checkProxySellerStatusAndAlert();
+      console.log(`[Cron] ISP proxy status check done (${label}): ${result.summary}`);
     } catch (error) {
-      console.error(`[Cron] IPRoyal traffic check failed (${label}):`, error);
+      console.error(`[Cron] ISP proxy status check failed (${label}):`, error);
     } finally {
-      proxyTrafficRunning = false;
+      proxyStatusRunning = false;
     }
   }
 
@@ -125,7 +127,7 @@ export async function registerNodeInstrumentation() {
   }, 0);
 
   setTimeout(() => {
-    void runProxyTrafficCheck("startup");
+    void runProxyStatusCheck("startup");
   }, 10_000);
 
   setTimeout(() => {
@@ -140,8 +142,8 @@ export async function registerNodeInstrumentation() {
     await runEmailSync("cron");
   });
 
-  schedule("*/10 * * * *", async () => {
-    await runProxyTrafficCheck("cron");
+  schedule("*/5 * * * *", async () => {
+    await runProxyStatusCheck("cron");
   });
 
   schedule("* * * * *", async () => {
@@ -161,13 +163,13 @@ export async function registerNodeInstrumentation() {
   });
 
   schedule("0 12 * * *", async () => {
-    await runCompetitorMonitor("12:00 today", "today");
+    await runCompetitorMonitor("12:00 next seven days", "next-week");
   }, {
     timezone: "Asia/Seoul",
   });
 
   schedule("0 18 * * *", async () => {
-    await runCompetitorMonitor("18:00 today and tomorrow", "today-next");
+    await runCompetitorMonitor("18:00 next seven days", "next-week");
   }, {
     timezone: "Asia/Seoul",
   });
@@ -186,7 +188,7 @@ export async function registerNodeInstrumentation() {
 
   console.log("[Cron] Email auto sync started (15 second interval)");
   console.log("[Cron] Reservation notification monitor started (1 minute interval)");
-  console.log("[Cron] IPRoyal traffic monitor started (10 minute interval)");
+  console.log("[Cron] ISP proxy status monitor started (5 minute interval)");
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
-  console.log("[Cron] Competitor monitor started (07:00 today+tomorrow, 12:00 today, 18:00 today+tomorrow, 23:00 next 7 days, monthly baseline at 07:00 on day 1)");
+  console.log("[Cron] Competitor monitor started (07:00 today+tomorrow, 12:00/18:00/23:00 next 7 days, monthly baseline at 07:00 on day 1)");
 }

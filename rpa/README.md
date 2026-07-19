@@ -4,27 +4,33 @@ RPA work starts from `v7`.
 
 Keep `v6` as the stable rollback branch.
 
-## 1. IPRoyal proxy test
+## 1. RPA proxy setup and test
 
-Add these values to `.env`.
+Run the local setup command. Credentials are saved only in the git-ignored `.env` file.
+
+```bash
+npm run rpa:configure-proxy
+```
+
+The resulting settings use provider-neutral names:
 
 ```env
-IPROYAL_PROXY_HOST="host from IPRoyal"
-IPROYAL_PROXY_PORT="port from IPRoyal"
-IPROYAL_PROXY_PROTOCOL="http"
-IPROYAL_PROXY_USER="username from IPRoyal"
-IPROYAL_PROXY_PASS="password from IPRoyal"
+RPA_PROXY_PROVIDER="proxyseller"
+RPA_PROXY_HOST="proxy host or IP"
+RPA_PROXY_PORT="HTTP proxy port"
+RPA_PROXY_PROTOCOL="http"
+RPA_PROXY_USER="proxy username"
+RPA_PROXY_PASS="proxy password"
 RPA_USE_PROXY="true"
-RPA_PROXY_DIRECT_FALLBACK="true"
-IPROYAL_PROXY_DIRECT_FALLBACK_GB="0.01"
+RPA_PROXY_DIRECT_FALLBACK="false"
 RPA_HEADLESS="false"
 RPA_MIN_DELAY_MS="900"
 RPA_MAX_DELAY_MS="2200"
 ```
 
 Set `RPA_USE_PROXY="false"` to run every RPA job through the machine's current IP.
-When proxy mode is enabled, the browser automatically uses the current IP if the
-remaining IPRoyal traffic is at or below `IPROYAL_PROXY_DIRECT_FALLBACK_GB`.
+Keep `RPA_PROXY_DIRECT_FALLBACK="false"` on a cloud server so a proxy outage stops
+the job instead of silently exposing the data-center IP.
 
 Run:
 
@@ -32,7 +38,15 @@ Run:
 npm run rpa:test-proxy
 ```
 
-If the output country is `KR`, the proxy base test passed.
+The test checks Korea geolocation, IP consistency, and non-login access to Naver,
+Kakao, and SpaceCloud. Do not log in until every check passes.
+
+If a Proxy-Seller API key is configured, inspect order status and expiration without
+printing proxy credentials:
+
+```bash
+npm run rpa:proxy-status
+```
 
 ## 2. Build order
 
@@ -54,7 +68,7 @@ Run:
 npm run rpa:naver-login
 ```
 
-A browser opens through the IPRoyal proxy. Log in manually, then press Enter in the terminal.
+A browser opens through the configured proxy. Log in manually, then press Enter in the terminal.
 The saved login session is stored under `rpa/.auth/`, which is ignored by git.
 
 After that, open a booking detail URL:

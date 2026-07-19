@@ -4,17 +4,22 @@ import { useCallback, useState } from "react";
 import {
   AlertTriangle,
   Bot,
+  CircleDollarSign,
   CheckCircle2,
   MessageSquareText,
   Phone,
+  Plus,
   RefreshCw,
   Save,
   ServerCog,
+  Trash2,
   WalletCards,
   Wifi,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SolapiServiceStatus } from "@/lib/solapi-status";
+import type { IspProxyStatus } from "@/lib/proxy-status-types";
+import type { ProxyPaymentCurrency, ProxyPaymentRecord } from "@/lib/proxy-payment-types";
 
 type MessageTemplateState = {
   id: string;
@@ -24,31 +29,64 @@ type MessageTemplateState = {
   updatedAt: string;
 };
 
-type ProxyStatus = {
-  configured: boolean;
-  availableGb: number | null;
-  warningGb: number;
-  criticalGb: number;
-  severity: "OK" | "WARNING" | "CRITICAL" | "UNKNOWN";
-  checkedAt: string | null;
-  alertTitle: string | null;
+type SettingsTab = "message" | "rpa";
+
+type ProxyPaymentForm = {
+  provider: string;
+  paidOn: string;
+  amount: string;
+  currency: ProxyPaymentCurrency;
+  vatIncluded: boolean;
+  periodStart: string;
+  periodEnd: string;
+  note: string;
 };
 
-type SettingsTab = "message" | "rpa";
+function todayInSeoul() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function emptyProxyPaymentForm(): ProxyPaymentForm {
+  return {
+    provider: "Proxy-Seller",
+    paidOn: todayInSeoul(),
+    amount: "",
+    currency: "USD",
+    vatIncluded: true,
+    periodStart: "",
+    periodEnd: "",
+    note: "",
+  };
+}
+
+function formatProxyPaymentAmount(amountMinor: number, currency: ProxyPaymentCurrency) {
+  if (currency === "KRW") return `${amountMinor.toLocaleString("ko-KR")}원`;
+  return `US$${(amountMinor / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 
 function formatWon(value: number | null) {
   if (value === null) return "-";
   return `${Math.round(value).toLocaleString()}원`;
 }
 
-function formatGb(value: number | null) {
-  if (value === null) return "-";
-  return `${value.toFixed(2)}GB`;
-}
-
 function formatPhone(value: string | null) {
   if (!value) return "-";
   if (value.length === 11) return `${value.slice(0, 3)}-${value.slice(3, 7)}-${value.slice(7)}`;
+  return value;
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "-";
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) return `${match[1]}.${match[2]}.${match[3]}`;
   return value;
 }
 
@@ -94,19 +132,28 @@ function senderStatusClass(status: string | null, error: string | null) {
   return "border-slate-200 bg-slate-50 text-slate-600";
 }
 
-function proxyStatusClass(status: ProxyStatus) {
-  if (!status.configured || status.severity === "UNKNOWN") return "border-slate-200 bg-slate-50 text-slate-600";
-  if (status.severity === "CRITICAL") return "border-rose-200 bg-rose-50 text-rose-700";
+function proxyStatusClass(status: IspProxyStatus) {
+  if (status.severity === "NOT_CONFIGURED") return "border-slate-200 bg-slate-50 text-slate-600";
+  if (status.severity === "ERROR") return "border-rose-200 bg-rose-50 text-rose-700";
   if (status.severity === "WARNING") return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
-function proxyStatusLabel(status: ProxyStatus) {
-  if (!status.configured) return "API 토큰 필요";
-  if (status.availableGb === null) return "확인필요";
-  if (status.severity === "CRITICAL") return "매우 부족";
-  if (status.severity === "WARNING") return "부족";
-  return "정상";
+function remainingLabel(days: number | null) {
+  if (days === null) return "-";
+  if (days < 0) return `${Math.abs(days)}일 지남`;
+  if (days === 0) return "오늘 만료";
+  return `${days}일 남음`;
+}
+
+function countryLabel(value: string | null) {
+  if (!value) return "-";
+  return value === "KR" ? "대한민국" : value;
+}
+
+function orderStatusLabel(value: string | null) {
+  if (!value) return "확인 필요";
+  return ["ACTIVE", "ACTIVATED", "ON", "WORKING"].includes(value.toUpperCase()) ? "활성" : value;
 }
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -148,18 +195,25 @@ export default function SettingsView({
   initialSolapiStatus,
   initialMessageTemplates,
   initialProxyStatus,
+  initialProxyPayments,
 }: {
   initialSolapiStatus: SolapiServiceStatus;
   initialMessageTemplates: MessageTemplateState[];
-  initialProxyStatus: ProxyStatus;
+  initialProxyStatus: IspProxyStatus;
+  initialProxyPayments: ProxyPaymentRecord[];
 }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("message");
   const [solapiStatus, setSolapiStatus] = useState<SolapiServiceStatus>(initialSolapiStatus);
-  const [proxyStatus, setProxyStatus] = useState<ProxyStatus>(initialProxyStatus);
+  const [proxyStatus, setProxyStatus] = useState<IspProxyStatus>(initialProxyStatus);
+  const [proxyPayments, setProxyPayments] = useState<ProxyPaymentRecord[]>(initialProxyPayments);
+  const [proxyPaymentForm, setProxyPaymentForm] = useState<ProxyPaymentForm>(emptyProxyPaymentForm);
   const [templates, setTemplates] = useState<MessageTemplateState[]>(initialMessageTemplates);
   const [isLoadingSolapi, setIsLoadingSolapi] = useState(false);
   const [isLoadingProxy, setIsLoadingProxy] = useState(false);
   const [savingRoom, setSavingRoom] = useState<string | null>(null);
+  const [isSavingProxyPayment, setIsSavingProxyPayment] = useState(false);
+  const [deletingProxyPaymentId, setDeletingProxyPaymentId] = useState<string | null>(null);
+  const [proxyPaymentMessage, setProxyPaymentMessage] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   const loadSolapiStatus = useCallback(async () => {
@@ -176,8 +230,9 @@ export default function SettingsView({
   const loadProxyStatus = useCallback(async () => {
     setIsLoadingProxy(true);
     try {
-      const response = await fetch("/api/proxy-traffic/status", { cache: "no-store" });
-      const data = (await response.json()) as ProxyStatus;
+      const response = await fetch("/api/proxy/status?refresh=1", { cache: "no-store" });
+      if (!response.ok) throw new Error("ISP 프록시 상태를 확인하지 못했습니다.");
+      const data = (await response.json()) as IspProxyStatus;
       setProxyStatus(data);
     } finally {
       setIsLoadingProxy(false);
@@ -222,11 +277,80 @@ export default function SettingsView({
     }
   };
 
+  const updateProxyPaymentForm = <K extends keyof ProxyPaymentForm>(key: K, value: ProxyPaymentForm[K]) => {
+    setProxyPaymentForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const saveProxyPayment = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSavingProxyPayment(true);
+    setProxyPaymentMessage(null);
+
+    try {
+      const response = await fetch("/api/settings/proxy-payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(proxyPaymentForm),
+      });
+      const data = await response.json() as {
+        success?: boolean;
+        payment?: ProxyPaymentRecord;
+        error?: string;
+      };
+      if (!response.ok || !data.success || !data.payment) {
+        throw new Error(data.error || "결제 내역을 저장하지 못했습니다.");
+      }
+
+      setProxyPayments((current) => [data.payment!, ...current]);
+      setProxyPaymentForm((current) => ({
+        ...emptyProxyPaymentForm(),
+        provider: current.provider,
+        currency: current.currency,
+        vatIncluded: current.vatIncluded,
+      }));
+      setProxyPaymentMessage("프록시 결제 내역을 저장했습니다.");
+    } catch (error) {
+      setProxyPaymentMessage(error instanceof Error ? error.message : "결제 내역을 저장하지 못했습니다.");
+    } finally {
+      setIsSavingProxyPayment(false);
+    }
+  };
+
+  const deleteProxyPayment = async (payment: ProxyPaymentRecord) => {
+    if (!window.confirm(`${formatDate(payment.paidOn)} 결제 내역을 삭제할까요?`)) return;
+
+    setDeletingProxyPaymentId(payment.id);
+    setProxyPaymentMessage(null);
+    try {
+      const response = await fetch("/api/settings/proxy-payments", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: payment.id }),
+      });
+      const data = await response.json() as { success?: boolean; error?: string };
+      if (!response.ok || !data.success) throw new Error(data.error || "결제 내역을 삭제하지 못했습니다.");
+
+      setProxyPayments((current) => current.filter((item) => item.id !== payment.id));
+      setProxyPaymentMessage("프록시 결제 내역을 삭제했습니다.");
+    } catch (error) {
+      setProxyPaymentMessage(error instanceof Error ? error.message : "결제 내역을 삭제하지 못했습니다.");
+    } finally {
+      setDeletingProxyPaymentId(null);
+    }
+  };
+
   const sender = solapiStatus.sender ?? null;
   const senderStatus = senderStatusLabel(sender?.status ?? null);
   const renewalText = sender?.expireAt
     ? formatDateTime(sender.expireAt)
     : sender?.autoExtension ? "자동연장" : "-";
+  const proxyPaymentTotals = proxyPayments.reduce<Record<ProxyPaymentCurrency, number>>(
+    (totals, payment) => {
+      totals[payment.currency] += payment.amountMinor;
+      return totals;
+    },
+    { USD: 0, KRW: 0 },
+  );
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-5 p-4 pb-24 md:p-8">
@@ -381,9 +505,12 @@ export default function SettingsView({
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-bold text-slate-500">프록시 잔여량</p>
-                  <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
-                    {formatGb(proxyStatus.availableGb)}
+                  <p className="text-sm font-bold text-slate-500">ISP 프록시</p>
+                  <p className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+                    {proxyStatus.summary}
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-slate-400">
+                    {proxyStatus.provider} · {countryLabel(proxyStatus.detectedCountry || proxyStatus.country)}
                   </p>
                 </div>
                 <div className="rounded-full bg-sky-50 p-3 text-sky-600">
@@ -392,7 +519,7 @@ export default function SettingsView({
               </div>
               <div className="mt-5 flex flex-wrap items-center gap-2">
                 <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs font-black", proxyStatusClass(proxyStatus))}>
-                  {proxyStatusLabel(proxyStatus)}
+                  {proxyStatus.severity === "OK" ? "정상" : proxyStatus.summary}
                 </span>
                 <button
                   type="button"
@@ -412,19 +539,232 @@ export default function SettingsView({
                 <h2 className="text-base font-black text-slate-900">RPA 운영 상태</h2>
               </div>
               <div className="mt-4 grid gap-x-8 md:grid-cols-2">
-                <InfoRow label="IPRoyal 설정" value={proxyStatus.configured ? "설정됨" : "API 토큰 필요"} />
+                <InfoRow label="서비스" value={proxyStatus.provider} />
+                <InfoRow label="주문 상태" value={orderStatusLabel(proxyStatus.orderStatus)} />
+                <InfoRow label="실제 연결" value={proxyStatus.connectionOk ? `정상 · ${countryLabel(proxyStatus.detectedCountry)}` : "연결 실패"} />
+                <InfoRow label="고정 IP 일치" value={proxyStatus.ipMatches === null ? "확인 필요" : proxyStatus.ipMatches ? "일치" : "불일치"} />
+                <InfoRow label="등록 IP" value={proxyStatus.expectedIp || "-"} />
+                <InfoRow label="접속 IP" value={proxyStatus.detectedIp || "-"} />
+                <InfoRow label="통신망" value={proxyStatus.detectedOrganization || "-"} />
+                <InfoRow label="관리 API" value={proxyStatus.apiOk ? "정상" : "확인 필요"} />
+                <InfoRow
+                  label="만료일"
+                  value={<span className="font-black text-rose-600">{formatDate(proxyStatus.expiresOn)}</span>}
+                />
+                <InfoRow label="남은 기간" value={remainingLabel(proxyStatus.daysRemaining)} />
+                <InfoRow label="자동연장" value={proxyStatus.autoRenew === null ? "확인 필요" : proxyStatus.autoRenew ? "사용" : "미사용"} />
                 <InfoRow label="최근 확인" value={formatDateTime(proxyStatus.checkedAt)} />
-                <InfoRow label="주의 기준" value={formatGb(proxyStatus.warningGb)} />
-                <InfoRow label="위험 기준" value={formatGb(proxyStatus.criticalGb)} />
-                <InfoRow label="메일 확인 주기" value="30초" />
-                <InfoRow label="프록시 확인 주기" value="10분" />
+                <InfoRow label="메일 확인 주기" value="15초" />
+                <InfoRow label="프록시 확인 주기" value="5분" />
               </div>
-              {proxyStatus.alertTitle && (
+              {proxyStatus.autoRenew === false && proxyStatus.daysRemaining !== null && proxyStatus.daysRemaining >= 0 && (
                 <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
-                  현재 알림: {proxyStatus.alertTitle}
+                  자동연장이 꺼져 있습니다. {formatDate(proxyStatus.expiresOn)} 전에 연장해야 같은 고정 IP를 유지할 수 있습니다.
+                </div>
+              )}
+              {proxyStatus.error && proxyStatus.severity !== "OK" && (
+                <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">
+                  확인 내용: {proxyStatus.error}
                 </div>
               )}
             </div>
+          </section>
+
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CircleDollarSign className="h-5 w-5 text-emerald-600" />
+                  <h2 className="text-base font-black text-slate-900">ISP 프록시 결제 내역</h2>
+                </div>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  카드에서 실제 결제된 최종 금액을 기록합니다. 달러와 원화는 환산하지 않고 따로 합산합니다.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+                {proxyPaymentTotals.USD > 0 && (
+                  <p>
+                    <span className="font-semibold text-slate-500">달러 누계 </span>
+                    <strong className="font-black text-slate-950">
+                      {formatProxyPaymentAmount(proxyPaymentTotals.USD, "USD")}
+                    </strong>
+                  </p>
+                )}
+                {proxyPaymentTotals.KRW > 0 && (
+                  <p>
+                    <span className="font-semibold text-slate-500">원화 누계 </span>
+                    <strong className="font-black text-slate-950">
+                      {formatProxyPaymentAmount(proxyPaymentTotals.KRW, "KRW")}
+                    </strong>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <form onSubmit={(event) => void saveProxyPayment(event)} className="border-b border-slate-200 py-5">
+              <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold leading-6 text-sky-900">
+                입력 방법: 결제일 선택 → 카드에서 빠져나간 최종 금액 입력 → VAT 포함 여부 확인 → 내역 추가.
+                사용기간과 메모는 몰라도 비워둘 수 있습니다.
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                <label className="space-y-1.5">
+                  <span className="text-xs font-black text-slate-600">결제일</span>
+                  <input
+                    type="date"
+                    required
+                    value={proxyPaymentForm.paidOn}
+                    onChange={(event) => updateProxyPaymentForm("paidOn", event.target.value)}
+                    className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-hidden focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-xs font-black text-slate-600">업체</span>
+                  <input
+                    type="text"
+                    required
+                    maxLength={60}
+                    value={proxyPaymentForm.provider}
+                    onChange={(event) => updateProxyPaymentForm("provider", event.target.value)}
+                    className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-hidden focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </label>
+                <label className="space-y-1.5 lg:col-span-2">
+                  <span className="text-xs font-black text-slate-600">최종 결제액</span>
+                  <span className="flex h-11 overflow-hidden rounded-lg border border-slate-200 bg-white focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
+                    <input
+                      type="number"
+                      required
+                      min={proxyPaymentForm.currency === "USD" ? "0.01" : "1"}
+                      step={proxyPaymentForm.currency === "USD" ? "0.01" : "1"}
+                      inputMode="decimal"
+                      placeholder={proxyPaymentForm.currency === "USD" ? "1.75" : "2500"}
+                      value={proxyPaymentForm.amount}
+                      onChange={(event) => updateProxyPaymentForm("amount", event.target.value)}
+                      className="min-w-0 flex-1 px-3 text-sm font-black text-slate-900 outline-hidden"
+                    />
+                    <select
+                      value={proxyPaymentForm.currency}
+                      onChange={(event) => updateProxyPaymentForm("currency", event.target.value as ProxyPaymentCurrency)}
+                      className="border-l border-slate-200 bg-slate-50 px-3 text-sm font-black text-slate-700 outline-hidden"
+                    >
+                      <option value="USD">USD</option>
+                      <option value="KRW">KRW</option>
+                    </select>
+                  </span>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-xs font-black text-slate-600">사용 시작일 (선택)</span>
+                  <input
+                    type="date"
+                    value={proxyPaymentForm.periodStart}
+                    onChange={(event) => updateProxyPaymentForm("periodStart", event.target.value)}
+                    className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-hidden focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-xs font-black text-slate-600">사용 종료일 (선택)</span>
+                  <input
+                    type="date"
+                    value={proxyPaymentForm.periodEnd}
+                    onChange={(event) => updateProxyPaymentForm("periodEnd", event.target.value)}
+                    className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-hidden focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center">
+                <label className="flex h-11 flex-1 items-center gap-2 rounded-lg border border-slate-200 px-3">
+                  <input
+                    type="checkbox"
+                    checked={proxyPaymentForm.vatIncluded}
+                    onChange={(event) => updateProxyPaymentForm("vatIncluded", event.target.checked)}
+                    className="h-4 w-4 accent-emerald-600"
+                  />
+                  <span className="text-sm font-bold text-slate-700">입력 금액에 VAT 포함</span>
+                </label>
+                <input
+                  type="text"
+                  maxLength={200}
+                  placeholder="메모 (선택 · 예: 한국 고정 ISP IP 1개 · 1주)"
+                  value={proxyPaymentForm.note}
+                  onChange={(event) => updateProxyPaymentForm("note", event.target.value)}
+                  className="h-11 min-w-0 flex-[2] rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-hidden focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                />
+                <button
+                  type="submit"
+                  disabled={isSavingProxyPayment}
+                  className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-slate-950 px-5 text-sm font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
+                >
+                  {isSavingProxyPayment ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  내역 추가
+                </button>
+              </div>
+              {proxyPaymentMessage && (
+                <p className="mt-3 text-sm font-bold text-slate-600">{proxyPaymentMessage}</p>
+              )}
+            </form>
+
+            {proxyPayments.length === 0 ? (
+              <p className="py-8 text-center text-sm font-semibold text-slate-400">등록된 결제 내역이 없습니다.</p>
+            ) : (
+              <div className="relative overflow-x-auto pt-2">
+                <table className="w-full min-w-[780px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-xs font-black text-slate-500">
+                      <th className="px-2 py-3">결제일</th>
+                      <th className="px-2 py-3">업체</th>
+                      <th className="px-2 py-3 text-right">최종 결제액</th>
+                      <th className="px-2 py-3 text-center">VAT</th>
+                      <th className="px-2 py-3">사용기간</th>
+                      <th className="px-2 py-3">메모</th>
+                      <th className="w-10 px-2 py-3"><span className="sr-only">삭제</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {proxyPayments.map((payment) => (
+                      <tr key={payment.id} className="border-b border-slate-100 last:border-b-0">
+                        <td className="whitespace-nowrap px-2 py-3 font-bold text-slate-700">{formatDate(payment.paidOn)}</td>
+                        <td className="whitespace-nowrap px-2 py-3 font-black text-slate-900">{payment.provider}</td>
+                        <td className="whitespace-nowrap px-2 py-3 text-right font-black text-slate-950">
+                          {formatProxyPaymentAmount(payment.amountMinor, payment.currency)}
+                        </td>
+                        <td className="px-2 py-3 text-center">
+                          <span className={cn(
+                            "inline-flex rounded-full px-2 py-1 text-[11px] font-black",
+                            payment.vatIncluded ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500",
+                          )}>
+                            {payment.vatIncluded ? "포함" : "별도"}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-3 font-semibold text-slate-600">
+                          {payment.periodStart && payment.periodEnd
+                            ? `${formatDate(payment.periodStart)} ~ ${formatDate(payment.periodEnd)}`
+                            : payment.periodStart
+                              ? `${formatDate(payment.periodStart)}부터`
+                              : "-"}
+                        </td>
+                        <td className="max-w-64 truncate px-2 py-3 font-semibold text-slate-500" title={payment.note || undefined}>
+                          {payment.note || "-"}
+                        </td>
+                        <td className="px-2 py-3 text-right">
+                          <button
+                            type="button"
+                            title="결제 내역 삭제"
+                            onClick={() => void deleteProxyPayment(payment)}
+                            disabled={deletingProxyPaymentId === payment.id}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                          >
+                            {deletingProxyPaymentId === payment.id
+                              ? <RefreshCw className="h-4 w-4 animate-spin" />
+                              : <Trash2 className="h-4 w-4" />}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

@@ -28,8 +28,8 @@ type RpaQueueState = {
   retryTimers: Map<string, ReturnType<typeof setTimeout>>;
   retryJobs: Map<string, RpaEmailJob>;
   supersededConfirmationIds: Set<string>;
-  running: boolean;
-  currentJob?: RpaEmailJob;
+  runningSources: Set<RpaEmailJob["source"]>;
+  currentJobs: Partial<Record<RpaEmailJob["source"], RpaEmailJob>>;
   slotRecheckRunning: boolean;
   lastSlotRecheckAt: number;
   naverStatusReconcileRunning: boolean;
@@ -126,12 +126,13 @@ function removeQueuedConfirmationForCancellation(state: RpaQueueState, cancelJob
 function findCancellationToOwnConfirmation(state: RpaQueueState, confirmationJob: RpaEmailJob) {
   if (isCancellationJob(confirmationJob)) return null;
 
+  const currentJob = state.currentJobs[confirmationJob.source];
   if (
-    state.currentJob
-    && isCancellationJob(state.currentJob)
-    && isSameQueuedReservation(state.currentJob, confirmationJob)
+    currentJob
+    && isCancellationJob(currentJob)
+    && isSameQueuedReservation(currentJob, confirmationJob)
   ) {
-    return state.currentJob;
+    return currentJob;
   }
 
   return state.queue.find((queuedJob) =>
@@ -177,13 +178,17 @@ function getState() {
     retryTimers: new Map<string, ReturnType<typeof setTimeout>>(),
     retryJobs: new Map<string, RpaEmailJob>(),
     supersededConfirmationIds: new Set<string>(),
-    running: false,
+    runningSources: new Set<RpaEmailJob["source"]>(),
+    currentJobs: {},
     slotRecheckRunning: false,
     lastSlotRecheckAt: 0,
     naverStatusReconcileRunning: false,
     lastNaverStatusReconcileAt: 0,
   };
-  return g.__memoroomRpaQueue;
+  const state = g.__memoroomRpaQueue;
+  state.runningSources ??= new Set<RpaEmailJob["source"]>();
+  state.currentJobs ??= {};
+  return state;
 }
 
 function clearRetryTimer(state: RpaQueueState, messageId: string) {
@@ -204,7 +209,7 @@ function scheduleRetry(state: RpaQueueState, job: RpaEmailJob, retryDelay: numbe
 
     const queued = pushJobByPriority(state, job);
     if (queued) state.activeIds.add(job.messageId);
-    void drainRpaEmailQueue();
+    void drainRpaEmailQueue(job.source);
   }, retryDelay);
 
   state.retryTimers.set(job.messageId, timer);
@@ -229,6 +234,7 @@ export function enqueueRpaEmailJob(job: RpaEmailJob) {
 export function enqueueRpaEmailJobs(jobs: RpaEmailJob[]) {
   const state = getState();
   let accepted = 0;
+  const acceptedSources = new Set<RpaEmailJob["source"]>();
 
   for (const job of jobs) {
     if (isRpaEmailJobActive(job.messageId)) continue;
@@ -236,22 +242,25 @@ export function enqueueRpaEmailJobs(jobs: RpaEmailJob[]) {
     const queued = pushJobByPriority(state, job);
     if (queued) state.activeIds.add(job.messageId);
     if (queued || state.supersededConfirmationIds.has(job.messageId)) accepted += 1;
+    if (queued) acceptedSources.add(job.source);
   }
 
-  void drainRpaEmailQueue();
+  for (const source of acceptedSources) void drainRpaEmailQueue(source);
   return accepted;
 }
 
-async function drainRpaEmailQueue() {
+async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
   const state = getState();
-  if (state.running) return;
+  if (state.runningSources.has(source)) return;
 
-  state.running = true;
+  state.runningSources.add(source);
   try {
-    while (state.queue.length > 0) {
-      const job = state.queue.shift();
+    while (true) {
+      const jobIndex = state.queue.findIndex((queuedJob) => queuedJob.source === source);
+      if (jobIndex === -1) break;
+      const [job] = state.queue.splice(jobIndex, 1);
       if (!job) continue;
-      state.currentJob = job;
+      state.currentJobs[source] = job;
 
       try {
         console.log(`[RPAQueue] Start ${job.source} job: ${job.messageId}`);
@@ -304,11 +313,11 @@ async function drainRpaEmailQueue() {
         }
       } finally {
         state.activeIds.delete(job.messageId);
-        state.currentJob = undefined;
+        delete state.currentJobs[source];
       }
     }
   } finally {
-    state.running = false;
+    state.runningSources.delete(source);
   }
 }
 
@@ -373,7 +382,11 @@ export function getRpaQueueStatus() {
       + state.manualCheckIds.size
       + state.retryTimers.size
       + state.supersededConfirmationIds.size,
-    running: state.running,
+    running: state.runningSources.size > 0,
+    runningBySource: {
+      naver: state.runningSources.has("naver"),
+      spacecloud: state.runningSources.has("spacecloud"),
+    },
     slotRecheckRunning: state.slotRecheckRunning,
     naverStatusReconcileRunning: state.naverStatusReconcileRunning,
   };

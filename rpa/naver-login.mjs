@@ -6,7 +6,11 @@ import { ensureParentDir, naverStorageStatePath } from "./lib/paths.mjs";
 
 async function main() {
   const startUrl = optionalEnv("NAVER_PARTNER_HOME_URL", "https://partner.booking.naver.com/");
-  const browser = await launchRpaBrowser({ headless: false });
+  const browser = await launchRpaBrowser({
+    headless: false,
+    useProxy: true,
+    forceProxy: true,
+  });
 
   try {
     const context = await newRpaContext(browser, { blockHeavyResources: false });
@@ -18,6 +22,7 @@ async function main() {
     });
 
     console.log("\nNaver login browser opened.");
+    console.log("Proxy for login: required");
     console.log("1. Log in manually in the opened browser.");
     console.log("2. Move to the SmartPlace/Booking admin page if needed.");
     console.log("3. Come back here and press Enter.");

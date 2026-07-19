@@ -305,7 +305,15 @@ async function main() {
       throw new Error("Naver detail phone number was not visible after retry.");
     }
 
-    console.log(JSON.stringify(result, null, 2));
+    const outputResult = args["redact-pii"] === "true"
+      ? {
+          ...result,
+          customerName: result.customerName ? "[redacted]" : null,
+          phone: result.phone ? "[redacted]" : null,
+          visibleTextSample: "[redacted]",
+        }
+      : result;
+    console.log(JSON.stringify(outputResult, null, 2));
   } finally {
     await browser.close();
   }

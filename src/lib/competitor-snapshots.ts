@@ -123,7 +123,7 @@ export async function getCompetitorSnapshots(year: number, month: number) {
           { dateKey: null, status: "OPEN" },
         ],
       },
-      orderBy: { capturedAt: "desc" },
+      orderBy: [{ status: "asc" }, { capturedAt: "desc" }],
       take: 12,
       select: {
         id: true,
@@ -164,7 +164,9 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       cancellationPending: slot.pendingState === "AVAILABLE",
       bookingNumber: null,
       bookingGroup: null,
-      firstDetectedAt: (slot.lastBookedAt || slot.firstObservedAt).toISOString(),
+      // A baseline that was already closed is a useful occupancy snapshot, but
+      // only AVAILABLE -> BOOKED is a confirmed first-detection event.
+      firstDetectedAt: slot.lastBookedAt?.toISOString() || null,
     };
     bookingGroupKeys.set(
       `${slot.competitorId}|${slot.dateKey}|${slot.hour}`,
@@ -278,7 +280,9 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       ...event,
       eventIds: [...event.eventIds, ...matchingBookings.flatMap((booking) => booking.eventIds)],
     };
-  }).filter((event) => !event.eventIds.every((id) => supersededBookingIds.has(id)));
+  })
+    .filter((event) => !event.eventIds.every((id) => supersededBookingIds.has(id)))
+    .filter((event) => !(event.eventType === "CANCELLED" && event.feeRate === 0));
 
   return {
     days,

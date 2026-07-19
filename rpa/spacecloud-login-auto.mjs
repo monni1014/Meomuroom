@@ -1,13 +1,39 @@
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
+import { rename, rm } from "node:fs/promises";
 import { optionalEnv } from "./lib/env.mjs";
 import { ensureParentDir, spaceCloudStorageStatePath } from "./lib/paths.mjs";
+import { saveSpaceCloudSessionMeta } from "./lib/spacecloud-session.mjs";
 
 const CHECK_INTERVAL_MS = 2000;
 const MAX_WAIT_MS = 10 * 60 * 1000;
 
 function hasLoggedInText(text) {
-  return /호스트|예약|공간|정산|로그아웃|예약관리|호스트센터/.test(text)
-    && !/로그인\s*$|회원가입/.test(text);
+  return /호스트\s*로그아웃|예약\s*관리\s*리스트|예약\s*\/\s*캘린더/.test(text)
+    && !/^\s*로그인\s*$|회원가입/.test(text);
+}
+
+function isAuthenticatedPartnerApiResponse(response) {
+  if (!/^https:\/\/api\.spacecloud\.kr\/partner\//i.test(response.url())) return false;
+  if (response.status() < 200 || response.status() >= 300) return false;
+  if (response.request().method() === "OPTIONS") return false;
+  return Boolean(response.request().headers().authorization);
+}
+
+async function verifyPartnerApiAccess(page) {
+  const authenticatedResponse = page.waitForResponse(
+    isAuthenticatedPartnerApiResponse,
+    { timeout: 60_000 },
+  );
+  await page.goto("https://partner.spacecloud.kr/reservation/", {
+    timeout: 60_000,
+    waitUntil: "domcontentloaded",
+  });
+  await authenticatedResponse;
+
+  const bodyText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+  if (!/예약\s*관리\s*리스트/.test(bodyText)) {
+    throw new Error("SpaceCloud reservation page did not finish loading after API authentication.");
+  }
 }
 
 async function main() {
@@ -33,9 +59,15 @@ async function main() {
       console.log(`Checking SpaceCloud login... url=${currentUrl.slice(0, 100)} text=${bodyText.slice(0, 30).replace(/\s+/g, " ")}`);
 
       if (loggedIn) {
+        console.log("SpaceCloud screen login detected. Verifying partner API access...");
+        await verifyPartnerApiAccess(page);
         ensureParentDir(spaceCloudStorageStatePath);
-        await context.storageState({ path: spaceCloudStorageStatePath });
-        console.log(`\nSaved SpaceCloud login session: ${spaceCloudStorageStatePath}`);
+        const temporaryStatePath = `${spaceCloudStorageStatePath}.${process.pid}.tmp`;
+        await context.storageState({ path: temporaryStatePath, indexedDB: true });
+        await rm(spaceCloudStorageStatePath, { force: true });
+        await rename(temporaryStatePath, spaceCloudStorageStatePath);
+        saveSpaceCloudSessionMeta({ useProxy: true });
+        console.log(`\nVerified SpaceCloud partner API access and saved login session: ${spaceCloudStorageStatePath}`);
         return;
       }
     }

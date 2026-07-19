@@ -32,7 +32,7 @@ function captureTimeKey(date = new Date()) {
 
 function targetCalendarIndex(targetKey) {
   const [year, month, day] = targetKey.split("-").map(Number);
-  const firstDay = new Date(`${year}-${String(month).padStart(2, "0")}-01T00:00:00+09:00`).getDay();
+  const firstDay = new Date(Date.UTC(year, month - 1, 1, 12)).getUTCDay();
   return firstDay + day - 1;
 }
 
@@ -100,7 +100,12 @@ async function main() {
   const dataPath = path.join(outputDir, `${timeKey}.json`);
   await mkdir(outputDir, { recursive: true });
 
-  const browser = await launchRpaBrowser({ headless: true, useProxy: false });
+  const browser = await launchRpaBrowser({
+    headless: true,
+    useProxy: true,
+    forceProxy: true,
+    reuse: false,
+  });
   try {
     const context = await newRpaContext(browser, {
       blockHeavyResources: true,

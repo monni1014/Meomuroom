@@ -1,0 +1,38 @@
+[Unit]
+Description=Memoroom Next.js application and reservation workers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExitType=cgroup
+User=memoroom
+Group=memoroom
+WorkingDirectory=/srv/memoroom/app
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=HOME=/srv/memoroom
+Environment=XDG_CONFIG_HOME=/srv/memoroom/.config
+Environment=XDG_CACHE_HOME=/srv/memoroom/.cache
+Environment=PLAYWRIGHT_BROWSERS_PATH=/srv/memoroom/.cache/ms-playwright
+Environment=DISABLE_BACKGROUND_JOBS=0
+Environment=RPA_EXECUTION_ENABLED=true
+Environment=RPA_HEADLESS=true
+Environment=SPACECLOUD_RPA_USE_XVFB=true
+Environment=SPACECLOUD_RPA_REUSE_BROWSER=false
+ExecStartPre=/usr/bin/rm -f /srv/memoroom/app/rpa/.runtime/browser-host.json /srv/memoroom/app/rpa/.runtime/browser-host-starting.lock
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+KillMode=control-group
+SendSIGKILL=true
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/memoroom/app /srv/memoroom/shared
+
+[Install]
+WantedBy=multi-user.target

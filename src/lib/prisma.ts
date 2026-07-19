@@ -17,9 +17,22 @@ export const prisma =
 if (!globalForPrisma.prismaConfigured) {
   globalForPrisma.prismaConfigured = (async () => {
     // WAL lets readers continue while a background task writes. The busy
-    // timeout prevents overlapping cron/API writes from failing immediately.
-    await prisma.$queryRawUnsafe("PRAGMA journal_mode = WAL");
-    await prisma.$queryRawUnsafe("PRAGMA busy_timeout = 5000");
+    // timeout must be installed before any pragma that may need a write lock.
+    await prisma.$queryRawUnsafe("PRAGMA busy_timeout = 10000");
+
+    const journalRows = await prisma.$queryRawUnsafe("PRAGMA journal_mode") as Array<Record<string, unknown>>;
+    const journalMode = String(Object.values(journalRows[0] || {})[0] || "").toLowerCase();
+    if (journalMode !== "wal") {
+      for (let attempt = 1; attempt <= 5; attempt += 1) {
+        try {
+          await prisma.$queryRawUnsafe("PRAGMA journal_mode = WAL");
+          break;
+        } catch (error) {
+          if (attempt === 5) throw error;
+          await new Promise((resolvePromise) => setTimeout(resolvePromise, attempt * 250));
+        }
+      }
+    }
   })().catch((error) => {
     globalForPrisma.prismaConfigured = undefined;
     throw error;

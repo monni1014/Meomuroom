@@ -7,12 +7,10 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
-import * as proxyChain from "proxy-chain";
 import { parseArgs } from "./lib/cli.mjs";
-import { getUpstreamProxyUrl } from "./lib/env.mjs";
+import { assertRpaExecutionAllowed, getProxyConfig } from "./lib/env.mjs";
 import {
   installRpaResourceBlocking,
   shouldUseRpaProxy,
@@ -40,6 +38,8 @@ const orphanGraceMs = Math.max(
   popupGraceMs,
   Number(process.env.RPA_ORPHAN_PAGE_CLEANUP_GRACE_MS) || 30 * 60_000,
 );
+
+assertRpaExecutionAllowed();
 
 mkdirSync(runtimeDir, { recursive: true });
 mkdirSync(profileDir, { recursive: true });
@@ -120,13 +120,10 @@ async function waitForCdp(endpoint, timeoutMs = 20_000) {
 const cdpPort = await freePort();
 const cdpEndpoint = `http://127.0.0.1:${cdpPort}`;
 const proxyEnabled = await shouldUseRpaProxy({ useProxy: true, forceProxy: false });
-const localProxyUrl = proxyEnabled
-  ? await proxyChain.anonymizeProxy(getUpstreamProxyUrl())
-  : null;
+const proxy = proxyEnabled ? getProxyConfig() : null;
 
 const chromiumArgs = [
   `--remote-debugging-port=${cdpPort}`,
-  `--user-data-dir=${profileDir}`,
   "--no-sandbox",
   "--disable-background-networking",
   "--disable-component-update",
@@ -138,20 +135,26 @@ const chromiumArgs = [
   "--no-first-run",
   "--lang=ko-KR",
   "--window-size=1440,1000",
-  ...(headless ? ["--headless"] : []),
-  ...(localProxyUrl ? [`--proxy-server=${localProxyUrl}`] : []),
-  "about:blank",
 ];
-const chromiumProcess = spawn(chromium.executablePath(), chromiumArgs, {
-  cwd: process.cwd(),
-  stdio: "ignore",
-  windowsHide: headless,
+const context = await chromium.launchPersistentContext(profileDir, {
+  headless,
+  viewport: { width: 1440, height: 1000 },
+  locale: "ko-KR",
+  timezoneId: "Asia/Seoul",
+  serviceWorkers: "block",
+  args: chromiumArgs,
+  ...(proxy ? {
+    proxy: {
+      server: proxy.server,
+      username: proxy.username,
+      password: proxy.password,
+    },
+  } : {}),
 });
 
 await waitForCdp(cdpEndpoint);
-const browser = await chromium.connectOverCDP(cdpEndpoint);
-const context = browser.contexts()[0];
-if (!context) throw new Error("Chromium persistent context was not available.");
+const browser = context.browser();
+if (!browser) throw new Error("Chromium persistent browser was not available.");
 
 await context.setExtraHTTPHeaders({ "Save-Data": "on" });
 await installRpaResourceBlocking(context);
@@ -249,7 +252,6 @@ authTimer.unref();
 writeFileSync(statePath, JSON.stringify({
   cdpEndpoint,
   pid: process.pid,
-  chromiumPid: chromiumProcess.pid,
   headless,
   networkMode: proxyEnabled ? "proxy" : "direct",
   startedAt: new Date().toISOString(),
@@ -262,12 +264,10 @@ async function shutdown() {
   clearInterval(authTimer);
   clearInterval(popupCleanupTimer);
   rmSync(statePath, { force: true });
-  await browser.close().catch(() => {});
-  if (chromiumProcess.exitCode === null) chromiumProcess.kill();
-  if (localProxyUrl) await proxyChain.closeAnonymizedProxy(localProxyUrl, true).catch(() => {});
+  await context.close().catch(() => {});
 }
 
-chromiumProcess.once("exit", () => {
+browser.once("disconnected", () => {
   if (!shuttingDown) process.exit(1);
 });
 process.once("SIGINT", async () => {

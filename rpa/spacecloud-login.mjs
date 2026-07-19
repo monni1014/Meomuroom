@@ -12,6 +12,13 @@ function hasArg(name) {
   return process.argv.includes(name);
 }
 
+function isAuthenticatedPartnerApiResponse(response) {
+  if (!/^https:\/\/api\.spacecloud\.kr\/partner\//i.test(response.url())) return false;
+  if (response.status() < 200 || response.status() >= 300) return false;
+  if (response.request().method() === "OPTIONS") return false;
+  return Boolean(response.request().headers().authorization);
+}
+
 async function main() {
   const startUrl = optionalEnv("SPACECLOUD_HOST_HOME_URL", "https://www.spacecloud.kr/");
   const useProxy = !hasArg("--no-proxy");
@@ -23,7 +30,11 @@ async function main() {
   let browser;
 
   try {
-    browser = await launchRpaBrowser({ headless: false, useProxy });
+    browser = await launchRpaBrowser({
+      headless: false,
+      useProxy,
+      forceProxy: useProxy,
+    });
     const context = await newRpaContext(browser, { blockHeavyResources: false });
     const page = await context.newPage();
 
@@ -45,10 +56,15 @@ async function main() {
 
     // Verify the saved session against the host reservation page, not just the
     // browser screen where the user happened to press Enter.
+    const authenticatedResponse = page.waitForResponse(
+      isAuthenticatedPartnerApiResponse,
+      { timeout: 60_000 },
+    );
     await page.goto("https://partner.spacecloud.kr/reservation/", {
       timeout: 60_000,
       waitUntil: "domcontentloaded",
     });
+    await authenticatedResponse;
     await page.waitForTimeout(3_000);
 
     const screenshot = await saveScreenshot(page, "spacecloud-login-check");
@@ -70,7 +86,7 @@ async function main() {
 
     ensureParentDir(spaceCloudStorageStatePath);
     const temporaryStatePath = `${spaceCloudStorageStatePath}.${process.pid}.tmp`;
-    await context.storageState({ path: temporaryStatePath });
+    await context.storageState({ path: temporaryStatePath, indexedDB: true });
     await rm(spaceCloudStorageStatePath, { force: true });
     await rename(temporaryStatePath, spaceCloudStorageStatePath);
     const sessionMeta = saveSpaceCloudSessionMeta({ useProxy });

@@ -53,15 +53,15 @@ model ImapSyncCursor {
 }
 
 model PendingImapEmail {
-  id            String    @id @default(cuid())
-  mailboxKey    String
-  uidValidity   String
-  uid           Int
-  messageId     String    @unique
-  rawSource     Bytes
-  envelopeDate  DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  mailboxKey   String
+  uidValidity  String
+  uid          Int
+  messageId    String    @unique
+  rawSource    Bytes
+  envelopeDate DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@unique([mailboxKey, uidValidity, uid])
   @@index([mailboxKey, uid])
@@ -112,16 +112,16 @@ model MessageTemplate {
 }
 
 model AdminAlert {
-  id        String   @id @default(cuid())
-  type      String
-  severity  String   @default("WARNING")
-  title     String
-  message   String
-  dedupeKey String?  @unique
-  resolved  Boolean  @default(false)
+  id          String    @id @default(cuid())
+  type        String
+  severity    String    @default("WARNING")
+  title       String
+  message     String
+  dedupeKey   String?   @unique
+  resolved    Boolean   @default(false)
   dismissedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([resolved, createdAt])
   @@index([type, createdAt])
@@ -137,6 +137,23 @@ model ProxyTrafficCheck {
   checkedAt   DateTime @default(now())
 
   @@index([provider, checkedAt])
+}
+
+model ProxyPayment {
+  id          String    @id @default(cuid())
+  provider    String    @default("Proxy-Seller")
+  paidOn      DateTime
+  amountMinor Int
+  currency    String    @default("USD") // USD is stored in cents; KRW is stored in won.
+  vatIncluded Boolean   @default(true)
+  periodStart DateTime?
+  periodEnd   DateTime?
+  note        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([paidOn])
+  @@index([provider, paidOn])
 }
 
 model CompetitorScan {
@@ -194,7 +211,7 @@ model CompetitorSlotObservation {
 }
 
 model CompetitorSlotEvent {
-  id                   String   @id @default(cuid())
+  id                   String    @id @default(cuid())
   scanId               String
   competitorId         String
   dateKey              String
@@ -204,7 +221,7 @@ model CompetitorSlotEvent {
   newState             String
   cancellationFeeRate  Int?
   opportunityLostRooms String?
-  occurredAt           DateTime @default(now())
+  occurredAt           DateTime  @default(now())
   acknowledgedAt       DateTime?
 
   @@index([competitorId, dateKey, occurredAt])

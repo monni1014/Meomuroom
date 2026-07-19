@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Memoroom SpaceCloud manual-block reconciliation every day at 03:00 KST
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Seoul
+Persistent=true
+AccuracySec=1m
+Unit=memoroom-spacecloud-reconcile.service
+
+[Install]
+WantedBy=timers.target

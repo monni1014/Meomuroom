@@ -1,12 +1,16 @@
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
 import { parseArgs } from "./lib/cli.mjs";
 import { humanClickElement } from "./lib/human.mjs";
+import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { readFile } from "node:fs/promises";
 import { saveScreenshot } from "./lib/screenshot.mjs";
 
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
 const TRACKED_START_HOUR = 8;
 const TRACKED_END_HOUR = 24;
+const DATE_SELECTED = "SELECTED";
+const DATE_UNAVAILABLE = "UNAVAILABLE";
+const DATE_NOT_YET_OPEN = "NOT_YET_OPEN";
 
 function previousStateKey(competitorId, targetKey, hour) {
   return `${competitorId}|${targetKey}|${hour}`;
@@ -169,14 +173,20 @@ function monthIndex(year, month) {
 
 function targetCalendarIndex(targetKey) {
   const { year, month, day } = parseDateKey(targetKey);
-  const firstDay = new Date(`${year}-${String(month).padStart(2, "0")}-01T00:00:00+09:00`).getDay();
+  // Calculate the weekday from calendar parts, not from the server's local
+  // timezone. A KST midnight is still the previous UTC date on the server.
+  const firstDay = new Date(Date.UTC(year, month - 1, 1, 12)).getUTCDay();
   return firstDay + day - 1;
 }
 
 function isPolicyClosed(targetKey, hour, checkedAt, leadMinutes) {
   if (targetKey !== dateKey(checkedAt)) return false;
   const start = new Date(`${targetKey}T${String(hour).padStart(2, "0")}:00:00+09:00`);
-  return checkedAt.getTime() >= start.getTime() - leadMinutes * 60_000;
+  // Naver exposes whole-hour choices and rolls the effective current time up
+  // to the next clock boundary. Mirroring that behavior prevents a same-day
+  // automatic cutoff from being recorded as a competitor booking.
+  const roundedCheckedAt = Math.ceil(checkedAt.getTime() / 3_600_000) * 3_600_000;
+  return roundedCheckedAt >= start.getTime() - leadMinutes * 60_000;
 }
 
 async function waitForCalendar(page) {
@@ -234,30 +244,59 @@ async function selectDate(page, targetKey) {
   }
 
   const button = buttons.nth(index);
-  if (await button.isDisabled()) return false;
-
-  // Selecting a date makes Naver scroll down to the time choices. Bring the
-  // next calendar date back into the viewport before using coordinate-based
-  // human clicking; otherwise the click can land at the top edge of the page.
-  await button.scrollIntoViewIfNeeded({ timeout: 10_000 });
-  await page.waitForTimeout(200);
-  await humanClickElement(page, button, `competitor calendar date ${targetKey}`);
-  try {
-    await page.waitForFunction(
-      ({ expectedDay }) => {
-        const selected = document.querySelector(".calendar_date.selected .num")?.textContent?.trim();
-        return selected === String(expectedDay);
-      },
-      { expectedDay: day },
-      { timeout: 20_000 },
-    );
-  } catch (error) {
-    throw new Error(
-      `Calendar date ${targetKey} was clicked but not selected: ${error instanceof Error ? error.message : error}`,
-    );
+  if (await button.isDisabled()) {
+    const { year, month, day } = parseDateKey(targetKey);
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const lastTargetMonthIndex = index - day + daysInMonth;
+    let hasLaterSelectableDate = false;
+    for (let cursor = index + 1; cursor <= Math.min(lastTargetMonthIndex, count - 1); cursor += 1) {
+      if (!await buttons.nth(cursor).isDisabled()) {
+        hasLaterSelectableDate = true;
+        break;
+      }
+    }
+    // A disabled date followed by enabled dates may be fully occupied and is
+    // genuinely uncertain. A disabled tail after the last enabled date is the
+    // platform's not-yet-open booking horizon and must not look like a booking.
+    return hasLaterSelectableDate ? DATE_UNAVAILABLE : DATE_NOT_YET_OPEN;
   }
-  await page.waitForTimeout(250);
-  return true;
+
+  const targetAlreadySelected = await button.evaluate((element) => (
+    element.closest(".calendar_date")?.classList.contains("selected") === true
+  )).catch(() => false);
+
+  if (!targetAlreadySelected) {
+    // Selecting a date makes Naver scroll down to the time choices. Bring the
+    // next calendar date back into the viewport before using coordinate-based
+    // human clicking; otherwise the click can land at the top edge of the page.
+    await button.scrollIntoViewIfNeeded({ timeout: 10_000 });
+    await page.waitForTimeout(200);
+    await humanClickElement(page, button, `competitor calendar date ${targetKey}`);
+    try {
+      await page.waitForFunction(
+        ({ expectedDay, targetIndex }) => {
+          const targetButton = document.querySelectorAll('button[data-click-code="calendar.date"]')[targetIndex];
+          const targetCell = targetButton?.closest(".calendar_date");
+          const selectedDay = targetCell?.querySelector(".num")?.textContent?.trim();
+          return targetCell?.classList.contains("selected") === true
+            && selectedDay === String(expectedDay);
+        },
+        { expectedDay: day, targetIndex: index },
+        { timeout: 20_000 },
+      );
+    } catch (error) {
+      throw new Error(
+        `Calendar date ${targetKey} was clicked but not selected: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+  }
+
+  // The selected marker can appear before the asynchronous time list. Waiting
+  // for at least one item avoids turning a still-loading list into UNKNOWN.
+  await page.locator(".time_item").first().waitFor({ state: "attached", timeout: 10_000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  return DATE_SELECTED;
 }
 
 async function readVisibleSlots(page) {
@@ -281,7 +320,7 @@ async function readVisibleSlots(page) {
   });
 }
 
-function buildObservations(competitor, targetKey, rawSlots, checkedAt) {
+function buildObservations(competitor, targetKey, rawSlots, checkedAt, dateSelection = DATE_SELECTED) {
   const rawByHour = new Map(rawSlots.map((slot) => [slot.hour, slot]));
   const observations = [];
 
@@ -295,6 +334,12 @@ function buildObservations(competitor, targetKey, rawSlots, checkedAt) {
     if (!offered) {
       observedState = "NOT_OFFERED";
       reason = "OUTSIDE_OPERATING_HOURS";
+    } else if (dateSelection === DATE_NOT_YET_OPEN) {
+      observedState = "NOT_YET_OPEN";
+      reason = "BOOKING_WINDOW_NOT_OPEN";
+    } else if (dateSelection === DATE_UNAVAILABLE) {
+      observedState = "UNKNOWN";
+      reason = "DATE_DISABLED_WITHIN_BOOKING_WINDOW";
     } else if (raw && !raw.unavailable) {
       observedState = "AVAILABLE";
     } else if (policyClosed) {
@@ -351,10 +396,16 @@ async function scanCompetitor(context, competitor, targetDates, previousStates, 
     for (let index = 0; index < targetDates.length; index += 1) {
       const targetKey = targetDates[index];
       try {
-        const selectable = await selectDate(page, targetKey);
+        const dateSelection = await selectDate(page, targetKey);
         const checkedAt = new Date();
-        const rawSlots = selectable ? await readVisibleSlots(page) : [];
-        const dateObservations = buildObservations(competitor, targetKey, rawSlots, checkedAt);
+        const rawSlots = dateSelection === DATE_SELECTED ? await readVisibleSlots(page) : [];
+        const dateObservations = buildObservations(
+          competitor,
+          targetKey,
+          rawSlots,
+          checkedAt,
+          dateSelection,
+        );
         observations.push(...dateObservations);
 
         const reason = detectEvidenceReason(competitor.id, targetKey, dateObservations, previousStates);
@@ -416,42 +467,66 @@ async function main() {
   if (competitors.length === 0) throw new Error("No matching competitors were selected");
 
   const targetDates = datesBetween(startKey, endKey);
-  const browser = await launchRpaBrowser({
-    headless: !headed,
-    useProxy: false,
-    reuse: !headed,
-  });
   const observations = [];
   const evidence = [];
   const errors = [];
+  const releaseScanLock = await acquireProcessLock("rpa/.locks/competitor-scan.lock", {
+    label: "Competitor public scan",
+    failIfLocked: true,
+    staleMs: 15 * 60 * 1000,
+  });
 
   try {
-    const context = await newRpaContext(browser, {
-      blockHeavyResources: true,
-      rpaRole: "competitor",
+    const browser = await launchRpaBrowser({
+      headless: !headed,
+      // Public pages still use the dedicated ISP proxy so competitor traffic
+      // never exposes the server's own address. forceProxy forbids a silent
+      // direct-IP fallback when configuration or balance checks change.
+      useProxy: true,
+      forceProxy: true,
+      // Competitor pages are public. Never inherit the persistent context that
+      // contains Naver and SpaceCloud administrator login cookies.
+      reuse: false,
     });
-    for (const competitor of competitors) {
+    try {
+      const context = await newRpaContext(browser, {
+        blockHeavyResources: true,
+        rpaRole: "competitor",
+      });
       try {
-        const scanned = await scanCompetitor(
-          context,
-          competitor,
-          targetDates,
-          previousStates,
-          demoHoldMs,
-        );
-        observations.push(...scanned.observations);
-        evidence.push(...scanned.evidence);
-        errors.push(...scanned.errors);
-      } catch (error) {
-        errors.push({
-          competitorId: competitor.id,
-          dateKey: null,
-          message: error instanceof Error ? error.message : String(error),
-        });
+        const inheritedCookies = await context.cookies();
+        if (inheritedCookies.length > 0) {
+          throw new Error("Competitor browser inherited cookies before public navigation");
+        }
+
+        for (const competitor of competitors) {
+          try {
+            const scanned = await scanCompetitor(
+              context,
+              competitor,
+              targetDates,
+              previousStates,
+              demoHoldMs,
+            );
+            observations.push(...scanned.observations);
+            evidence.push(...scanned.evidence);
+            errors.push(...scanned.errors);
+          } catch (error) {
+            errors.push({
+              competitorId: competitor.id,
+              dateKey: null,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      } finally {
+        await context.close();
       }
+    } finally {
+      await browser.close();
     }
   } finally {
-    await browser.close();
+    await releaseScanLock();
   }
 
   console.log(`${RESULT_PREFIX}${JSON.stringify({ startKey, endKey, observations, evidence, errors })}`);

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Calendar, Home, ClipboardList, BarChart3, Building2, Table2, Radar, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ProxyStatusIndicator } from "@/components/ProxyStatusIndicator";
 
 const NAV_ITEMS = [
   { name: "대시보드", href: "/", icon: Home },
@@ -67,6 +68,7 @@ export function SideNav() {
           );
         })}
       </div>
+      <ProxyStatusIndicator />
     </nav>
   );
 }

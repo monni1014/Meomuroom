@@ -33,3 +33,19 @@ rpa/screenshots/
 # Local agent/runtime metadata
 .agents/
 
+# Local server migration and diagnostic artifacts
+.runtime/
+.db-*
+.latest-db-backup-path.txt
+.remote-upload-blocked
+.ssh-*
+db-migration-status.png
+HANDOVER_FOR_NEW_TASK*.md
+
+# One-off production data corrections (may contain operational/customer data)
+scripts/correct-server-test-reservations.sql
+scripts/cleanup-naver-cancel-timezone-2026-07-19.sql
+scripts/record-proxy-payments-2026-07-19.sql
+scripts/apply-naver-cancel-timezone-cleanup-2026-07-19.sh
+scripts/apply-proxy-payments-2026-07-19.sh
+

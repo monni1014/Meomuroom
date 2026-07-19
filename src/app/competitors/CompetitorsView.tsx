@@ -431,13 +431,22 @@ export default function CompetitorsView({
     };
   }, [currentMonth, currentYear, fetchSnapshots]);
 
-  const moveToMonth = (year: number, month: number) => setCurrentDate(new Date(year, month - 1, 1));
+  const canLeaveCurrentMonth = () => {
+    if (dirtyKeys.size === 0) return true;
+    setEditMessage("저장하지 않은 수동 입력이 있습니다. 저장하거나 되돌린 뒤 월을 이동해 주세요.");
+    return false;
+  };
+  const moveToMonth = (year: number, month: number) => {
+    if (!canLeaveCurrentMonth()) return;
+    setCurrentDate(new Date(year, month - 1, 1));
+  };
   const moveToUnreadEvent = (event: UnreadEventSnapshot) => {
     const [year, month] = event.dateKey.split("-").map(Number);
     moveToMonth(year, month);
     setCompetitorFilter(event.competitorId);
   };
   const moveMonthBy = (amount: number) => {
+    if (!canLeaveCurrentMonth()) return;
     setCurrentDate((previous) => new Date(previous.getFullYear(), previous.getMonth() + amount, 1));
   };
 
@@ -679,7 +688,13 @@ export default function CompetitorsView({
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.error || "경쟁사 일정 확인에 실패했습니다.");
       }
-      await loadMonth(currentYear, currentMonth);
+      const result = await response.json() as { status?: string; error?: string };
+      if (result.status === "FAILED") {
+        throw new Error(result.error || "경쟁사 공개 예약 화면을 읽지 못했습니다.");
+      }
+      // Refresh only automated snapshots. Reloading manual cells here would
+      // silently discard any unsaved operator edits on the table.
+      await fetchSnapshots(currentYear, currentMonth);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "경쟁사 일정 확인에 실패했습니다.");
     } finally {

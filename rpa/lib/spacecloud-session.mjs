@@ -41,11 +41,16 @@ export function shouldUseSpaceCloudProxy() {
 
 export function spaceCloudBrowserOptions(headless) {
   const useProxy = shouldUseSpaceCloudProxy();
+  const reuseSharedBrowser = readBoolean(
+    process.env.SPACECLOUD_RPA_REUSE_BROWSER,
+    false,
+  );
   return {
     headless,
     useProxy,
-    // The shared Chromium currently follows the proxy network. A locally
-    // authenticated SpaceCloud session must use an isolated direct browser.
-    reuse: headless && useProxy,
+    // SpaceCloud write requests can reject a stale persistent browser profile
+    // even while read requests still succeed. Prefer a fresh isolated context;
+    // shared reuse remains an explicit opt-in for controlled diagnostics.
+    reuse: headless && useProxy && reuseSharedBrowser,
   };
 }

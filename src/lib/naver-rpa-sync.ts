@@ -27,6 +27,8 @@ const ROOM_PRODUCT_URL: Record<string, string> = {
 };
 
 const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
+const RPA_TIME_OVERRIDE_MARKER = "[RPA_TIME_OVERRIDE]";
+const SPACECLOUD_SYNC_GROUP_MARKER = "[SPACECLOUD_SYNC_GROUP]";
 
 type NaverDetailResult = {
   bookingStatus?: string | null;
@@ -72,6 +74,15 @@ type SlotActionResult = {
 type SlotSegment = {
   startTime: Date;
   endTime: Date;
+};
+
+type SpaceCloudSyncGroup = {
+  bookingNumber: string;
+  bookingNumbers: string[];
+  room: "1" | "2" | "3";
+  dateValue: string;
+  startClock: string;
+  endClock: string;
 };
 
 type RpaRecheckGlobal = typeof globalThis & {
@@ -120,6 +131,46 @@ function parseCancellationFeeFromDetail(detail: NaverDetailResult) {
 function naverBookingNumberFromEmailId(emailId?: string | null) {
   const match = (emailId || "").match(/^naver:(\d+)$/);
   return match?.[1] || null;
+}
+
+function parseSpaceCloudSyncGroup(memo?: string | null): SpaceCloudSyncGroup | null {
+  const line = (memo || "")
+    .split(/\r?\n/)
+    .find((value) => value.startsWith(SPACECLOUD_SYNC_GROUP_MARKER));
+  if (!line) return null;
+
+  const match = line.match(
+    /^\[SPACECLOUD_SYNC_GROUP\] booking=([0-9+]+);room=([123]);date=(\d{4}-\d{2}-\d{2});start=(\d{2}:\d{2});end=(\d{2}:\d{2})$/,
+  );
+  if (!match) return null;
+
+  const bookingNumbers = match[1].split("+").filter((value) => /^\d{9,12}$/.test(value));
+  if (bookingNumbers.length < 2) return null;
+
+  return {
+    bookingNumber: match[1],
+    bookingNumbers,
+    room: match[2] as "1" | "2" | "3",
+    dateValue: match[3],
+    startClock: match[4],
+    endClock: match[5],
+  };
+}
+
+function dateFromKstClock(dateValue: string, clock: string) {
+  const [hour, minute] = clock.split(":").map(Number);
+  if (hour === 24) {
+    const value = new Date(`${dateValue}T00:00:00+09:00`);
+    value.setDate(value.getDate() + 1);
+    return value;
+  }
+  return new Date(
+    `${dateValue}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+09:00`,
+  );
+}
+
+function formatSpaceCloudSyncGroup(group: SpaceCloudSyncGroup) {
+  return `${SPACECLOUD_SYNC_GROUP_MARKER} booking=${group.bookingNumber};room=${group.room};date=${group.dateValue};start=${group.startClock};end=${group.endClock}`;
 }
 
 function parseHeadCount(value?: string | null) {
@@ -202,6 +253,35 @@ async function runNodeScript(args: string[], timeout = 180_000, envOverrides: Re
   const result = await execFileAsync(process.execPath, args, {
     cwd: process.cwd(),
     env: { ...process.env, ...envOverrides },
+    timeout,
+    maxBuffer: 1024 * 1024 * 5,
+  });
+  return result.stdout;
+}
+
+function shouldUseSpaceCloudXvfb() {
+  const explicit = process.env.SPACECLOUD_RPA_USE_XVFB?.trim().toLowerCase();
+  if (["0", "false", "no", "off"].includes(explicit || "")) return false;
+  if (["1", "true", "yes", "on"].includes(explicit || "")) return true;
+  return process.platform === "linux";
+}
+
+async function runSpaceCloudNodeScript(
+  args: string[],
+  timeout = 360_000,
+  envOverrides: Record<string, string> = {},
+) {
+  if (!shouldUseSpaceCloudXvfb()) {
+    return runNodeScript(args, timeout, envOverrides);
+  }
+
+  const result = await execFileAsync("xvfb-run", ["-a", process.execPath, ...args], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ...envOverrides,
+      RPA_HEADLESS: "false",
+    },
     timeout,
     maxBuffer: 1024 * 1024 * 5,
   });
@@ -351,6 +431,7 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
     })) || null;
 
   if (existing) {
+    const preserveOperationalTime = existing.memo?.includes(RPA_TIME_OVERRIDE_MARKER) === true;
     const updated = await prisma.reservation.update({
       where: { id: existing.id },
       data: {
@@ -359,8 +440,8 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
         roomName: item.roomName,
         customerName: item.customerName,
         phone: item.phone,
-        startTime: item.startTime,
-        endTime: item.endTime,
+        startTime: preserveOperationalTime ? existing.startTime : item.startTime,
+        endTime: preserveOperationalTime ? existing.endTime : item.endTime,
         price: item.price,
         discount: item.discount,
         status: item.status,
@@ -428,6 +509,33 @@ async function findCancellationTarget(item: NormalizedNaverReservation, messageI
   return reservations.find((reservation) => reservation.status !== "CANCELLED") || reservations[0] || null;
 }
 
+async function deleteDetachedCancellationPending(messageId: string, keptReservationId: string) {
+  const pending = await prisma.reservation.findUnique({
+    where: { emailId: messageId },
+    select: { id: true, source: true, status: true, memo: true },
+  });
+
+  if (
+    !pending
+    || pending.id === keptReservationId
+    || pending.source !== "naver"
+    || pending.status !== "CANCELLED"
+    || !pending.memo?.includes(RPA_PENDING_MARKER)
+  ) return;
+
+  await prisma.$transaction([
+    prisma.usageLog.deleteMany({ where: { reservationId: pending.id } }),
+    prisma.reservation.deleteMany({
+      where: {
+        id: pending.id,
+        emailId: messageId,
+        memo: { contains: RPA_PENDING_MARKER },
+      },
+    }),
+  ]);
+  console.log(`[NaverRPA] Removed detached cancellation pending row: ${pending.id}`);
+}
+
 async function cancelNaverReservation(
   item: NormalizedNaverReservation,
   messageId: string,
@@ -447,6 +555,7 @@ async function cancelNaverReservation(
       return { reservation: existing, created: false, changed: false };
     }
 
+    const preserveOperationalTime = existing.memo?.includes(RPA_TIME_OVERRIDE_MARKER) === true;
     const updated = await prisma.reservation.update({
       where: { id: existing.id },
       data: {
@@ -455,8 +564,8 @@ async function cancelNaverReservation(
         roomName: item.roomName,
         customerName: isMaskedOrFallbackName(item.customerName) ? existing.customerName : item.customerName,
         phone: item.phone || existing.phone,
-        startTime: item.startTime,
-        endTime: item.endTime,
+        startTime: preserveOperationalTime ? existing.startTime : item.startTime,
+        endTime: preserveOperationalTime ? existing.endTime : item.endTime,
         price: cancellationPrice,
         status: "CANCELLED",
         paymentMethod: item.paymentMethod,
@@ -469,6 +578,7 @@ async function cancelNaverReservation(
     });
 
     await clearRpaPendingForReservation(updated.id);
+    await deleteDetachedCancellationPending(messageId, updated.id);
     return { reservation: updated, created: false, changed: true };
   }
 
@@ -497,6 +607,7 @@ async function cancelNaverReservation(
     include: { usageLog: true },
   });
 
+  await deleteDetachedCancellationPending(messageId, created.id);
   return { reservation: created, created: true, changed: true };
 }
 
@@ -665,6 +776,8 @@ function isNaverSlotCheckLine(line: string) {
 function isSpaceCloudExternalCheckLine(line: string) {
   return [
     "SpaceCloud external",
+    "SpaceCloud grouped external",
+    "SpaceCloud manual reconciliation",
     "spacecloud-external-reservation",
     "SpaceCloud login required",
     "SpaceCloud product",
@@ -746,7 +859,7 @@ async function setSpaceCloudExternalReservation(
     if (item.customerName) args.push(`--customer-name=${item.customerName}`);
     if (item.phone) args.push(`--phone=${item.phone}`);
 
-    await runNodeScript(args, 360_000, FAST_SPACECLOUD_SLOT_RPA_ENV);
+    await runSpaceCloudNodeScript(args, 360_000, FAST_SPACECLOUD_SLOT_RPA_ENV);
 
     if (reservationId) await clearRpaCheckRequired(reservationId, isSpaceCloudExternalCheckLine);
     return { ok: true, skipped: false, reason: null };
@@ -759,12 +872,220 @@ async function setSpaceCloudExternalReservation(
   }
 }
 
+async function resizeSpaceCloudExternalReservation(
+  currentItem: NormalizedNaverReservation,
+  desiredItem: NormalizedNaverReservation,
+  reservationId?: string,
+) {
+  if (!canSetSlot(currentItem) || !canSetSlot(desiredItem)) {
+    const reason = `Unsupported SpaceCloud grouped reservation resize ${currentItem.dateValue} ${currentItem.startClock}-${currentItem.endClock} -> ${desiredItem.startClock}-${desiredItem.endClock}`;
+    if (reservationId) await markRpaCheckRequired(reservationId, reason);
+    return { ok: false, skipped: true, reason };
+  }
+
+  try {
+    const args = [
+      "rpa/spacecloud-external-reservation.mjs",
+      `--room=${currentItem.room}`,
+      `--date=${currentItem.dateValue}`,
+      `--start=${currentItem.startClock}`,
+      `--end=${currentItem.endClock}`,
+      "--mode=resize",
+      `--new-start=${desiredItem.startClock}`,
+      `--new-end=${desiredItem.endClock}`,
+      `--booking-number=${currentItem.bookingNumber}`,
+      "--apply",
+    ];
+    if (currentItem.customerName) args.push(`--customer-name=${currentItem.customerName}`);
+    if (currentItem.phone) args.push(`--phone=${currentItem.phone}`);
+
+    await runSpaceCloudNodeScript(args, 360_000, FAST_SPACECLOUD_SLOT_RPA_ENV);
+    if (reservationId) await clearRpaCheckRequired(reservationId, isSpaceCloudExternalCheckLine);
+    return { ok: true, skipped: false, reason: null };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (reservationId) {
+      await markRpaCheckRequired(
+        reservationId,
+        `SpaceCloud grouped external reservation resize failed: ${reason}`,
+      );
+    }
+    return { ok: false, skipped: false, reason };
+  }
+}
+
+function groupSlotItem(
+  item: NormalizedNaverReservation,
+  group: SpaceCloudSyncGroup,
+  startClock = group.startClock,
+  endClock = group.endClock,
+): NormalizedNaverReservation {
+  return {
+    ...item,
+    bookingNumber: group.bookingNumber,
+    room: group.room,
+    dateValue: group.dateValue,
+    startClock,
+    endClock,
+    startTime: dateFromKstClock(group.dateValue, startClock),
+    endTime: dateFromKstClock(group.dateValue, endClock),
+  };
+}
+
+function normalizedGroupIdentity(customerName: string | null, phone: string | null) {
+  return [
+    String(customerName || "").normalize("NFKC").trim().toLowerCase(),
+    String(phone || "").replace(/\D/g, ""),
+  ].join("|");
+}
+
+async function replaceSpaceCloudGroupMarker(
+  bookingNumbers: string[],
+  nextGroup: SpaceCloudSyncGroup | null,
+) {
+  const reservations = await prisma.reservation.findMany({
+    where: { emailId: { in: bookingNumbers.map((value) => `naver:${value}`) } },
+    select: { id: true, memo: true },
+  });
+  const nextLine = nextGroup ? formatSpaceCloudSyncGroup(nextGroup) : null;
+  const updates = reservations.flatMap((reservation) => {
+    const lines = (reservation.memo || "")
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .filter((line) => !line.startsWith(SPACECLOUD_SYNC_GROUP_MARKER));
+    if (nextLine) lines.push(nextLine);
+    const memo = lines.length > 0 ? lines.join("\n") : null;
+    if (memo === reservation.memo) return [];
+    return [prisma.reservation.update({ where: { id: reservation.id }, data: { memo } })];
+  });
+  if (updates.length > 0) await prisma.$transaction(updates);
+  return reservations.map((reservation) => reservation.id);
+}
+
+async function runSpaceCloudGroupedReservationAction(
+  item: NormalizedNaverReservation,
+  group: SpaceCloudSyncGroup,
+  reservationId: string,
+): Promise<SlotActionResult> {
+  if (item.room !== group.room || item.dateValue !== group.dateValue) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "SpaceCloud grouped external reservation metadata no longer matches the reservation room/date. The existing block was kept closed.",
+    };
+  }
+
+  const members = await prisma.reservation.findMany({
+    where: { emailId: { in: group.bookingNumbers.map((value) => `naver:${value}`) } },
+    select: {
+      id: true,
+      roomName: true,
+      customerName: true,
+      phone: true,
+      startTime: true,
+      endTime: true,
+      status: true,
+      isNoShow: true,
+    },
+    orderBy: { startTime: "asc" },
+  });
+
+  if (members.length !== group.bookingNumbers.length) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "SpaceCloud grouped external reservation membership is incomplete. The existing block was kept closed.",
+    };
+  }
+
+  const identity = normalizedGroupIdentity(members[0]?.customerName || null, members[0]?.phone || null);
+  const invalidMember = members.some((member) =>
+    parseRoomFromRoomName(member.roomName) !== group.room
+    || toKstDateValue(member.startTime) !== group.dateValue
+    || normalizedGroupIdentity(member.customerName, member.phone) !== identity
+  );
+  if (invalidMember) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "SpaceCloud grouped external reservation identity changed. The existing block was kept closed.",
+    };
+  }
+
+  const activeMembers = members
+    .filter((member) => member.status === "CONFIRMED" && !member.isNoShow)
+    .sort((left, right) => left.startTime.getTime() - right.startTime.getTime());
+  const currentGroupItem = groupSlotItem(item, group);
+
+  if (activeMembers.length === 0) {
+    const deleted = await setSpaceCloudExternalReservation(
+      currentGroupItem,
+      "open",
+      reservationId,
+    );
+    if (!deleted.ok) return deleted;
+
+    const memberIds = await replaceSpaceCloudGroupMarker(group.bookingNumbers, null);
+    for (const memberId of memberIds) {
+      await clearRpaCheckRequired(memberId, isSpaceCloudExternalCheckLine);
+    }
+    return deleted;
+  }
+
+  const desiredStart = activeMembers[0].startTime;
+  let desiredEnd = activeMembers[0].endTime;
+  for (const member of activeMembers.slice(1)) {
+    if (member.startTime.getTime() > desiredEnd.getTime()) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "SpaceCloud grouped external reservation became disconnected. The wider existing block was kept closed for manual review.",
+      };
+    }
+    if (member.endTime.getTime() > desiredEnd.getTime()) desiredEnd = member.endTime;
+  }
+
+  const desiredStartClock = toClock(desiredStart);
+  const desiredEndClock = toSlotEndClock(desiredStart, desiredEnd);
+  if (desiredStartClock === group.startClock && desiredEndClock === group.endClock) {
+    return { ok: true, skipped: true, reason: null };
+  }
+
+  const desiredItem = groupSlotItem(item, group, desiredStartClock, desiredEndClock);
+  const resized = await resizeSpaceCloudExternalReservation(
+    currentGroupItem,
+    desiredItem,
+    reservationId,
+  );
+  if (!resized.ok) return resized;
+
+  const nextGroup = {
+    ...group,
+    startClock: desiredStartClock,
+    endClock: desiredEndClock,
+  };
+  const memberIds = await replaceSpaceCloudGroupMarker(group.bookingNumbers, nextGroup);
+  for (const memberId of memberIds) {
+    await clearRpaCheckRequired(memberId, isSpaceCloudExternalCheckLine);
+  }
+  return resized;
+}
+
 async function runSpaceCloudSlotAction(
   item: NormalizedNaverReservation,
   mode: "close" | "open",
   reservationId: string,
   options: { claimUnlabelledBeforeDelete?: boolean } = {},
 ): Promise<SlotActionResult> {
+  const current = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    select: { memo: true },
+  });
+  const group = parseSpaceCloudSyncGroup(current?.memo);
+  if (group) {
+    return runSpaceCloudGroupedReservationAction(item, group, reservationId);
+  }
+
   if (mode === "close") {
     return setSpaceCloudExternalReservation(item, mode, reservationId);
   }
@@ -920,7 +1241,7 @@ export async function recheckNaverSlotRpaIssues(limit = 1) {
           );
           await clearRpaCheckRequired(result.reservation.id, isObsoleteCloseCheckLine);
           await syncNaverAndSpaceCloudSlots(
-            detailItem,
+            normalizeReservationForSlotRecheck(result.reservation),
             "open",
             result.reservation.id,
             bookingNumber,
@@ -954,7 +1275,7 @@ export async function recheckNaverSlotRpaIssues(limit = 1) {
     }
 
     if (hasSpaceCloudIssue) {
-      await setSpaceCloudExternalReservation(item, mode, reservation.id);
+      await runSpaceCloudSlotAction(item, mode, reservation.id);
     }
 
     checked += 1;
@@ -1030,7 +1351,7 @@ export async function reconcileNaverReservationsWithoutCancelEmail(limit = 1) {
 
       await clearRpaCheckRequired(result.reservation.id, isObsoleteCloseCheckLine);
       await syncNaverAndSpaceCloudSlots(
-        detailItem,
+        normalizeReservationForSlotRecheck(result.reservation),
         "open",
         result.reservation.id,
         bookingNumber,
@@ -1095,7 +1416,7 @@ export async function processNaverEmailWithRpa({
     if (result.changed || needsSlotOpenRetry) {
       await clearRpaCheckRequired(result.reservation.id, isObsoleteCloseCheckLine);
       await syncNaverAndSpaceCloudSlots(
-        normalized,
+        normalizeReservationForSlotRecheck(result.reservation),
         "open",
         result.reservation.id,
         bookingId || normalized.bookingNumber,
@@ -1123,7 +1444,12 @@ export async function processNaverEmailWithRpa({
   const result = await upsertNaverReservation(normalized, messageId, receivedAt);
 
   if (normalized.status === "CONFIRMED") {
-    await syncNaverAndSpaceCloudSlots(normalized, "close", result.reservation.id, bookingId!);
+    await syncNaverAndSpaceCloudSlots(
+      normalizeReservationForSlotRecheck(result.reservation),
+      "close",
+      result.reservation.id,
+      bookingId!,
+    );
   }
 
   return { changed: true, skipped: false, created: result.created, reservationId: result.reservation.id };

@@ -1,5 +1,21 @@
 import "dotenv/config";
 
+const ENABLED_VALUES = new Set(["1", "true", "yes", "on"]);
+
+export function isRpaExecutionAllowed() {
+  return process.platform === "linux" && ENABLED_VALUES.has(
+    String(process.env.RPA_EXECUTION_ENABLED || "").trim().toLowerCase(),
+  );
+}
+
+export function assertRpaExecutionAllowed() {
+  if (isRpaExecutionAllowed()) return;
+
+  throw new Error(
+    "RPA execution is disabled on this host. Memoroom RPA may run only on the authorized Linux server.",
+  );
+}
+
 export function requiredEnv(name) {
   const value = process.env[name];
   if (!value) {
@@ -12,26 +28,51 @@ export function optionalEnv(name, fallback) {
   return process.env[name] || fallback;
 }
 
+function proxyEnv(suffix) {
+  return process.env[`RPA_PROXY_${suffix}`] || process.env[`IPROYAL_PROXY_${suffix}`];
+}
+
+function requiredProxyEnv(suffix) {
+  const value = proxyEnv(suffix);
+  if (!value) {
+    throw new Error(
+      `Missing RPA_PROXY_${suffix} in .env (legacy IPROYAL_PROXY_${suffix} is also supported)`,
+    );
+  }
+  return value;
+}
+
+export function getProxyProvider() {
+  return optionalEnv(
+    "RPA_PROXY_PROVIDER",
+    process.env.RPA_PROXY_HOST ? "custom" : "iproyal",
+  );
+}
+
 export function getProxyConfig() {
-  const host = requiredEnv("IPROYAL_PROXY_HOST");
-  const port = requiredEnv("IPROYAL_PROXY_PORT");
-  const username = requiredEnv("IPROYAL_PROXY_USER");
-  const password = requiredEnv("IPROYAL_PROXY_PASS");
-  const protocol = optionalEnv("IPROYAL_PROXY_PROTOCOL", "http");
+  const host = requiredProxyEnv("HOST");
+  const port = requiredProxyEnv("PORT");
+  const username = requiredProxyEnv("USER");
+  const password = requiredProxyEnv("PASS");
+  const protocol = proxyEnv("PROTOCOL") || "http";
 
   return {
+    provider: getProxyProvider(),
     server: `${protocol}://${host}:${port}`,
+    host,
+    port,
+    protocol,
     username,
     password,
   };
 }
 
 export function getUpstreamProxyUrl() {
-  const host = requiredEnv("IPROYAL_PROXY_HOST");
-  const port = requiredEnv("IPROYAL_PROXY_PORT");
-  const username = encodeURIComponent(requiredEnv("IPROYAL_PROXY_USER"));
-  const password = encodeURIComponent(requiredEnv("IPROYAL_PROXY_PASS"));
-  const protocol = optionalEnv("IPROYAL_PROXY_PROTOCOL", "http");
+  const host = requiredProxyEnv("HOST");
+  const port = requiredProxyEnv("PORT");
+  const username = encodeURIComponent(requiredProxyEnv("USER"));
+  const password = encodeURIComponent(requiredProxyEnv("PASS"));
+  const protocol = proxyEnv("PROTOCOL") || "http";
 
   return `${protocol}://${username}:${password}@${host}:${port}`;
 }

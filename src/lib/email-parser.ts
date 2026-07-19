@@ -1,5 +1,3 @@
-import { parse } from 'date-fns';
-
 export interface ParsedReservation {
   source: string;       // "naver" | "spacecloud"
   roomName: string;     // "머무룸1" | "머무룸2" | "머무룸3"
@@ -12,6 +10,20 @@ export interface ParsedReservation {
   emailId: string;
   isCancelled?: boolean;  // 취소 메일 여부
   refundFee?: number;     // 환불수수료 (취소 시 매출로 반영)
+}
+
+function parseSeoulDateTime(dateValue: string, hour: number, minute = 0) {
+  const normalizedDate = dateValue.replace(/[./]/g, "-");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+    throw new Error(`Invalid reservation date: ${dateValue}`);
+  }
+
+  const seoulMidnight = new Date(`${normalizedDate}T00:00:00+09:00`);
+  if (Number.isNaN(seoulMidnight.getTime())) {
+    throw new Error(`Invalid reservation date: ${dateValue}`);
+  }
+
+  return new Date(seoulMidnight.getTime() + (hour * 60 + minute) * 60_000);
 }
 
 function parseRoomName(source: string) {
@@ -38,10 +50,10 @@ export function parseSpaceCloudEmail(subject: string, text: string, messageId: s
     const startHour = parseInt(timeMatch[2], 10);
     const endHour = parseInt(timeMatch[3], 10);
 
-    const startTime = parse(`${dateStr} ${startHour}:00`, 'yyyy/MM/dd HH:mm', new Date());
-    const endTime = parse(`${dateStr} ${endHour}:00`, 'yyyy/MM/dd HH:mm', new Date());
+    const startTime = parseSeoulDateTime(dateStr, startHour);
+    const endTime = parseSeoulDateTime(dateStr, endHour);
     if (endTime.getTime() <= startTime.getTime()) {
-      endTime.setDate(endTime.getDate() + 1);
+      endTime.setTime(endTime.getTime() + 24 * 60 * 60 * 1000);
     }
 
     // 3. 인원 추출: "예약인원 5명" 또는 "이용인원 10명" 둘 다 지원
@@ -59,9 +71,8 @@ export function parseSpaceCloudEmail(subject: string, text: string, messageId: s
     const price = priceMatch ? parseInt(priceMatch[1].replace(/,/g, ''), 10) : 0;
 
     // 6. 취소 메일 여부 추출
-    //    참고: 스페이스클라우드 취소 메일 하단의 '결제예정금액'은 실제 환불수수료와
-    //    다를 수 있다(정확한 수수료는 '호스트센터'에서 확인해야 함). 그래서 메일값을
-    //    매출로 자동 반영하지 않는다. → 취소 시 매출은 0, 필요하면 수기 입력.
+    //    스페이스클라우드 취소 메일에는 취소수수료가 없으므로 메일 금액을 수수료로
+    //    사용하지 않는다. 정확한 취소수수료는 반드시 호스트센터 RPA에서 확인한다.
     const isCancelled = /예약이\s*취소|취소되었습니다|취소일|취소사유/.test(text) || subject.includes("취소");
     const refundFee = 0;
 
@@ -127,7 +138,7 @@ export function parseNaverEmail(subject: string, text: string, messageId: string
     const timeMatch = text.match(/(?:예약일시|이용일시)\s+(\d{4}\.\d{2}\.\d{2}).*?(오전|오후)\s*(\d+):(\d+)\s*~\s*(오전|오후)\s*(\d+):(\d+)/);
     if (!timeMatch) return null;
 
-    const dateStr = timeMatch[1].replace(/\./g, '/'); // 2026/06/03
+    const dateStr = timeMatch[1];
     
     let startHour = parseInt(timeMatch[3], 10);
     if (timeMatch[2] === "오후" && startHour !== 12) startHour += 12;
@@ -139,14 +150,14 @@ export function parseNaverEmail(subject: string, text: string, messageId: string
     if (timeMatch[5] === "오전" && endHour === 12) endHour = 0;
     const endMin = parseInt(timeMatch[7], 10);
 
-    const startTime = new Date(`${dateStr} ${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00`);
-    const endTime = new Date(`${dateStr} ${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`);
+    const startTime = parseSeoulDateTime(dateStr, startHour, startMin);
+    const endTime = parseSeoulDateTime(dateStr, endHour, endMin);
     // Naver may expose a midnight endpoint as 23:59 in list/email text.
     if (endHour === 23 && endMin === 59) {
       endTime.setMinutes(endTime.getMinutes() + 1);
     }
     if (endTime.getTime() <= startTime.getTime()) {
-      endTime.setDate(endTime.getDate() + 1);
+      endTime.setTime(endTime.getTime() + 24 * 60 * 60 * 1000);
     }
 
     // 4. 예약자명 추출: "예약자명 양*우님"

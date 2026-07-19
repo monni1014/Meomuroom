@@ -2,8 +2,11 @@ import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
-import * as proxyChain from "proxy-chain";
-import { getUpstreamProxyUrl } from "./env.mjs";
+import {
+  assertRpaExecutionAllowed,
+  getProxyConfig,
+  getProxyProvider,
+} from "./env.mjs";
 
 const IPROYAL_ME_URL = "https://resi-api.iproyal.com/v1/me";
 const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
@@ -28,6 +31,11 @@ function readNumberEnv(name, fallback) {
 
 async function hasUsableProxyTraffic() {
   if (!readBooleanEnv("RPA_PROXY_DIRECT_FALLBACK", true)) return true;
+
+  // Proxy-Seller ISP proxies are fixed-IP subscriptions with no traffic
+  // balance. The legacy IPRoyal balance check must never decide whether a
+  // different provider is used, even if an old IPRoyal token remains in .env.
+  if (getProxyProvider().trim().toLowerCase() !== "iproyal") return true;
 
   const apiToken = process.env.IPROYAL_API_TOKEN;
   if (!apiToken) return true;
@@ -205,43 +213,29 @@ export async function launchRpaBrowser({
   forceProxy = false,
   reuse = false,
 } = {}) {
+  assertRpaExecutionAllowed();
+
   if (reuse) {
     console.log(`[RPA browser] Reuse shared Chromium (${headless ? "headless" : "headed"}).`);
     return ensureSharedBrowser({ headless, useProxy, forceProxy });
   }
 
   const proxyEnabled = await shouldUseRpaProxy({ useProxy, forceProxy });
-  let localProxyUrl = null;
+  const proxy = proxyEnabled ? getProxyConfig() : null;
 
-  if (proxyEnabled) {
-    try {
-      localProxyUrl = await proxyChain.anonymizeProxy(getUpstreamProxyUrl());
-    } catch (error) {
-      if (forceProxy || !readBooleanEnv("RPA_PROXY_DIRECT_FALLBACK", true)) throw error;
-      console.warn(
-        `[RPA network] Proxy initialization failed. Use current IP: ${error instanceof Error ? error.message : error}`,
-      );
-    }
-  }
-
-  console.log(`[RPA network] Browser connection: ${localProxyUrl ? "IPRoyal proxy" : "current IP"}`);
-  const browser = await chromium.launch({
+  console.log(
+    `[RPA network] Browser connection: ${proxy ? `${getProxyProvider()} proxy` : "current IP"}`,
+  );
+  return chromium.launch({
     headless,
-    ...(localProxyUrl ? { proxy: { server: localProxyUrl } } : {}),
+    ...(proxy ? {
+      proxy: {
+        server: proxy.server,
+        username: proxy.username,
+        password: proxy.password,
+      },
+    } : {}),
   });
-
-  const closeBrowser = browser.close.bind(browser);
-  browser.close = async (...args) => {
-    try {
-      await closeBrowser(...args);
-    } finally {
-      if (localProxyUrl) {
-        await proxyChain.closeAnonymizedProxy(localProxyUrl, true);
-      }
-    }
-  };
-
-  return browser;
 }
 
 export async function newRpaContext(browser, options = {}) {

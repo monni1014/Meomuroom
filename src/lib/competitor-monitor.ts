@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createAdminAlert, resolveAdminAlertsByType } from "@/lib/admin-alerts";
@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
 const ALERT_TYPE = "COMPETITOR_MONITOR";
 const STALE_SCAN_MINUTES = 15;
+const SCAN_LOCK_PATH = resolve("rpa/.locks/competitor-monitor.lock");
 
 export type CompetitorScanMode =
   | "today"
@@ -24,7 +25,7 @@ type ScannerObservation = {
   competitorId: string;
   dateKey: string;
   hour: number;
-  observedState: "AVAILABLE" | "BOOKED" | "POLICY_CLOSED" | "UNKNOWN" | "NOT_OFFERED";
+  observedState: "AVAILABLE" | "BOOKED" | "POLICY_CLOSED" | "UNKNOWN" | "NOT_OFFERED" | "NOT_YET_OPEN";
   reason: string | null;
   checkedAt: string;
 };
@@ -94,6 +95,11 @@ function endOfMonthKey(dateKey: string) {
   return `${year}-${String(month).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`;
 }
 
+function calendarWeekday(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay();
+}
+
 function resolveRange(options: RunOptions) {
   const today = kstDateKey();
   if (options.mode === "range") {
@@ -106,9 +112,61 @@ function resolveRange(options: RunOptions) {
   if (options.mode === "daily") return { startKey: today, endKey: addDays(today, 7) };
   if (options.mode === "monthly") return { startKey: today, endKey: endOfMonthKey(today) };
 
-  const todayDate = new Date(`${today}T00:00:00+09:00`);
-  const daysUntilSunday = (7 - todayDate.getDay()) % 7;
+  const daysUntilSunday = (7 - calendarWeekday(today)) % 7;
   return { startKey: today, endKey: addDays(today, daysUntilSunday) };
+}
+
+function processIsRunning(pid: number | null) {
+  if (!pid || !Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
+    return null;
+  }
+}
+
+async function acquireMonitorLock() {
+  await mkdir(dirname(SCAN_LOCK_PATH), { recursive: true });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await open(SCAN_LOCK_PATH, "wx");
+      await handle.writeFile(
+        `Competitor monitor\npid=${process.pid}\nstartedAt=${new Date().toISOString()}\n`,
+        "utf8",
+      );
+      await handle.close();
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        await rm(SCAN_LOCK_PATH, { force: true }).catch(() => undefined);
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+
+      const [content, info] = await Promise.all([
+        readFile(SCAN_LOCK_PATH, "utf8").catch(() => ""),
+        stat(SCAN_LOCK_PATH).catch(() => null),
+      ]);
+      if (!info) continue;
+      const pid = Number(/(?:^|\n)pid=(\d+)(?:\n|$)/.exec(content)?.[1] || 0) || null;
+      const running = processIsRunning(pid);
+      const staleWithoutOwner = running === null
+        && Date.now() - info.mtimeMs >= STALE_SCAN_MINUTES * 60_000;
+      if (running === false || staleWithoutOwner) {
+        await rm(SCAN_LOCK_PATH, { force: true });
+        continue;
+      }
+      return null;
+    }
+  }
+
+  return null;
 }
 
 function cancellationFeeRate(competitorId: string, useDateKey: string, checkedAt: Date) {
@@ -388,10 +446,12 @@ function resolveState(current: ExistingSlot | undefined, observation: ScannerObs
       pendingCount = current.pendingCount;
       pendingSince = current.pendingSince;
     }
-  } else if (observation.observedState === "UNKNOWN") {
+  } else if (["UNKNOWN", "NOT_YET_OPEN"].includes(observation.observedState)) {
     if (current && ["AVAILABLE", "BOOKED", "POLICY_CLOSED"].includes(current.state)) {
       state = current.state;
-      reason = "TRANSIENT_UNKNOWN_PRESERVED_PREVIOUS_STATE";
+      reason = observation.observedState === "NOT_YET_OPEN"
+        ? "BOOKING_WINDOW_NOT_OPEN_PRESERVED_PREVIOUS_STATE"
+        : "TRANSIENT_UNKNOWN_PRESERVED_PREVIOUS_STATE";
       pendingState = current.pendingState;
       pendingCount = current.pendingCount;
       pendingSince = current.pendingSince;
@@ -486,6 +546,21 @@ async function reconcileMissingOpportunityLoss(startKey: string, endKey: string)
   const judgementGroups: OpportunitySlot[][] = [];
   for (const group of groups) {
     const first = group[0];
+    // A slot that was already closed in the first baseline has no preceding
+    // AVAILABLE observation. Keep the observed booking on the grid, but do not
+    // infer that the customer chose the competitor over Memoroom.
+    if (group.every((slot) => slot.lastBookedAt === null)) {
+      const result = await prisma.competitorSlot.updateMany({
+        where: {
+          id: { in: group.map((slot) => slot.id) },
+          opportunityLostRooms: null,
+        },
+        data: { opportunityLostRooms: "NONE" },
+      });
+      repairedSlots += result.count;
+      continue;
+    }
+
     const isSingleHourTriground = first.competitorId.startsWith("triground-") && group.length < 2;
     if (isSingleHourTriground) {
       const result = await prisma.competitorSlot.updateMany({
@@ -569,6 +644,21 @@ async function reconcileMissingOpportunityLoss(startKey: string, endKey: string)
   return repairedSlots;
 }
 
+async function withDatabaseWriteRetry<T>(label: string, operation: () => Promise<T>) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const retryable = /SQLITE_BUSY|database is locked|timed?\s*out|transaction.*closed/i.test(message);
+      if (!retryable || attempt === 3) throw error;
+      console.warn(`[Competitor] ${label} was busy; retry ${attempt}/3.`);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, attempt * 300));
+    }
+  }
+  throw new Error(`${label} failed without an error`);
+}
+
 async function persistScannerResult(scanId: string, result: ScannerResult) {
   const existingRows = await prisma.competitorSlot.findMany({
     where: {
@@ -578,121 +668,134 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
   const currentMap = new Map(
     existingRows.map((slot) => [`${slot.competitorId}|${slot.dateKey}|${slot.hour}`, slot]),
   );
-  const rangeStart = new Date(`${result.startKey}T00:00:00+09:00`);
-  const rangeEnd = new Date(`${addDays(result.endKey, 1)}T00:00:00+09:00`);
-  const memoroomReservations = await prisma.reservation.findMany({
-    where: {
-      status: "CONFIRMED",
-      roomName: { in: [...MEMOROOM_ROOMS] },
-      startTime: { lt: rangeEnd },
-      endTime: { gt: rangeStart },
-    },
-    select: { roomName: true, startTime: true, endTime: true },
-  });
+  const observationGroups = new Map<string, ScannerObservation[]>();
+  for (const observation of result.observations) {
+    const groupKey = `${observation.competitorId}|${observation.dateKey}`;
+    const group = observationGroups.get(groupKey) || [];
+    group.push(observation);
+    observationGroups.set(groupKey, group);
+  }
 
   let changedSlots = 0;
   let bookingEvents = 0;
   let cancellationEvents = 0;
 
-  for (const observation of result.observations) {
-    const key = `${observation.competitorId}|${observation.dateKey}|${observation.hour}`;
-    const current = currentMap.get(key);
-    const resolved = resolveState(current, observation);
-    const changed = Boolean(current && current.state !== resolved.state);
-    if (changed) changedSlots += 1;
-    let opportunityLostRooms = current?.opportunityLostRooms || null;
-    if (resolved.eventType === "CANCELLED") opportunityLostRooms = null;
-    const slotStart = new Date(`${observation.dateKey}T${String(observation.hour).padStart(2, "0")}:00:00+09:00`);
-    const shouldEvaluateOpportunity = resolved.state === "BOOKED"
-      && opportunityLostRooms === null
-      && slotStart > resolved.checkedAt;
-    if (shouldEvaluateOpportunity) {
-      const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
-      const occupiedRooms = new Set(
-        memoroomReservations
-          .filter((reservation) => reservation.startTime < slotEnd && reservation.endTime > slotStart)
-          .map((reservation) => reservation.roomName),
-      );
-      const availableRooms = MEMOROOM_ROOMS.filter((roomName) => !occupiedRooms.has(roomName));
-      opportunityLostRooms = availableRooms.length > 0 ? availableRooms.join(",") : "NONE";
-    }
-
-    const slot = await prisma.competitorSlot.upsert({
-      where: {
-        competitorId_dateKey_hour: {
-          competitorId: observation.competitorId,
-          dateKey: observation.dateKey,
-          hour: observation.hour,
-        },
-      },
-      create: {
-        competitorId: observation.competitorId,
-        dateKey: observation.dateKey,
-        hour: observation.hour,
-        state: resolved.state,
-        observedState: observation.observedState,
-        firstObservedAt: resolved.checkedAt,
-        lastCheckedAt: resolved.checkedAt,
-        lastChangedAt: resolved.checkedAt,
-        lastBookedAt: resolved.eventType === "BOOKED" ? resolved.checkedAt : null,
-        lastReleasedAt: resolved.eventType === "CANCELLED" ? resolved.checkedAt : null,
-        lastScanId: scanId,
-        pendingState: resolved.pendingState,
-        pendingCount: resolved.pendingCount,
-        pendingSince: resolved.pendingSince,
-        opportunityLostRooms,
-      },
-      update: {
-        state: resolved.state,
-        observedState: observation.observedState,
-        lastCheckedAt: resolved.checkedAt,
-        lastChangedAt: changed ? resolved.checkedAt : current?.lastChangedAt,
-        lastBookedAt: resolved.eventType === "BOOKED" ? resolved.checkedAt : current?.lastBookedAt,
-        lastReleasedAt: resolved.eventType === "CANCELLED" ? resolved.checkedAt : current?.lastReleasedAt,
-        lastScanId: scanId,
-        pendingState: resolved.pendingState,
-        pendingCount: resolved.pendingCount,
-        pendingSince: resolved.pendingSince,
-        opportunityLostRooms,
-      },
-    });
-
-    await prisma.competitorSlotObservation.create({
-      data: {
-        scanId,
-        competitorId: observation.competitorId,
-        dateKey: observation.dateKey,
-        hour: observation.hour,
-        observedState: observation.observedState,
-        effectiveState: resolved.state,
-        reason: resolved.reason,
-        checkedAt: resolved.checkedAt,
-      },
-    });
-
-    if (resolved.eventType) {
+  for (const [groupKey, observations] of observationGroups) {
+    const plans = observations.map((observation) => {
+      const key = `${observation.competitorId}|${observation.dateKey}|${observation.hour}`;
+      const current = currentMap.get(key);
+      const resolved = resolveState(current, observation);
+      const changed = Boolean(current && current.state !== resolved.state);
+      let opportunityLostRooms = current?.opportunityLostRooms || null;
+      if (resolved.eventType === "CANCELLED" || resolved.eventType === "BOOKED") {
+        opportunityLostRooms = null;
+      } else if (resolved.state === "BOOKED" && !current?.lastBookedAt) {
+        // First-baseline closed slots are observable, but are not proof of a
+        // newly won competitor booking or an opportunity lost by Memoroom.
+        opportunityLostRooms = "NONE";
+      }
       const feeRate = resolved.eventType === "CANCELLED"
         ? cancellationFeeRate(observation.competitorId, observation.dateKey, resolved.eventObservedAt)
         : null;
-      await prisma.competitorSlotEvent.create({
-        data: {
-          scanId,
-          competitorId: observation.competitorId,
-          dateKey: observation.dateKey,
-          hour: observation.hour,
-          eventType: resolved.eventType,
-          previousState: current?.state || null,
-          newState: resolved.state,
-          cancellationFeeRate: feeRate,
-          opportunityLostRooms: resolved.eventType === "BOOKED" ? opportunityLostRooms : null,
-          occurredAt: resolved.eventObservedAt,
-        },
-      });
-      if (resolved.eventType === "BOOKED") bookingEvents += 1;
-      if (resolved.eventType === "CANCELLED") cancellationEvents += 1;
-    }
+      return {
+        key,
+        observation,
+        current,
+        resolved,
+        changed,
+        opportunityLostRooms,
+        feeRate,
+      };
+    });
 
-    currentMap.set(key, slot);
+    const committedSlots = await withDatabaseWriteRetry(`persist ${groupKey}`, () => (
+      prisma.$transaction(async (tx) => {
+        const slots = [];
+        for (const plan of plans) {
+          const { observation, current, resolved, changed, opportunityLostRooms } = plan;
+          const slot = await tx.competitorSlot.upsert({
+            where: {
+              competitorId_dateKey_hour: {
+                competitorId: observation.competitorId,
+                dateKey: observation.dateKey,
+                hour: observation.hour,
+              },
+            },
+            create: {
+              competitorId: observation.competitorId,
+              dateKey: observation.dateKey,
+              hour: observation.hour,
+              state: resolved.state,
+              observedState: observation.observedState,
+              firstObservedAt: resolved.checkedAt,
+              lastCheckedAt: resolved.checkedAt,
+              lastChangedAt: resolved.checkedAt,
+              lastBookedAt: resolved.eventType === "BOOKED" ? resolved.checkedAt : null,
+              lastReleasedAt: resolved.eventType === "CANCELLED" ? resolved.checkedAt : null,
+              lastScanId: scanId,
+              pendingState: resolved.pendingState,
+              pendingCount: resolved.pendingCount,
+              pendingSince: resolved.pendingSince,
+              opportunityLostRooms,
+            },
+            update: {
+              state: resolved.state,
+              observedState: observation.observedState,
+              lastCheckedAt: resolved.checkedAt,
+              lastChangedAt: changed ? resolved.checkedAt : current?.lastChangedAt,
+              lastBookedAt: resolved.eventType === "BOOKED" ? resolved.checkedAt : current?.lastBookedAt,
+              lastReleasedAt: resolved.eventType === "CANCELLED" ? resolved.checkedAt : current?.lastReleasedAt,
+              lastScanId: scanId,
+              pendingState: resolved.pendingState,
+              pendingCount: resolved.pendingCount,
+              pendingSince: resolved.pendingSince,
+              opportunityLostRooms,
+            },
+          });
+          slots.push(slot);
+        }
+
+        await tx.competitorSlotObservation.createMany({
+          data: plans.map(({ observation, resolved }) => ({
+            scanId,
+            competitorId: observation.competitorId,
+            dateKey: observation.dateKey,
+            hour: observation.hour,
+            observedState: observation.observedState,
+            effectiveState: resolved.state,
+            reason: resolved.reason,
+            checkedAt: resolved.checkedAt,
+          })),
+        });
+
+        const eventPlans = plans.filter(({ resolved }) => resolved.eventType !== null);
+        if (eventPlans.length > 0) {
+          await tx.competitorSlotEvent.createMany({
+            data: eventPlans.map(({ observation, current, resolved, feeRate }) => ({
+              scanId,
+              competitorId: observation.competitorId,
+              dateKey: observation.dateKey,
+              hour: observation.hour,
+              eventType: resolved.eventType!,
+              previousState: current?.state || null,
+              newState: resolved.state,
+              cancellationFeeRate: feeRate,
+              opportunityLostRooms: null,
+              occurredAt: resolved.eventObservedAt,
+            })),
+          });
+        }
+
+        return slots;
+      }, { maxWait: 10_000, timeout: 30_000 })
+    ));
+
+    plans.forEach((plan, index) => {
+      currentMap.set(plan.key, committedSlots[index]);
+      if (plan.changed) changedSlots += 1;
+      if (plan.resolved.eventType === "BOOKED") bookingEvents += 1;
+      if (plan.resolved.eventType === "CANCELLED") cancellationEvents += 1;
+    });
   }
 
   await reconcileMissingOpportunityLoss(result.startKey, result.endKey);
@@ -722,6 +825,8 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
       where: {
         status: "COMPLETED",
         startedAt: { gte: new Date(Date.now() - options.skipIfRecentMinutes * 60_000) },
+        targetStartKey: { lte: range.startKey },
+        targetEndKey: { gte: range.endKey },
       },
       orderBy: { startedAt: "desc" },
     });
@@ -741,14 +846,17 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
     const changes = await persistScannerResult(scan.id, scannerResult);
     await persistScannerEvidence(scan.id, scannerResult);
     await resolveRecoveredEvidence(scannerResult);
+    const uncertainSlots = scannerResult.observations.filter(
+      (observation) => observation.observedState === "UNKNOWN",
+    ).length;
     const status = scannerResult.observations.length === 0
       ? "FAILED"
-      : scannerResult.errors.length > 0
+      : scannerResult.errors.length > 0 || uncertainSlots > 0
         ? "PARTIAL"
         : "COMPLETED";
-    const error = scannerResult.errors.length > 0
-      ? scannerResult.errors.map((item) => `${item.competitorId}: ${item.message}`).join(" / ").slice(0, 2000)
-      : null;
+    const issueMessages = scannerResult.errors.map((item) => `${item.competitorId}: ${item.message}`);
+    if (uncertainSlots > 0) issueMessages.push(`${uncertainSlots} slot(s) need screenshot review`);
+    const error = issueMessages.length > 0 ? issueMessages.join(" / ").slice(0, 2000) : null;
 
     await prisma.competitorScan.update({
       where: { id: scan.id },
@@ -806,7 +914,25 @@ export function runCompetitorScan(options: RunOptions): Promise<CompetitorScanRe
   const globalState = globalThis as MonitorGlobal;
   if (globalState.__competitorScanPromise) return globalState.__competitorScanPromise;
 
-  globalState.__competitorScanPromise = runScan(options).finally(() => {
+  globalState.__competitorScanPromise = (async () => {
+    const releaseLock = await acquireMonitorLock();
+    if (!releaseLock) {
+      const activeScan = await prisma.competitorScan.findFirst({
+        where: { status: "RUNNING" },
+        orderBy: { startedAt: "desc" },
+      });
+      return {
+        skipped: true,
+        scanId: activeScan?.id,
+        status: activeScan?.status || "RUNNING",
+      };
+    }
+    try {
+      return await runScan(options);
+    } finally {
+      await releaseLock();
+    }
+  })().finally(() => {
     delete globalState.__competitorScanPromise;
   });
   return globalState.__competitorScanPromise;
