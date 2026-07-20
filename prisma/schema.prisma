@@ -34,6 +34,7 @@ model Reservation {
   isCleanUpBad        Boolean   @default(false) // 정리 상태 불량 여부 (블랙리스트 기능)
 
   usageLog UsageLog?
+  messages CustomerMessage[]
 }
 
 model ProcessedEmail {
@@ -132,6 +133,47 @@ model AdminAlert {
 
   @@index([resolved, createdAt])
   @@index([type, createdAt])
+}
+
+model SmsBridgeDevice {
+  id               String            @id @default(cuid())
+  name             String
+  phoneNumber      String            @unique
+  tokenHash        String            @unique
+  externalDeviceId String?           @unique
+  platform         String            @default("ANDROID")
+  enabled          Boolean           @default(true)
+  lastSeenAt       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  messages         CustomerMessage[]
+
+  @@index([enabled, lastSeenAt])
+}
+
+model CustomerMessage {
+  id                String           @id @default(cuid())
+  direction         String // INBOUND | OUTBOUND
+  channel           String           @default("SMS")
+  status            String // RECEIVED | SENT | FAILED | DRY_RUN
+  senderNumber      String
+  recipientNumber   String
+  customerPhone     String
+  body              String
+  providerMessageId String?
+  dedupeKey         String           @unique
+  reservationId     String?
+  reservation       Reservation?     @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  bridgeDeviceId    String?
+  bridgeDevice      SmsBridgeDevice? @relation(fields: [bridgeDeviceId], references: [id], onDelete: SetNull)
+  occurredAt        DateTime
+  readAt            DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([customerPhone, occurredAt])
+  @@index([reservationId, occurredAt])
+  @@index([direction, readAt, occurredAt])
 }
 
 model ProxyTrafficCheck {

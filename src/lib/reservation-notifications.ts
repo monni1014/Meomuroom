@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
 import { sendReservationReminder } from "@/lib/kakao";
+import { recordOutboundReservationMessage } from "@/lib/customer-messages";
 
 const ALERT_TYPE = "NOTIFICATION_DELIVERY";
 
@@ -59,6 +60,18 @@ export async function sendDueReservationReminders() {
       startTime: reservation.startTime,
       endTime: reservation.endTime,
     });
+
+    if (result.to && result.text) {
+      await recordOutboundReservationMessage({
+        reservationId: reservation.id,
+        senderNumber: result.from,
+        recipientNumber: result.to,
+        body: result.text,
+        channel: result.channel,
+        status: result.success ? (result.dryRun ? "DRY_RUN" : "SENT") : "FAILED",
+        providerMessageId: result.messageId,
+      });
+    }
 
     results.push({
       reservationId: reservation.id,

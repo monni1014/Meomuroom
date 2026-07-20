@@ -26,7 +26,8 @@
     "rpa:spacecloud-read-detail": "node rpa/spacecloud-read-reservation-detail.mjs",
     "rpa:spacecloud-external": "node rpa/spacecloud-external-reservation.mjs",
     "rpa:spacecloud-reconcile": "node scripts/reconcile-spacecloud-manual-blocks.mjs",
-    "rpa:competitors": "node rpa/competitor-scan.mjs"
+    "rpa:competitors": "node rpa/competitor-scan.mjs",
+    "sms:provision-device": "node scripts/provision-sms-bridge-device.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",

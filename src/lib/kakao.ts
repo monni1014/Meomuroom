@@ -4,11 +4,13 @@ import { getSelectedSolapiSenderNumber } from "@/lib/solapi-sender-setting";
 
 type NotificationChannel = "SMS" | "KAKAO_ALIMTALK";
 
-type SendResult = {
+export type SendResult = {
   success: boolean;
   dryRun: boolean;
   channel: NotificationChannel;
   to: string;
+  from: string;
+  text: string;
   messageId?: string | null;
   error?: string;
 };
@@ -104,27 +106,29 @@ export async function buildReservationReminder(input: ReservationReminderInput) 
 
 export async function sendReservationReminder(input: ReservationReminderInput): Promise<SendResult> {
   const to = normalizePhone(input.phone);
+  const reminder = await buildReservationReminder(input);
+  const channel: NotificationChannel = shouldUseAlimtalk() ? "KAKAO_ALIMTALK" : "SMS";
   if (!to) {
     return {
       success: false,
       dryRun: false,
-      channel: shouldUseAlimtalk() ? "KAKAO_ALIMTALK" : "SMS",
+      channel,
       to: "",
+      from: "",
+      text: reminder.text,
       error: "Recipient phone number is missing.",
     };
   }
 
-  const reminder = await buildReservationReminder(input);
-  const channel: NotificationChannel = shouldUseAlimtalk() ? "KAKAO_ALIMTALK" : "SMS";
   const dryRun = !isRealSendEnabled();
-
-  if (dryRun) {
-    console.log(`[Solapi dry-run] ${channel} to=${to} room=${input.roomName}\n${reminder.text}`);
-    return { success: true, dryRun: true, channel, to };
-  }
 
   try {
     const from = await getSenderPhone();
+    if (dryRun) {
+      console.log(`[Solapi dry-run] ${channel} from=${from} to=${to} room=${input.roomName}\n${reminder.text}`);
+      return { success: true, dryRun: true, channel, to, from, text: reminder.text };
+    }
+
     const messageService = getSolapiService();
     const message =
       channel === "KAKAO_ALIMTALK"
@@ -158,13 +162,15 @@ export async function sendReservationReminder(input: ReservationReminderInput): 
 
     const response = await messageService.send(message);
     const messageId = response?.groupInfo?.groupId || null;
-    return { success: true, dryRun: false, channel, to, messageId };
+    return { success: true, dryRun: false, channel, to, from, text: reminder.text, messageId };
   } catch (error) {
     return {
       success: false,
       dryRun: false,
       channel,
       to,
+      from: "",
+      text: reminder.text,
       error: getSolapiErrorMessage(error),
     };
   }

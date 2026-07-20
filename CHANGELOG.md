@@ -14,6 +14,9 @@ All notable changes to Memoroom are documented in this file. Versions follow
 - systemd service and reconciliation timer templates for production operations.
 - Encrypted, verified Google Drive backups for the production SQLite database.
 - Login-session validation and SpaceCloud diagnostic tooling.
+- Customer SMS inbox that joins Solapi outbound records with Android phone replies.
+- Privacy-filtered Android SMS bridge with reservation-phone matching, deduplication,
+  unread indicators, and per-device connection status.
 
 ### Fixed
 

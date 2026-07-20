@@ -68,6 +68,27 @@ async function getDashboardVersion() {
   return [reservationVersion, alerts._count._all, dateStamp(alerts._max.updatedAt)].join(":");
 }
 
+async function getMessageVersion() {
+  const [messages, devices] = await Promise.all([
+    prisma.customerMessage.aggregate({
+      _count: { _all: true },
+      _max: { updatedAt: true },
+    }),
+    prisma.smsBridgeDevice.aggregate({
+      _count: { _all: true },
+      _max: { updatedAt: true, lastSeenAt: true },
+    }),
+  ]);
+
+  return [
+    messages._count._all,
+    dateStamp(messages._max.updatedAt),
+    devices._count._all,
+    dateStamp(devices._max.updatedAt),
+    dateStamp(devices._max.lastSeenAt),
+  ].join(":");
+}
+
 async function getCompetitorVersion(year?: number, month?: number) {
   const [scans, slots, events, evidence, manualCells] = await Promise.all([
     prisma.competitorScan.aggregate({
@@ -128,6 +149,9 @@ export async function GET(request: NextRequest) {
         break;
       case "reservations":
         version = await getReservationVersion();
+        break;
+      case "messages":
+        version = await getMessageVersion();
         break;
       default:
         return NextResponse.json({ error: "Unsupported data-version scope" }, { status: 400 });
