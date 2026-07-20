@@ -5,6 +5,10 @@ export function normalizeKoreanPhone(value: string | null | undefined) {
   return digits;
 }
 
+export function isValidKoreanMobilePhone(value: string | null | undefined) {
+  return /^01[016789]\d{7,8}$/.test(normalizeKoreanPhone(value));
+}
+
 export function formatKoreanPhone(value: string | null | undefined) {
   const digits = normalizeKoreanPhone(value);
   if (digits.length === 11) {

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
-import { sendReservationReminder } from "@/lib/kakao";
+import { sendReservationReminder } from "@/lib/solapi-sms";
 import { recordOutboundReservationMessage } from "@/lib/customer-messages";
 
 const ALERT_TYPE = "NOTIFICATION_DELIVERY";

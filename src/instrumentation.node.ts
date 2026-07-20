@@ -17,6 +17,7 @@ export async function registerNodeInstrumentation() {
   const { enqueueNaverStatusReconcile } = await import("@/lib/rpa-job-queue");
   const { checkProxySellerStatusAndAlert } = await import("@/lib/proxy-seller");
   const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
+  const { runReservationContactPreflight } = await import("@/lib/reservation-contact-preflight");
   const { runCompetitorScan } = await import("@/lib/competitor-monitor");
   const { runRpaUiHealthChecks } = await import("@/lib/rpa-ui-monitor");
 
@@ -24,6 +25,7 @@ export async function registerNodeInstrumentation() {
   let proxyStatusRunning = false;
   let naverStatusReconcileRunning = false;
   let notificationRunning = false;
+  let contactPreflightRunning = false;
   let competitorScanRunning = false;
   let rpaUiHealthRunning = false;
 
@@ -101,6 +103,23 @@ export async function registerNodeInstrumentation() {
     }
   }
 
+  async function runContactPreflight(label: string) {
+    if (contactPreflightRunning) return;
+    contactPreflightRunning = true;
+    try {
+      const result = await runReservationContactPreflight();
+      if (result.missingCount > 0) {
+        console.warn(
+          `[Cron] Reservation contact preflight (${label}): checked ${result.checkedCount}, missing ${result.missingCount}, critical ${result.criticalCount}`,
+        );
+      }
+    } catch (error) {
+      console.error(`[Cron] Reservation contact preflight failed (${label}):`, error);
+    } finally {
+      contactPreflightRunning = false;
+    }
+  }
+
   async function runCompetitorMonitor(
     label: string,
     mode: "today" | "today-next" | "next-week" | "daily" | "weekly" | "monthly",
@@ -157,6 +176,10 @@ export async function registerNodeInstrumentation() {
   }, 15_000);
 
   setTimeout(() => {
+    void runContactPreflight("startup");
+  }, 20_000);
+
+  setTimeout(() => {
     void runCompetitorMonitor("startup", "today-next", 120);
   }, 60_000);
 
@@ -170,6 +193,10 @@ export async function registerNodeInstrumentation() {
 
   schedule("* * * * *", async () => {
     await runReservationNotifications("cron");
+  });
+
+  schedule("*/5 * * * *", async () => {
+    await runContactPreflight("cron");
   });
 
   schedule("0 10,22 * * *", async () => {
@@ -216,6 +243,7 @@ export async function registerNodeInstrumentation() {
 
   console.log("[Cron] Email auto sync started (15 second interval)");
   console.log("[Cron] Reservation notification monitor started (1 minute interval)");
+  console.log("[Cron] Reservation contact preflight started (5 minute interval)");
   console.log("[Cron] ISP proxy status monitor started (5 minute interval)");
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
   console.log("[Cron] RPA UI health monitor started (02:20/08:20/14:20/20:20 read-only checks)");

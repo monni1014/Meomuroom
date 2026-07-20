@@ -1,8 +1,9 @@
 import { SolapiMessageService } from "solapi";
 import { getMessageTemplateForRoom } from "@/lib/message-templates";
 import { getSelectedSolapiSenderNumber } from "@/lib/solapi-sender-setting";
+import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 
-type NotificationChannel = "SMS" | "KAKAO_ALIMTALK";
+type NotificationChannel = "SMS";
 
 export type SendResult = {
   success: boolean;
@@ -25,10 +26,6 @@ type ReservationReminderInput = {
 
 function env(name: string) {
   return process.env[name]?.trim() || "";
-}
-
-function normalizePhone(phone: string | null | undefined) {
-  return (phone || "").replace(/\D/g, "");
 }
 
 function formatKstDate(date: Date) {
@@ -63,10 +60,6 @@ async function getSenderPhone() {
   const sender = await getSelectedSolapiSenderNumber();
   if (!sender) throw new Error("문자 발신번호가 설정되지 않았습니다.");
   return sender;
-}
-
-function shouldUseAlimtalk() {
-  return env("SOLAPI_MESSAGE_CHANNEL").toUpperCase() === "KAKAO_ALIMTALK";
 }
 
 function isRealSendEnabled() {
@@ -105,10 +98,10 @@ export async function buildReservationReminder(input: ReservationReminderInput) 
 }
 
 export async function sendReservationReminder(input: ReservationReminderInput): Promise<SendResult> {
-  const to = normalizePhone(input.phone);
+  const to = normalizeKoreanPhone(input.phone);
   const reminder = await buildReservationReminder(input);
-  const channel: NotificationChannel = shouldUseAlimtalk() ? "KAKAO_ALIMTALK" : "SMS";
-  if (!to) {
+  const channel: NotificationChannel = "SMS";
+  if (!isValidKoreanMobilePhone(to)) {
     return {
       success: false,
       dryRun: false,
@@ -116,7 +109,9 @@ export async function sendReservationReminder(input: ReservationReminderInput): 
       to: "",
       from: "",
       text: reminder.text,
-      error: "Recipient phone number is missing.",
+      error: to
+        ? "Recipient mobile phone number is invalid."
+        : "Recipient phone number is missing.",
     };
   }
 
@@ -130,37 +125,11 @@ export async function sendReservationReminder(input: ReservationReminderInput): 
     }
 
     const messageService = getSolapiService();
-    const message =
-      channel === "KAKAO_ALIMTALK"
-        ? {
-            to,
-            from,
-            kakaoOptions: {
-              pfId: env("SOLAPI_KAKAO_PFID"),
-              templateId: env("SOLAPI_KAKAO_RESERVATION_TEMPLATE_ID"),
-              variables: {
-                "#{고객명}": reminder.customerName,
-                "#{예약일}": reminder.reservationDate,
-                "#{예약시간}": reminder.reservationTime,
-                "#{공간명}": reminder.roomName,
-                "#{안내사항}": reminder.guide,
-              },
-            },
-          }
-        : {
-            to,
-            from,
-            text: reminder.text,
-          };
-
-    if (channel === "KAKAO_ALIMTALK") {
-      const kakaoOptions = message.kakaoOptions;
-      if (!kakaoOptions?.pfId || !kakaoOptions?.templateId) {
-        throw new Error("SOLAPI_KAKAO_PFID and SOLAPI_KAKAO_RESERVATION_TEMPLATE_ID are required for Kakao Alimtalk.");
-      }
-    }
-
-    const response = await messageService.send(message);
+    const response = await messageService.send({
+      to,
+      from,
+      text: reminder.text,
+    });
     const messageId = response?.groupInfo?.groupId || null;
     return { success: true, dryRun: false, channel, to, from, text: reminder.text, messageId };
   } catch (error) {
@@ -189,16 +158,4 @@ export async function sendTestSms(
     startTime,
     endTime: options.endTime || new Date(startTime.getTime() + 2 * 60 * 60 * 1000),
   });
-}
-
-export async function sendKakaoAlimtalk(name: string, startTime: string, phone: string): Promise<boolean> {
-  const start = new Date(startTime);
-  const result = await sendReservationReminder({
-    customerName: name,
-    phone,
-    roomName: "머무룸1",
-    startTime: start,
-    endTime: new Date(start.getTime() + 2 * 60 * 60 * 1000),
-  });
-  return result.success;
 }

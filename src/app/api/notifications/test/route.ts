@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sendTestSms } from "@/lib/kakao";
+import { sendTestSms } from "@/lib/solapi-sms";
 
 export const dynamic = "force-dynamic";
 
