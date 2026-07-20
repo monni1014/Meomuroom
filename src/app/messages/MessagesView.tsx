@@ -44,7 +44,7 @@ const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   PENDING: { label: "발송 예정", className: "bg-sky-50 text-sky-700 ring-sky-200" },
 };
 
-const ATTENTION_STATUSES = new Set(["FAILED", "MISSING_PHONE", "OVERDUE", "DRY_RUN"]);
+const ATTENTION_STATUSES = new Set(["FAILED", "MISSING_PHONE", "OVERDUE"]);
 const PROCESSING_STATUSES = new Set(["SUBMITTED", "CARRIER_ACCEPTED"]);
 const SCHEDULED_STATUSES = new Set(["SCHEDULED", "PENDING"]);
 
@@ -73,19 +73,24 @@ function statusStyle(status: string) {
   return STATUS_STYLE[status] || { label: status, className: "bg-slate-100 text-slate-600 ring-slate-200" };
 }
 
+function needsAttention(entry: DeliveryEntry) {
+  if (ATTENTION_STATUSES.has(entry.status)) return true;
+  return entry.status === "DRY_RUN" && new Date(entry.endTime).getTime() >= Date.now();
+}
+
 function matchesFilter(entry: DeliveryEntry, filter: Filter) {
   if (filter === "ALL") return entry.status !== "CANCELLED";
-  if (filter === "ATTENTION") return ATTENTION_STATUSES.has(entry.status);
+  if (filter === "ATTENTION") return needsAttention(entry);
   if (filter === "PROCESSING") return PROCESSING_STATUSES.has(entry.status);
   if (filter === "SCHEDULED") return SCHEDULED_STATUSES.has(entry.status);
   return entry.status === "DELIVERED";
 }
 
-function sortWeight(status: string) {
-  if (ATTENTION_STATUSES.has(status)) return 0;
-  if (PROCESSING_STATUSES.has(status)) return 1;
-  if (SCHEDULED_STATUSES.has(status)) return 2;
-  if (status === "DELIVERED") return 3;
+function sortWeight(entry: DeliveryEntry) {
+  if (needsAttention(entry)) return 0;
+  if (PROCESSING_STATUSES.has(entry.status)) return 1;
+  if (SCHEDULED_STATUSES.has(entry.status)) return 2;
+  if (entry.status === "DELIVERED") return 3;
   return 4;
 }
 
@@ -100,7 +105,7 @@ export default function MessagesView({ initialEntries }: { initialEntries: Deliv
     today: initialEntries.filter((entry) =>
       entry.reservationStatus === "CONFIRMED" && kstDateKey(entry.scheduledAt) === todayKey,
     ).length,
-    attention: initialEntries.filter((entry) => ATTENTION_STATUSES.has(entry.status)).length,
+    attention: initialEntries.filter(needsAttention).length,
     processing: initialEntries.filter((entry) => PROCESSING_STATUSES.has(entry.status)).length,
     delivered: initialEntries.filter((entry) => entry.status === "DELIVERED").length,
   }), [initialEntries, todayKey]);
@@ -108,7 +113,7 @@ export default function MessagesView({ initialEntries }: { initialEntries: Deliv
   const filteredEntries = useMemo(() => initialEntries
     .filter((entry) => matchesFilter(entry, filter))
     .sort((left, right) => {
-      const weight = sortWeight(left.status) - sortWeight(right.status);
+      const weight = sortWeight(left) - sortWeight(right);
       if (weight !== 0) return weight;
       if (left.status === "DELIVERED" && right.status === "DELIVERED") {
         return new Date(right.sentAt || right.startTime).getTime() - new Date(left.sentAt || left.startTime).getTime();

@@ -12,7 +12,7 @@ export default async function MessagesPage() {
         {
           status: "CONFIRMED",
           startTime: {
-            gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+            gte: now,
             lte: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000),
           },
         },
