@@ -17,6 +17,7 @@ export type SendResult = {
 };
 
 type ReservationReminderInput = {
+  reservationId?: string;
   customerName: string | null;
   phone: string | null;
   roomName: string;
@@ -129,8 +130,11 @@ export async function sendReservationReminder(input: ReservationReminderInput): 
       to,
       from,
       text: reminder.text,
-    });
-    const messageId = response?.groupInfo?.groupId || null;
+      ...(input.reservationId
+        ? { customFields: { reservationId: input.reservationId } }
+        : {}),
+    }, { showMessageList: true });
+    const messageId = response?.messageList?.[0]?.messageId || response?.groupInfo?.groupId || null;
     return { success: true, dryRun: false, channel, to, from, text: reminder.text, messageId };
   } catch (error) {
     return {

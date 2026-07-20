@@ -1,0 +1,146 @@
+import { prisma } from "@/lib/prisma";
+import { after } from "next/server";
+import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
+import { sendPushNotification } from "@/lib/push-notifications";
+
+type SolapiReport = {
+  messageId?: string;
+  groupId?: string;
+  type?: string;
+  to?: string;
+  from?: string;
+  statusCode?: string;
+  statusMessage?: string;
+  dateProcessed?: string;
+  dateReported?: string;
+  customFields?: Record<string, unknown>;
+};
+
+type DeliveryStatus = "SUBMITTED" | "CARRIER_ACCEPTED" | "DELIVERED" | "FAILED";
+
+function notificationAlertKey(reservationId: string) {
+  return `notification-delivery:${reservationId}`;
+}
+
+function mapDeliveryStatus(statusCode: string): DeliveryStatus {
+  if (statusCode === "2000") return "SUBMITTED";
+  if (statusCode === "3000") return "CARRIER_ACCEPTED";
+  if (statusCode === "4000") return "DELIVERED";
+  return "FAILED";
+}
+
+function formatKstReservation(startTime: Date, endTime: Date) {
+  const date = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+  }).format(startTime);
+  const time = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `${date} ${time.format(startTime)}-${time.format(endTime)}`;
+}
+
+async function findMessage(report: SolapiReport, reservationId: string | null) {
+  const clauses: Array<Record<string, string>> = [];
+  if (report.messageId) clauses.push({ providerMessageId: report.messageId });
+  if (report.groupId) clauses.push({ providerMessageId: report.groupId });
+  if (reservationId) clauses.push({ reservationId });
+  if (clauses.length === 0) return null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const message = await prisma.customerMessage.findFirst({
+      where: { direction: "OUTBOUND", OR: clauses },
+      orderBy: { occurredAt: "desc" },
+      include: { reservation: true },
+    });
+    if (message || attempt === 2) return message;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return null;
+}
+
+export async function processSolapiReport(report: SolapiReport) {
+  const statusCode = String(report.statusCode || "").trim();
+  if (!statusCode) return { processed: false, reason: "missing-status-code" };
+
+  const reservationId = typeof report.customFields?.reservationId === "string"
+    ? report.customFields.reservationId
+    : null;
+  const message = await findMessage(report, reservationId);
+  if (!message) return { processed: false, reason: "message-not-found" };
+
+  const status = mapDeliveryStatus(statusCode);
+  const statusChanged = message.status !== status;
+  const errorMessage = status === "FAILED"
+    ? `${report.statusMessage || "문자 수신 실패"} (${statusCode})`
+    : null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.customerMessage.update({
+      where: { id: message.id },
+      data: {
+        status,
+        ...(report.messageId ? { providerMessageId: report.messageId } : {}),
+      },
+    });
+
+    if (message.reservationId) {
+      await tx.reservation.update({
+        where: { id: message.reservationId },
+        data: {
+          notified: true,
+          notificationStatus: status,
+          notificationChannel: report.type || message.channel,
+          notificationError: errorMessage,
+        },
+      });
+    }
+  });
+
+  const reservation = message.reservation;
+  if (!reservation || !statusChanged) {
+    return { processed: true, status, reservationId: message.reservationId };
+  }
+
+  const summary = `${reservation.roomName} · ${reservation.customerName || "이름 없음"} · ${formatKstReservation(reservation.startTime, reservation.endTime)}`;
+  if (status === "DELIVERED") {
+    after(async () => {
+      await Promise.all([
+        resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id)),
+        sendPushNotification({
+          title: "문자 수신 완료",
+          body: summary,
+          url: "/messages",
+          tag: `sms-delivered-${reservation.id}`,
+        }),
+      ]);
+    });
+  } else if (status === "FAILED") {
+    after(async () => {
+      await Promise.all([
+        createAdminAlert({
+          type: "NOTIFICATION_DELIVERY",
+          severity: "CRITICAL",
+          title: "예약 안내 문자 발송 실패",
+          message: `${summary} · ${errorMessage}`,
+          dedupeKey: notificationAlertKey(reservation.id),
+        }),
+        sendPushNotification({
+          title: "문자 발송 실패",
+          body: `${summary} · ${report.statusMessage || statusCode}`,
+          url: "/messages",
+          tag: `sms-failed-${reservation.id}`,
+        }),
+      ]);
+    });
+  }
+
+  return { processed: true, status, reservationId: reservation.id };
+}
+
+export type { SolapiReport };

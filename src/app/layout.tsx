@@ -2,6 +2,17 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { SideNav } from "@/components/SideNav";
 import { AppBackButton } from "@/components/AppBackButton";
+import type { Metadata, Viewport } from "next";
+
+export const metadata: Metadata = {
+  title: "머무룸 DX",
+  description: "머무룸 예약 및 운영 관리",
+  applicationName: "머무룸 DX",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#4f46e5",
+};
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

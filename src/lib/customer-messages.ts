@@ -47,7 +47,7 @@ type OutboundMessageInput = {
   recipientNumber: string;
   body: string;
   channel: string;
-  status: "SENT" | "FAILED" | "DRY_RUN";
+  status: "SUBMITTED" | "CARRIER_ACCEPTED" | "DELIVERED" | "FAILED" | "DRY_RUN";
   providerMessageId?: string | null;
   occurredAt?: Date;
 };

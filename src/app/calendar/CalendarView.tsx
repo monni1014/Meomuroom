@@ -11,7 +11,6 @@ import TimeSelect from "@/components/TimeSelect";
 import MultiDatePicker from "@/components/MultiDatePicker";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
 import { createKstDate, getKstDateParts } from "@/lib/kst-time";
-import MessageStatusBadge from "@/components/MessageStatusBadge";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 
 interface UsageLog {
@@ -677,22 +676,10 @@ export default function CalendarPage() {
                   }}
                   title="더블클릭하면 이용현황에서 수정"
                   className={cn(
-                    "relative p-4 pr-10 rounded-xl border flex justify-between items-start gap-2 cursor-pointer select-none",
+                    "relative p-4 rounded-xl border flex justify-between items-start gap-2 cursor-pointer select-none",
                     isCancelled ? "bg-slate-100 border-slate-200" : "bg-slate-50 border-slate-100 hover:border-indigo-200"
                   )}
                 >
-                  <div className="absolute right-2 top-2">
-                    <MessageStatusBadge
-                      notified={res.notified}
-                      notifiedAt={res.notifiedAt}
-                      notificationStatus={res.notificationStatus}
-                      notificationChannel={res.notificationChannel}
-                      notificationError={res.notificationError}
-                      startTime={res.startTime}
-                      status={res.status}
-                      phone={res.phone}
-                    />
-                  </div>
                   <div className="space-y-2 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {isCancelled && (

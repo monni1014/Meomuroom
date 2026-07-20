@@ -27,7 +27,9 @@
     "rpa:spacecloud-external": "node rpa/spacecloud-external-reservation.mjs",
     "rpa:spacecloud-reconcile": "node scripts/reconcile-spacecloud-manual-blocks.mjs",
     "rpa:competitors": "node rpa/competitor-scan.mjs",
-    "sms:provision-device": "node scripts/provision-sms-bridge-device.mjs"
+    "sms:provision-device": "node scripts/provision-sms-bridge-device.mjs",
+    "sms:configure-notifications": "node scripts/configure-notification-secrets.mjs",
+    "sms:register-webhook": "node scripts/register-solapi-webhook.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",
@@ -46,7 +48,8 @@
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
     "solapi": "^6.0.1",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -56,6 +59,7 @@
     "@types/node-cron": "^3.0.11",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",

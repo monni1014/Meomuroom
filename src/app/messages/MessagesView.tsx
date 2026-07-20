@@ -3,311 +3,216 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
+  CalendarClock,
   CheckCheck,
+  Clock3,
   MessageSquareText,
-  Search,
-  ShieldCheck,
-  Smartphone,
+  Radio,
 } from "lucide-react";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 import { formatKoreanPhone } from "@/lib/phone-number";
+import PushNotificationSetup from "@/components/PushNotificationSetup";
 
-type ReservationSummary = {
-  id: string;
+type DeliveryEntry = {
+  reservationId: string;
   customerName: string | null;
   roomName: string;
+  phone: string;
   startTime: string;
   endTime: string;
+  scheduledAt: string;
+  reservationStatus: string;
   status: string;
+  error: string | null;
+  sentAt: string | null;
+  providerMessageId: string | null;
 };
 
-type MessageRecord = {
-  id: string;
-  direction: string;
-  channel: string;
-  status: string;
-  senderNumber: string;
-  recipientNumber: string;
-  customerPhone: string;
-  body: string;
-  occurredAt: string;
-  readAt: string | null;
-  bridgeDeviceName: string | null;
-  reservation: ReservationSummary | null;
+type Filter = "ALL" | "ATTENTION" | "PROCESSING" | "SCHEDULED" | "DELIVERED";
+
+const STATUS_STYLE: Record<string, { label: string; className: string }> = {
+  SCHEDULED: { label: "발송 예정", className: "bg-sky-50 text-sky-700 ring-sky-200" },
+  SUBMITTED: { label: "솔라피 접수", className: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
+  CARRIER_ACCEPTED: { label: "통신사 처리 중", className: "bg-violet-50 text-violet-700 ring-violet-200" },
+  DELIVERED: { label: "수신 완료", className: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  FAILED: { label: "발송 실패", className: "bg-rose-50 text-rose-700 ring-rose-200" },
+  MISSING_PHONE: { label: "전화번호 누락", className: "bg-rose-50 text-rose-700 ring-rose-200" },
+  OVERDUE: { label: "발송시간 지남", className: "bg-amber-50 text-amber-800 ring-amber-200" },
+  DRY_RUN: { label: "테스트 · 미발송", className: "bg-amber-50 text-amber-800 ring-amber-200" },
+  CANCELLED: { label: "예약 취소", className: "bg-slate-100 text-slate-600 ring-slate-200" },
+  PENDING: { label: "발송 예정", className: "bg-sky-50 text-sky-700 ring-sky-200" },
 };
 
-type BridgeDevice = {
-  id: string;
-  name: string;
-  phoneNumber: string;
-  enabled: boolean;
-  connected: boolean;
-  lastSeenAt: string | null;
-};
+const ATTENTION_STATUSES = new Set(["FAILED", "MISSING_PHONE", "OVERDUE", "DRY_RUN"]);
+const PROCESSING_STATUSES = new Set(["SUBMITTED", "CARRIER_ACCEPTED"]);
+const SCHEDULED_STATUSES = new Set(["SCHEDULED", "PENDING"]);
 
-type Conversation = {
-  phone: string;
-  name: string;
-  messages: MessageRecord[];
-  latest: MessageRecord;
-  unreadCount: number;
-  reservation: ReservationSummary | null;
-};
-
-function formatKstDateTime(value: string) {
+function formatKst(value: string, includeDate = true) {
   return new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
-function formatReservation(value: ReservationSummary) {
-  const start = new Date(value.startTime);
-  const end = new Date(value.endTime);
-  const date = new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    month: "numeric",
-    day: "numeric",
-  }).format(start);
-  const time = new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
+    ...(includeDate ? { month: "numeric", day: "numeric", weekday: "short" } : {}),
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  });
-  return `${date} ${time.format(start)}-${time.format(end)} · ${value.roomName}`;
+  }).format(new Date(value));
 }
 
-function deviceState(device: BridgeDevice) {
-  if (!device.enabled) return { label: "사용 중지", className: "bg-slate-100 text-slate-500" };
-  if (!device.connected) return { label: "연결 전", className: "bg-amber-50 text-amber-700" };
-  if (!device.lastSeenAt) return { label: "등록됨", className: "bg-indigo-50 text-indigo-700" };
-  const age = Date.now() - new Date(device.lastSeenAt).getTime();
-  if (age < 30 * 60 * 1000) {
-    return { label: "최근 수신 정상", className: "bg-emerald-50 text-emerald-700" };
-  }
-  return { label: `마지막 수신 ${formatKstDateTime(device.lastSeenAt)}`, className: "bg-slate-100 text-slate-600" };
+function kstDateKey(value: Date | string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-export default function MessagesView({
-  initialMessages,
-  devices,
-}: {
-  initialMessages: MessageRecord[];
-  devices: BridgeDevice[];
-}) {
+function statusStyle(status: string) {
+  return STATUS_STYLE[status] || { label: status, className: "bg-slate-100 text-slate-600 ring-slate-200" };
+}
+
+function matchesFilter(entry: DeliveryEntry, filter: Filter) {
+  if (filter === "ALL") return entry.status !== "CANCELLED";
+  if (filter === "ATTENTION") return ATTENTION_STATUSES.has(entry.status);
+  if (filter === "PROCESSING") return PROCESSING_STATUSES.has(entry.status);
+  if (filter === "SCHEDULED") return SCHEDULED_STATUSES.has(entry.status);
+  return entry.status === "DELIVERED";
+}
+
+function sortWeight(status: string) {
+  if (ATTENTION_STATUSES.has(status)) return 0;
+  if (PROCESSING_STATUSES.has(status)) return 1;
+  if (SCHEDULED_STATUSES.has(status)) return 2;
+  if (status === "DELIVERED") return 3;
+  return 4;
+}
+
+export default function MessagesView({ initialEntries }: { initialEntries: DeliveryEntry[] }) {
   const router = useRouter();
-  const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
-  const [optimisticallyReadPhones, setOptimisticallyReadPhones] = useState<Set<string>>(() => new Set());
-  const [search, setSearch] = useState("");
-
-  const messages = useMemo(() => initialMessages.map((message) =>
-    optimisticallyReadPhones.has(message.customerPhone) && message.direction === "INBOUND" && !message.readAt
-      ? { ...message, readAt: new Date().toISOString() }
-      : message,
-  ), [initialMessages, optimisticallyReadPhones]);
-
-  const conversations = useMemo(() => {
-    const grouped = new Map<string, MessageRecord[]>();
-    for (const message of messages) {
-      const list = grouped.get(message.customerPhone) || [];
-      list.push(message);
-      grouped.set(message.customerPhone, list);
-    }
-
-    return Array.from(grouped.entries())
-      .map(([phone, conversationMessages]): Conversation => {
-        const latest = conversationMessages[conversationMessages.length - 1];
-        const reservation = [...conversationMessages]
-          .reverse()
-          .find((message) => message.reservation)?.reservation || null;
-        return {
-          phone,
-          name: reservation?.customerName?.trim() || `고객 ${phone.slice(-4)}`,
-          messages: conversationMessages,
-          latest,
-          reservation,
-          unreadCount: conversationMessages.filter(
-            (message) => message.direction === "INBOUND" && !message.readAt,
-          ).length,
-        };
-      })
-      .sort((a, b) => new Date(b.latest.occurredAt).getTime() - new Date(a.latest.occurredAt).getTime());
-  }, [messages]);
-
-  const filteredConversations = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    if (!keyword) return conversations;
-    const digits = keyword.replace(/\D/g, "");
-    return conversations.filter((conversation) =>
-      conversation.name.toLowerCase().includes(keyword) ||
-      (digits && conversation.phone.includes(digits)) ||
-      conversation.latest.body.toLowerCase().includes(keyword),
-    );
-  }, [conversations, search]);
-
+  const [filter, setFilter] = useState<Filter>("ALL");
   const refresh = useCallback(() => router.refresh(), [router]);
   useDataChangePolling("/api/data-version?scope=messages", refresh, { intervalMs: 5_000 });
 
-  const fallbackPhone = conversations.find((item) => item.unreadCount > 0)?.phone || conversations[0]?.phone || null;
-  const activePhone = selectedPhone && conversations.some((item) => item.phone === selectedPhone)
-    ? selectedPhone
-    : fallbackPhone;
-  const selectedConversation = conversations.find((item) => item.phone === activePhone) || null;
+  const todayKey = kstDateKey(new Date());
+  const stats = useMemo(() => ({
+    today: initialEntries.filter((entry) =>
+      entry.reservationStatus === "CONFIRMED" && kstDateKey(entry.scheduledAt) === todayKey,
+    ).length,
+    attention: initialEntries.filter((entry) => ATTENTION_STATUSES.has(entry.status)).length,
+    processing: initialEntries.filter((entry) => PROCESSING_STATUSES.has(entry.status)).length,
+    delivered: initialEntries.filter((entry) => entry.status === "DELIVERED").length,
+  }), [initialEntries, todayKey]);
 
-  const openConversation = async (phone: string) => {
-    setSelectedPhone(phone);
-    setOptimisticallyReadPhones((current) => new Set(current).add(phone));
-    try {
-      await fetch("/api/messages/read", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerPhone: phone }),
-      });
-    } catch (error) {
-      console.error("Failed to mark conversation as read:", error);
-    }
-  };
+  const filteredEntries = useMemo(() => initialEntries
+    .filter((entry) => matchesFilter(entry, filter))
+    .sort((left, right) => {
+      const weight = sortWeight(left.status) - sortWeight(right.status);
+      if (weight !== 0) return weight;
+      if (left.status === "DELIVERED" && right.status === "DELIVERED") {
+        return new Date(right.sentAt || right.startTime).getTime() - new Date(left.sentAt || left.startTime).getTime();
+      }
+      return new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime();
+    }), [filter, initialEntries]);
+
+  const filters: Array<{ key: Filter; label: string }> = [
+    { key: "ALL", label: "전체" },
+    { key: "ATTENTION", label: "확인 필요" },
+    { key: "PROCESSING", label: "처리 중" },
+    { key: "SCHEDULED", label: "발송 예정" },
+    { key: "DELIVERED", label: "수신 완료" },
+  ];
 
   return (
     <div className="min-h-full bg-slate-50 px-4 pb-24 pt-16 sm:px-6 md:pb-8 md:pt-20 lg:px-8">
-      <div className="mx-auto max-w-7xl space-y-5">
-        <header>
-          <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-indigo-600 p-3 text-white shadow-sm">
-              <MessageSquareText className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-900">고객 문자함</h1>
-              <p className="mt-1 text-sm text-slate-500">솔라피 발송 기록과 휴대폰으로 온 고객 답장을 한곳에서 확인합니다.</p>
-            </div>
+      <div className="mx-auto max-w-6xl space-y-5">
+        <header className="flex items-center gap-3">
+          <div className="rounded-2xl bg-indigo-600 p-3 text-white shadow-sm">
+            <MessageSquareText className="h-6 w-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900">문자 발송현황</h1>
+            <p className="mt-1 text-sm text-slate-500">예약 2시간 전 발송부터 고객 휴대폰 수신 결과까지 확인합니다.</p>
           </div>
         </header>
 
-        <section className="grid gap-3 sm:grid-cols-2">
-          {devices.length === 0 ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 sm:col-span-2">
-              휴대폰 문자 수신 연결을 준비 중입니다. 연결 전에도 솔라피 발송 기록은 이 화면에 쌓입니다.
+        <PushNotificationSetup />
+
+        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[
+            { label: "오늘 발송 대상", value: stats.today, icon: CalendarClock, tone: "text-sky-600 bg-sky-50" },
+            { label: "확인 필요", value: stats.attention, icon: AlertTriangle, tone: "text-rose-600 bg-rose-50" },
+            { label: "처리 중", value: stats.processing, icon: Radio, tone: "text-indigo-600 bg-indigo-50" },
+            { label: "수신 완료", value: stats.delivered, icon: CheckCheck, tone: "text-emerald-600 bg-emerald-50" },
+          ].map((stat) => (
+            <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className={`inline-flex rounded-xl p-2 ${stat.tone}`}><stat.icon className="h-5 w-5" /></div>
+              <p className="mt-3 text-xs font-bold text-slate-500">{stat.label}</p>
+              <p className="mt-1 text-2xl font-black text-slate-900">{stat.value}건</p>
             </div>
-          ) : devices.map((device) => {
-            const state = deviceState(device);
-            return (
-              <div key={device.id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex min-w-0 items-center gap-3">
-                  <Smartphone className="h-5 w-5 shrink-0 text-indigo-500" />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-900">{device.name}</p>
-                    <p className="text-xs text-slate-500">{formatKoreanPhone(device.phoneNumber)}</p>
-                  </div>
-                </div>
-                <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${state.className}`}>{state.label}</span>
-              </div>
-            );
-          })}
+          ))}
         </section>
 
-        <div className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900">
-          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-          예약자 전화번호와 정확히 일치하는 문자만 저장합니다. 개인 문자와 인증번호는 서버에 보관하지 않습니다.
-        </div>
-
-        <section className="grid min-h-[620px] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm lg:grid-cols-[330px_minmax(0,1fr)]">
-          <aside className="border-b border-slate-200 lg:border-b-0 lg:border-r">
-            <div className="border-b border-slate-100 p-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="이름·전화번호·내용 검색"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-indigo-400 focus:bg-white"
-                />
-              </div>
-            </div>
-            <div className="max-h-64 overflow-y-auto lg:max-h-[650px]">
-              {filteredConversations.map((conversation) => (
+        <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-4 sm:p-5">
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {filters.map((item) => (
                 <button
-                  key={conversation.phone}
+                  key={item.key}
                   type="button"
-                  onClick={() => void openConversation(conversation.phone)}
-                  className={`w-full border-b border-slate-100 p-4 text-left transition ${
-                    activePhone === conversation.phone ? "bg-indigo-50" : "hover:bg-slate-50"
+                  onClick={() => setFilter(item.key)}
+                  className={`shrink-0 rounded-full px-4 py-2 text-xs font-extrabold transition ${
+                    filter === item.key ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-extrabold text-slate-900">{conversation.name}</p>
-                    <span className="shrink-0 text-[11px] text-slate-400">{formatKstDateTime(conversation.latest.occurredAt)}</span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <p className="min-w-0 flex-1 truncate text-xs text-slate-500">{conversation.latest.body}</p>
-                    {conversation.unreadCount > 0 && (
-                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white">
-                        {conversation.unreadCount}
-                      </span>
-                    )}
-                  </div>
+                  {item.label}
                 </button>
               ))}
-              {filteredConversations.length === 0 && (
-                <p className="p-8 text-center text-sm text-slate-400">표시할 고객 대화가 없습니다.</p>
-              )}
             </div>
-          </aside>
+          </div>
 
-          <div className="flex min-w-0 flex-col">
-            {selectedConversation ? (
-              <>
-                <div className="border-b border-slate-200 px-4 py-4 sm:px-6">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h2 className="font-black text-slate-900">{selectedConversation.name}</h2>
-                      <p className="text-xs text-slate-500">{formatKoreanPhone(selectedConversation.phone)}</p>
-                    </div>
-                    {selectedConversation.reservation && (
-                      <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
-                        {formatReservation(selectedConversation.reservation)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/70 p-4 sm:p-6">
-                  {selectedConversation.messages.map((message) => {
-                    const outbound = message.direction === "OUTBOUND";
-                    return (
-                      <div key={message.id} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-[86%] sm:max-w-[72%] ${outbound ? "items-end" : "items-start"}`}>
-                          <div className={`whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
-                            outbound
-                              ? "rounded-br-md bg-indigo-600 text-white"
-                              : "rounded-bl-md border border-slate-200 bg-white text-slate-800"
-                          }`}>
-                            {message.body}
-                          </div>
-                          <div className={`mt-1 flex items-center gap-1.5 px-1 text-[11px] text-slate-400 ${outbound ? "justify-end" : "justify-start"}`}>
-                            <span>{formatKstDateTime(message.occurredAt)}</span>
-                            <span>·</span>
-                            <span>{outbound ? `발신 ${formatKoreanPhone(message.senderNumber)}` : `${message.bridgeDeviceName || "휴대폰"} 수신`}</span>
-                            {outbound && message.status === "SENT" && <CheckCheck className="h-3.5 w-3.5 text-indigo-500" />}
-                            {outbound && message.status === "DRY_RUN" && <span className="font-bold text-amber-600">테스트</span>}
-                            {outbound && message.status === "FAILED" && <span className="font-bold text-rose-600">실패</span>}
-                          </div>
-                        </div>
+          <div className="divide-y divide-slate-100">
+            {filteredEntries.map((entry) => {
+              const style = statusStyle(entry.status);
+              return (
+                <article key={entry.reservationId} className="p-4 sm:p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-black text-slate-900">{entry.customerName || "이름 없음"}</p>
+                        <span className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">{entry.roomName}</span>
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ring-1 ring-inset ${style.className}`}>{style.label}</span>
                       </div>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center text-slate-400">
-                <MessageSquareText className="h-12 w-12" />
-                <p className="text-sm">고객 대화를 선택하면 발송 내용과 답장을 함께 볼 수 있습니다.</p>
-              </div>
+                      <p className="mt-2 text-sm font-semibold text-slate-700">
+                        {formatKst(entry.startTime)} - {formatKst(entry.endTime, false)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {entry.phone ? formatKoreanPhone(entry.phone) : "전화번호 없음"}
+                        <span className="mx-1.5">·</span>
+                        발송예정 {formatKst(entry.scheduledAt)}
+                      </p>
+                      {entry.error && (
+                        <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{entry.error}</p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 text-xs text-slate-400">
+                      <Clock3 className="h-4 w-4" />
+                      {entry.sentAt ? `처리 ${formatKst(entry.sentAt)}` : "아직 발송 전"}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+            {filteredEntries.length === 0 && (
+              <div className="p-12 text-center text-sm text-slate-400">이 상태에 해당하는 예약이 없습니다.</div>
             )}
           </div>
         </section>
+
+        <p className="px-1 text-xs leading-5 text-slate-500">
+          ‘솔라피 접수’는 발송 요청이 들어간 상태이고, ‘수신 완료’는 통신사 결과가 확인된 최종 성공입니다. 결과는 5초마다 자동 갱신됩니다.
+        </p>
       </div>
     </div>
   );

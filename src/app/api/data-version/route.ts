@@ -69,23 +69,22 @@ async function getDashboardVersion() {
 }
 
 async function getMessageVersion() {
-  const [messages, devices] = await Promise.all([
+  const [messages, reservations] = await Promise.all([
     prisma.customerMessage.aggregate({
       _count: { _all: true },
       _max: { updatedAt: true },
     }),
-    prisma.smsBridgeDevice.aggregate({
+    prisma.reservation.aggregate({
       _count: { _all: true },
-      _max: { updatedAt: true, lastSeenAt: true },
+      _max: { updatedAt: true },
     }),
   ]);
 
   return [
     messages._count._all,
     dateStamp(messages._max.updatedAt),
-    devices._count._all,
-    dateStamp(devices._max.updatedAt),
-    dateStamp(devices._max.lastSeenAt),
+    reservations._count._all,
+    dateStamp(reservations._max.updatedAt),
   ].join(":");
 }
 

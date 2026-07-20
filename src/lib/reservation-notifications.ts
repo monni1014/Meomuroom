@@ -54,6 +54,7 @@ export async function sendDueReservationReminders() {
 
   for (const reservation of upcomingReservations) {
     const result = await sendReservationReminder({
+      reservationId: reservation.id,
       customerName: reservation.customerName,
       phone: reservation.phone,
       roomName: reservation.roomName,
@@ -68,7 +69,7 @@ export async function sendDueReservationReminders() {
         recipientNumber: result.to,
         body: result.text,
         channel: result.channel,
-        status: result.success ? (result.dryRun ? "DRY_RUN" : "SENT") : "FAILED",
+        status: result.success ? (result.dryRun ? "DRY_RUN" : "SUBMITTED") : "FAILED",
         providerMessageId: result.messageId,
       });
     }
@@ -104,7 +105,7 @@ export async function sendDueReservationReminders() {
         data: {
           notified: true,
           notifiedAt: new Date(),
-          notificationStatus: "SENT",
+          notificationStatus: "SUBMITTED",
           notificationChannel: result.channel,
           notificationError: null,
         },

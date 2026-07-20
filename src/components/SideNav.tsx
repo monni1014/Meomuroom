@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Calendar, Home, ClipboardList, BarChart3, Building2, Table2, Radar, Settings, MessageSquareText } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -10,7 +9,7 @@ import { ProxyStatusIndicator } from "@/components/ProxyStatusIndicator";
 const NAV_ITEMS = [
   { name: "대시보드", href: "/", icon: Home },
   { name: "캘린더", href: "/calendar", icon: Calendar },
-  { name: "문자함", href: "/messages", icon: MessageSquareText },
+  { name: "문자 현황", href: "/messages", icon: MessageSquareText },
   { name: "이용현황", href: "/usage", icon: ClipboardList },
   { name: "월간표", href: "/monthly-table", icon: Table2 },
   { name: "경쟁사 현황", href: "/competitors", icon: Radar },
@@ -20,28 +19,6 @@ const NAV_ITEMS = [
 
 export function SideNav() {
   const pathname = usePathname();
-  const [unreadMessages, setUnreadMessages] = useState(0);
-
-  useEffect(() => {
-    let disposed = false;
-    const loadUnreadCount = async () => {
-      try {
-        const response = await fetch("/api/messages/unread-count", { cache: "no-store" });
-        if (!response.ok || disposed) return;
-        const payload = (await response.json()) as { count?: unknown };
-        if (typeof payload.count === "number") setUnreadMessages(payload.count);
-      } catch {
-        // Navigation must remain usable even while the server is restarting.
-      }
-    };
-    void loadUnreadCount();
-    const timer = window.setInterval(() => void loadUnreadCount(), 15_000);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
   return (
     <nav
       className={cn(
@@ -81,11 +58,6 @@ export function SideNav() {
                 )}
                 strokeWidth={isActive ? 2.5 : 2}
               />
-              {item.href === "/messages" && unreadMessages > 0 && (
-                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-black text-white md:left-8 md:right-auto md:top-1.5">
-                  {unreadMessages > 99 ? "99+" : unreadMessages}
-                </span>
-              )}
               <span className={cn(
                 "whitespace-nowrap text-[9px] sm:text-[10px] md:text-sm",
                 isActive ? "font-semibold" : "font-medium"
