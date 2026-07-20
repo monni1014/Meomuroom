@@ -65,7 +65,10 @@ async function executeHealthScript(platform: RpaHealthPlatform) {
   try {
     await execFileAsync(command, commandArgs, {
       cwd: process.cwd(),
-      env: monitorEnv(),
+      env: {
+        ...monitorEnv(),
+        ...(platform === "spacecloud" ? { RPA_HEADLESS: "false" } : {}),
+      },
       timeout: platform === "spacecloud" ? 240_000 : 180_000,
       maxBuffer: 5 * 1024 * 1024,
     });
