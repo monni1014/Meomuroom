@@ -24,6 +24,7 @@ import {
   manualColorClass,
   reconcileDirtyKey,
 } from "@/lib/manual-table-colors";
+import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 
 interface UsageLog {
   id: string;
@@ -258,7 +259,7 @@ export default function MonthlyTableView() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [roomFilter, setRoomFilter] = useState<"all" | RoomName>("all");
 
-  const fetchReservations = async (showLoading = true) => {
+  const fetchReservations = useCallback(async (showLoading = true) => {
     try {
       if (showLoading) setIsLoading(true);
       const res = await fetch("/api/reservations");
@@ -268,12 +269,12 @@ export default function MonthlyTableView() {
     } finally {
       if (showLoading) setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchReservations();
-  }, []);
+    void fetchReservations();
+  }, [fetchReservations]);
 
   const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth() + 1;
@@ -328,18 +329,14 @@ export default function MonthlyTableView() {
     fetchManualCells(currentYear, currentMonth);
   }, [currentYear, currentMonth, fetchManualCells]);
 
-  useEffect(() => {
-    const refreshLinkedData = () => {
-      fetchReservations(false);
-      if (dirtyKeys.size === 0) fetchManualCells(currentYear, currentMonth);
-    };
-    const timer = window.setInterval(refreshLinkedData, 30_000);
-    window.addEventListener("focus", refreshLinkedData);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", refreshLinkedData);
-    };
-  }, [currentYear, currentMonth, dirtyKeys.size, fetchManualCells]);
+  useDataChangePolling(
+    `/api/data-version?scope=monthly-table&year=${currentYear}&month=${currentMonth}`,
+    async () => {
+      const updates: Promise<void>[] = [fetchReservations(false)];
+      if (dirtyKeys.size === 0) updates.push(fetchManualCells(currentYear, currentMonth));
+      await Promise.all(updates);
+    },
+  );
 
   const updateManualCell = (sectionId: string, day: Date, cellKey: string, patch: Partial<ManualCellData>) => {
     const key = manualCellKey(sectionId, day, cellKey);

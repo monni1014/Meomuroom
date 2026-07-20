@@ -24,6 +24,7 @@ import {
 } from "@/lib/manual-table-colors";
 import { cn } from "@/lib/utils";
 import type { CompetitorSnapshotPayload } from "@/lib/competitor-snapshots";
+import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 
 type SlotState = "available" | "closed" | "policy_closed" | "need_check" | "not_collected";
 
@@ -411,25 +412,18 @@ export default function CompetitorsView({
     void loadMonth(currentYear, currentMonth);
   }, [currentMonth, currentYear, loadMonth]);
 
-  useEffect(() => {
-    const refreshSnapshots = () => {
-      void fetchSnapshots(currentYear, currentMonth).catch((error) => {
+  useDataChangePolling(
+    `/api/data-version?scope=competitors&year=${currentYear}&month=${currentMonth}`,
+    async () => {
+      try {
+        const updates: Promise<void>[] = [fetchSnapshots(currentYear, currentMonth)];
+        if (dirtyKeys.size === 0) updates.push(fetchManualCells(currentYear, currentMonth));
+        await Promise.all(updates);
+      } catch (error) {
         setLoadError(error instanceof Error ? error.message : "경쟁사 자동 확인 정보를 갱신하지 못했습니다.");
-      });
-    };
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") refreshSnapshots();
-    };
-
-    const interval = window.setInterval(refreshSnapshots, 60_000);
-    window.addEventListener("focus", refreshSnapshots);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshSnapshots);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [currentMonth, currentYear, fetchSnapshots]);
+      }
+    },
+  );
 
   const canLeaveCurrentMonth = () => {
     if (dirtyKeys.size === 0) return true;

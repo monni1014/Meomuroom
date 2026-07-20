@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
@@ -12,6 +12,7 @@ import MultiDatePicker from "@/components/MultiDatePicker";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
 import { createKstDate, getKstDateParts } from "@/lib/kst-time";
 import MessageStatusBadge from "@/components/MessageStatusBadge";
+import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 
 interface UsageLog {
   id: string;
@@ -167,7 +168,7 @@ export default function CalendarPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showMultiPicker, setShowMultiPicker] = useState(false);
 
-  const fetchReservations = async () => {
+  const fetchReservations = useCallback(async () => {
     try {
       const res = await fetch("/api/reservations");
       if (res.ok) {
@@ -179,15 +180,17 @@ export default function CalendarPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchReservations();
-    // 1분마다 화면 자동 새로고침 (서버 cron이 받아온 새 예약/취소를 반영)
-    const id = setInterval(fetchReservations, 60000);
-    return () => clearInterval(id);
-  }, []);
+    void fetchReservations();
+  }, [fetchReservations]);
+
+  useDataChangePolling(
+    "/api/data-version?scope=reservations",
+    fetchReservations,
+  );
 
   const replaceCalendarState = (date: Date, room: RoomFilter) => {
     const params = new URLSearchParams(searchParams.toString());
