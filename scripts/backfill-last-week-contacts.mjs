@@ -10,9 +10,18 @@ const prisma = new PrismaClient({
   adapter: new PrismaLibSql({ url: process.env.DATABASE_URL || "file:./dev.db" }),
 });
 
-const START = new Date("2026-06-14T15:00:00.000Z"); // 2026-06-15 00:00 KST
-const END = new Date("2026-06-21T15:00:00.000Z"); // 2026-06-22 00:00 KST
-const MAIL_SINCE = new Date("2026-06-01T00:00:00.000Z");
+function dateFromEnv(name, fallback) {
+  const value = process.env[name];
+  if (!value) return new Date(fallback);
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error(`${name} is not a valid date: ${value}`);
+  return parsed;
+}
+
+const START = dateFromEnv("CONTACT_BACKFILL_START", "2026-06-14T15:00:00.000Z"); // default: 2026-06-15 00:00 KST
+const END = dateFromEnv("CONTACT_BACKFILL_END", "2026-06-21T15:00:00.000Z"); // default: 2026-06-22 00:00 KST
+const MAIL_SINCE = dateFromEnv("CONTACT_BACKFILL_MAIL_SINCE", "2026-06-01T00:00:00.000Z");
+const TARGET_NAME = process.env.CONTACT_BACKFILL_NAME?.trim() || null;
 
 function normalizeMessageId(value) {
   return (value || "").trim().replace(/^<|>$/g, "");
@@ -227,7 +236,10 @@ async function main() {
     orderBy: { startTime: "asc" },
   });
 
-  const targetRows = rows.filter((row) => isMaskedName(row.customerName) || isMissingPhone(row.phone));
+  const targetRows = rows.filter((row) => (
+    (isMaskedName(row.customerName) || isMissingPhone(row.phone))
+    && (!TARGET_NAME || row.customerName === TARGET_NAME)
+  ));
   const targetMessageIds = new Set();
   for (const row of targetRows) {
     if (!row.emailId) continue;
@@ -237,7 +249,8 @@ async function main() {
   }
 
   console.log(JSON.stringify({
-    range: "2026-06-15~2026-06-21",
+    range: `${START.toISOString()}~${END.toISOString()}`,
+    targetName: TARGET_NAME,
     targetRows: targetRows.length,
     targetMessageIds: targetMessageIds.size,
   }, null, 2));
