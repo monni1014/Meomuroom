@@ -111,6 +111,13 @@ model MessageTemplate {
   updatedAt DateTime @updatedAt
 }
 
+model AppSetting {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model AdminAlert {
   id          String    @id @default(cuid())
   type        String

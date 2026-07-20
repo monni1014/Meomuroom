@@ -31,6 +31,11 @@ type MessageTemplateState = {
 
 type SettingsTab = "message" | "rpa";
 
+const SOLAPI_SENDER_LABELS: Record<string, string> = {
+  "01071835720": "사장님",
+  "01094431849": "와이프",
+};
+
 type ProxyPaymentForm = {
   provider: string;
   paidOn: string;
@@ -132,6 +137,10 @@ function senderStatusClass(status: string | null, error: string | null) {
   return "border-slate-200 bg-slate-50 text-slate-600";
 }
 
+function senderOwnerLabel(phoneNumber: string) {
+  return SOLAPI_SENDER_LABELS[phoneNumber] || "등록 발신번호";
+}
+
 function proxyStatusClass(status: IspProxyStatus) {
   if (status.severity === "NOT_CONFIGURED") return "border-slate-200 bg-slate-50 text-slate-600";
   if (status.severity === "ERROR") return "border-rose-200 bg-rose-50 text-rose-700";
@@ -209,6 +218,9 @@ export default function SettingsView({
   const [proxyPaymentForm, setProxyPaymentForm] = useState<ProxyPaymentForm>(emptyProxyPaymentForm);
   const [templates, setTemplates] = useState<MessageTemplateState[]>(initialMessageTemplates);
   const [isLoadingSolapi, setIsLoadingSolapi] = useState(false);
+  const [selectedSenderNumber, setSelectedSenderNumber] = useState(initialSolapiStatus.senderNumber || "");
+  const [isSavingSenderNumber, setIsSavingSenderNumber] = useState(false);
+  const [senderSaveMessage, setSenderSaveMessage] = useState<string | null>(null);
   const [isLoadingProxy, setIsLoadingProxy] = useState(false);
   const [savingRoom, setSavingRoom] = useState<string | null>(null);
   const [isSavingProxyPayment, setIsSavingProxyPayment] = useState(false);
@@ -222,10 +234,44 @@ export default function SettingsView({
       const response = await fetch("/api/settings/solapi/status", { cache: "no-store" });
       const data = (await response.json()) as SolapiServiceStatus;
       setSolapiStatus(data);
+      setSelectedSenderNumber(data.senderNumber || "");
     } finally {
       setIsLoadingSolapi(false);
     }
   }, []);
+
+  const saveSenderNumber = async () => {
+    if (!selectedSenderNumber) {
+      setSenderSaveMessage("발신번호를 선택해주세요.");
+      return;
+    }
+
+    setIsSavingSenderNumber(true);
+    setSenderSaveMessage(null);
+    try {
+      const response = await fetch("/api/settings/solapi/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senderNumber: selectedSenderNumber }),
+      });
+      const data = await response.json() as {
+        success?: boolean;
+        status?: SolapiServiceStatus;
+        error?: string;
+      };
+      if (!response.ok || !data.success || !data.status) {
+        throw new Error(data.error || "발신번호를 저장하지 못했습니다.");
+      }
+
+      setSolapiStatus(data.status);
+      setSelectedSenderNumber(data.status.senderNumber || "");
+      setSenderSaveMessage(`${formatPhone(data.status.senderNumber)} 번호를 문자 발신번호로 저장했습니다.`);
+    } catch (error) {
+      setSenderSaveMessage(error instanceof Error ? error.message : "발신번호를 저장하지 못했습니다.");
+    } finally {
+      setIsSavingSenderNumber(false);
+    }
+  };
 
   const loadProxyStatus = useCallback(async () => {
     setIsLoadingProxy(true);
@@ -438,6 +484,94 @@ export default function SettingsView({
                     새로고침
                   </button>
                 </div>
+              </div>
+
+              <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">문자 발신번호 선택</h3>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    저장한 번호가 다음 실제 문자 발송부터 적용됩니다.
+                  </p>
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {solapiStatus.senders.map((senderOption) => {
+                    const isSelected = selectedSenderNumber === senderOption.phoneNumber;
+                    const isAvailable = senderOption.status === "ACTIVE";
+                    return (
+                      <label
+                        key={senderOption.phoneNumber}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-3 rounded-lg border bg-white p-3 transition",
+                          isSelected ? "border-indigo-400 ring-2 ring-indigo-100" : "border-slate-200 hover:border-slate-300",
+                          !isAvailable && "cursor-not-allowed opacity-60",
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="solapiSenderNumber"
+                          value={senderOption.phoneNumber}
+                          checked={isSelected}
+                          disabled={!isAvailable || isSavingSenderNumber}
+                          onChange={() => setSelectedSenderNumber(senderOption.phoneNumber)}
+                          className="h-4 w-4 accent-indigo-600"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-sm font-black text-slate-900">
+                              {senderOwnerLabel(senderOption.phoneNumber)}
+                            </span>
+                            <span className={cn(
+                              "rounded-full border px-2 py-0.5 text-[10px] font-black",
+                              senderStatusClass(senderOption.status, null),
+                            )}>
+                              {senderStatusLabel(senderOption.status)}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm font-bold text-slate-600">
+                            {formatPhone(senderOption.phoneNumber)}
+                          </p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {solapiStatus.senders.length === 0 && (
+                  <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                    선택할 수 있는 등록 발신번호를 불러오지 못했습니다.
+                  </p>
+                )}
+
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className={cn(
+                    "text-xs font-bold",
+                    senderSaveMessage?.includes("저장했습니다") ? "text-emerald-700" : "text-rose-700",
+                  )}>
+                    {senderSaveMessage}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void saveSenderNumber()}
+                    disabled={
+                      isSavingSenderNumber
+                      || !selectedSenderNumber
+                      || selectedSenderNumber === solapiStatus.senderNumber
+                    }
+                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-black text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                  >
+                    {isSavingSenderNumber ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Save className="h-3.5 w-3.5" />
+                    )}
+                    발신번호 저장
+                  </button>
+                </div>
+
+                <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-relaxed text-amber-800">
+                  솔라피로 보낸 문자는 휴대폰 기본 메시지 앱의 보낸 내역과 자동으로 동기화되지 않습니다.
+                </p>
               </div>
 
               <div className="mt-5 grid gap-x-8 md:grid-cols-2">

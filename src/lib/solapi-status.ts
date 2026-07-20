@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { SolapiMessageService } from "solapi";
+import { getSelectedSolapiSenderNumber, normalizeSolapiPhone } from "@/lib/solapi-sender-setting";
 
 const SOLAPI_API_BASE_URL = "https://api.solapi.com";
 
@@ -27,6 +28,7 @@ export type SolapiServiceStatus = {
   minimumCash: number | null;
   lowBalanceAlert: unknown | null;
   sender: SolapiSenderStatus | null;
+  senders: SolapiSenderStatus[];
   senderLimit: number | null;
   checkedAt: string;
   error: string | null;
@@ -50,10 +52,6 @@ type SenderIdResponse = {
 
 function env(name: string) {
   return process.env[name]?.trim() || "";
-}
-
-function normalizePhone(value: string | null | undefined) {
-  return (value || "").replace(/\D/g, "");
 }
 
 function finiteNumber(value: unknown) {
@@ -92,7 +90,7 @@ async function getSenderIds(apiKey: string, apiSecret: string) {
 }
 
 function toSenderStatus(sender: NonNullable<SenderIdResponse["senderIds"]>[number]): SolapiSenderStatus | null {
-  const phoneNumber = normalizePhone(sender.phoneNumber);
+  const phoneNumber = normalizeSolapiPhone(sender.phoneNumber);
   if (!phoneNumber) return null;
 
   return {
@@ -112,7 +110,7 @@ function toSenderStatus(sender: NonNullable<SenderIdResponse["senderIds"]>[numbe
 export async function getSolapiServiceStatus(): Promise<SolapiServiceStatus> {
   const apiKey = env("SOLAPI_API_KEY");
   const apiSecret = env("SOLAPI_API_SECRET");
-  const senderNumber = normalizePhone(env("SOLAPI_FROM") || env("OWNER_PHONE")) || null;
+  const senderNumber = await getSelectedSolapiSenderNumber();
   const checkedAt = new Date().toISOString();
 
   if (!apiKey || !apiSecret) {
@@ -127,6 +125,7 @@ export async function getSolapiServiceStatus(): Promise<SolapiServiceStatus> {
       minimumCash: null,
       lowBalanceAlert: null,
       sender: null,
+      senders: [],
       senderLimit: null,
       checkedAt,
       error: "SOLAPI_API_KEY 또는 SOLAPI_API_SECRET이 설정되지 않았습니다.",
@@ -144,7 +143,9 @@ export async function getSolapiServiceStatus(): Promise<SolapiServiceStatus> {
     const senderList = senderIds.senderIds
       ?.map(toSenderStatus)
       .filter((item): item is SolapiSenderStatus => item !== null) || [];
-    const sender = senderList.find((item) => item.phoneNumber === normalizedSender) || senderList[0] || null;
+    const sender = normalizedSender
+      ? senderList.find((item) => item.phoneNumber === normalizedSender) || null
+      : senderList[0] || null;
     const balanceOnly = finiteNumber(balance.balanceOnly);
     const deposit = finiteNumber(balance.deposit);
     const point = finiteNumber(balance.point);
@@ -164,6 +165,7 @@ export async function getSolapiServiceStatus(): Promise<SolapiServiceStatus> {
       minimumCash: typeof balance.minimumCash === "number" ? balance.minimumCash : null,
       lowBalanceAlert: balance.lowBalanceAlert || null,
       sender,
+      senders: senderList,
       senderLimit: typeof senderIds.limit === "number" ? senderIds.limit : null,
       checkedAt,
       error: null,
@@ -180,6 +182,7 @@ export async function getSolapiServiceStatus(): Promise<SolapiServiceStatus> {
       minimumCash: null,
       lowBalanceAlert: null,
       sender: null,
+      senders: [],
       senderLimit: null,
       checkedAt,
       error: error instanceof Error ? error.message : String(error),

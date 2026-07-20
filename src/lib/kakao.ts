@@ -1,5 +1,6 @@
 import { SolapiMessageService } from "solapi";
 import { getMessageTemplateForRoom } from "@/lib/message-templates";
+import { getSelectedSolapiSenderNumber } from "@/lib/solapi-sender-setting";
 
 type NotificationChannel = "SMS" | "KAKAO_ALIMTALK";
 
@@ -56,9 +57,9 @@ function getSolapiService() {
   return new SolapiMessageService(apiKey, apiSecret);
 }
 
-function getSenderPhone() {
-  const sender = normalizePhone(env("SOLAPI_FROM") || env("OWNER_PHONE"));
-  if (!sender) throw new Error("SOLAPI_FROM is required.");
+async function getSenderPhone() {
+  const sender = await getSelectedSolapiSenderNumber();
+  if (!sender) throw new Error("문자 발신번호가 설정되지 않았습니다.");
   return sender;
 }
 
@@ -123,7 +124,7 @@ export async function sendReservationReminder(input: ReservationReminderInput): 
   }
 
   try {
-    const from = getSenderPhone();
+    const from = await getSenderPhone();
     const messageService = getSolapiService();
     const message =
       channel === "KAKAO_ALIMTALK"
