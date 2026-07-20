@@ -1,10 +1,12 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$tailscaleExe = "C:\Program Files\Tailscale\tailscale.exe"
-$stateDirectory = "C:\ProgramData\Memoroom"
-$logPath = Join-Path $stateDirectory "tailscale-watchdog.log"
-$mutex = New-Object System.Threading.Mutex($false, "Global\MemoroomTailscaleWatchdog")
+$memoroomTailnetHost = "100.65.163.49"
+$memoroomTailnetPort = 22
+$stateDirectory = "C:\ProgramData\Memoroom\watchdog-state"
+$logPath = Join-Path $stateDirectory "tailscale-watchdog-check.log"
+$requestPath = Join-Path $stateDirectory "tailscale-recovery-request.json"
+$mutex = New-Object System.Threading.Mutex($false, "Global\MemoroomTailscaleWatchdogCheck")
 
 function Write-WatchdogLog([string]$message) {
   New-Item -ItemType Directory -Force -Path $stateDirectory | Out-Null
@@ -14,41 +16,24 @@ function Write-WatchdogLog([string]$message) {
   Add-Content -LiteralPath $logPath -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz') $message"
 }
 
-function Get-TailscaleBackendState {
-  if (-not (Test-Path -LiteralPath $tailscaleExe)) {
-    return "MissingExecutable"
-  }
-
-  $tempStem = Join-Path $env:TEMP "memoroom-tailscale-$PID-$([Guid]::NewGuid().ToString('N'))"
-  $stdoutPath = "$tempStem.stdout"
-  $stderrPath = "$tempStem.stderr"
-  $process = $null
+function Test-MemoroomTailnetRoute {
+  $client = New-Object System.Net.Sockets.TcpClient
+  $connect = $null
   try {
-    $process = Start-Process -FilePath $tailscaleExe -ArgumentList @("status", "--json") `
-      -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
-    if (-not $process.WaitForExit(12000)) {
-      try { $process.Kill() } catch { }
-      return "TimedOut"
+    $connect = $client.BeginConnect($memoroomTailnetHost, $memoroomTailnetPort, $null, $null)
+    if (-not $connect.AsyncWaitHandle.WaitOne(10000)) {
+      return $false
     }
-    if ($process.ExitCode -ne 0) {
-      return "CommandFailed"
-    }
-    $status = Get-Content -LiteralPath $stdoutPath -Raw | ConvertFrom-Json
-    return [string]$status.BackendState
+    $client.EndConnect($connect)
+    return $client.Connected
   } catch {
-    return "InvalidStatus"
-  } finally {
-    if ($process) { $process.Dispose() }
-    Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
-  }
-}
-
-function Test-TailscaleHealthy {
-  $service = Get-Service -Name Tailscale -ErrorAction SilentlyContinue
-  if (-not $service -or $service.Status -ne "Running") {
     return $false
+  } finally {
+    if ($connect -and $connect.AsyncWaitHandle) {
+      $connect.AsyncWaitHandle.Close()
+    }
+    $client.Dispose()
   }
-  return (Get-TailscaleBackendState) -eq "Running"
 }
 
 if (-not $mutex.WaitOne(0)) {
@@ -56,36 +41,25 @@ if (-not $mutex.WaitOne(0)) {
 }
 
 try {
-  if (Test-TailscaleHealthy) {
+  $service = Get-Service -Name Tailscale -ErrorAction SilentlyContinue
+  $routeAvailable = Test-MemoroomTailnetRoute
+  if ($service -and $service.Status -eq "Running" -and $routeAvailable) {
+    Remove-Item -LiteralPath $requestPath -Force -ErrorAction SilentlyContinue
     exit 0
   }
 
-  $initialState = Get-TailscaleBackendState
-  Write-WatchdogLog "Unhealthy state detected: $initialState. Restarting the Tailscale service."
-
-  Restart-Service -Name Tailscale -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 5
-
-  if (-not (Test-TailscaleHealthy)) {
-    Write-WatchdogLog "Normal restart did not recover Tailscale. Cleaning residual daemon processes."
-    Stop-Service -Name Tailscale -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-    Get-Process -Name tailscaled -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-    Start-Service -Name Tailscale
-    Start-Sleep -Seconds 5
+  $serviceState = if ($service) { [string]$service.Status } else { "Missing" }
+  $request = [ordered]@{
+    requestedAt = (Get-Date).ToString("o")
+    routeState = if ($routeAvailable) { "Reachable" } else { "Unreachable" }
+    serviceState = $serviceState
   }
-
-  if (-not (Test-TailscaleHealthy)) {
-    $finalState = Get-TailscaleBackendState
-    Write-WatchdogLog "Automatic recovery failed. Final state: $finalState."
-    exit 1
-  }
-
-  Write-WatchdogLog "Automatic recovery completed successfully."
+  New-Item -ItemType Directory -Force -Path $stateDirectory | Out-Null
+  $request | ConvertTo-Json -Compress | Set-Content -LiteralPath $requestPath -Encoding utf8
+  Write-WatchdogLog "Unhealthy state detected: route=$($request.routeState) service=$serviceState. Recovery requested."
   exit 0
 } catch {
-  Write-WatchdogLog "Watchdog error: $($_.Exception.Message)"
+  Write-WatchdogLog "Watchdog check error: $($_.Exception.Message)"
   exit 1
 } finally {
   try { $mutex.ReleaseMutex() } catch { }

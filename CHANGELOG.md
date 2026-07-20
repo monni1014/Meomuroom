@@ -27,4 +27,6 @@ All notable changes to Memoroom are documented in this file. Versions follow
 ### Operations
 
 - Prepared the application for single-server operation on Vultr.
+- Added a two-stage Windows Tailscale watchdog that separates user-level
+  private-route checks from administrator-only service recovery.
 - Kept databases, browser sessions, credentials, logs, and production correction data out of Git.

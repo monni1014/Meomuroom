@@ -31,12 +31,12 @@ There is no scheduled server reboot.
 
 ## Windows Tailscale watchdog
 
-`ops/windows/Install-MemoroomTailscaleWatchdog.ps1` installs a SYSTEM-level
-task on the operator laptop. Every five minutes it checks the real Tailscale
-backend state, not only the Windows service status. If the backend is stuck in
-`NoState`, it restarts Tailscale and cleans residual daemon processes when a
-normal restart is insufficient. It does not restart the laptop, server, app,
-or RPA worker.
+`ops/windows/Install-MemoroomTailscaleWatchdog.ps1` installs two least-privilege
+tasks. Every five minutes the signed-in operator task checks the actual private
+route to the Memoroom server. A `NoState` client cannot reach that route, so only
+when the route is unavailable does it leave a recovery request. A separate SYSTEM task consumes that request and
+restarts only the Tailscale service, with a 10-minute recovery cooldown. It does
+not restart the laptop, server, app, or RPA worker.
 
 ## Database backup
 
