@@ -29,6 +29,15 @@ node scripts/reconcile-spacecloud-manual-blocks.mjs --plan --full
 
 There is no scheduled server reboot.
 
+## Windows Tailscale watchdog
+
+`ops/windows/Install-MemoroomTailscaleWatchdog.ps1` installs a SYSTEM-level
+task on the operator laptop. Every five minutes it checks the real Tailscale
+backend state, not only the Windows service status. If the backend is stuck in
+`NoState`, it restarts Tailscale and cleans residual daemon processes when a
+normal restart is insufficient. It does not restart the laptop, server, app,
+or RPA worker.
+
 ## Database backup
 
 `memoroom-db-backup.timer` creates an online SQLite backup four times per day
