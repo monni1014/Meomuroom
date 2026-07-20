@@ -18,12 +18,14 @@ export async function registerNodeInstrumentation() {
   const { checkProxySellerStatusAndAlert } = await import("@/lib/proxy-seller");
   const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
   const { runCompetitorScan } = await import("@/lib/competitor-monitor");
+  const { runRpaUiHealthChecks } = await import("@/lib/rpa-ui-monitor");
 
   let running = false;
   let proxyStatusRunning = false;
   let naverStatusReconcileRunning = false;
   let notificationRunning = false;
   let competitorScanRunning = false;
+  let rpaUiHealthRunning = false;
 
   async function runEmailSync(label: string) {
     if (running) {
@@ -122,6 +124,26 @@ export async function registerNodeInstrumentation() {
     }
   }
 
+  async function runRpaUiHealthMonitor(label: string) {
+    if (rpaUiHealthRunning) {
+      console.log(`[Cron] Previous RPA UI health check is still running. Skipping ${label}.`);
+      return;
+    }
+
+    rpaUiHealthRunning = true;
+    try {
+      const result = await runRpaUiHealthChecks();
+      const summary = result.results
+        .map((item) => `${item.platform}=${item.status}`)
+        .join(", ");
+      console.log(`[Cron] RPA UI health check ${result.skipped ? "skipped" : "done"} (${label}): ${summary || result.reason || "-"}`);
+    } catch (error) {
+      console.error(`[Cron] RPA UI health check failed (${label}):`, error);
+    } finally {
+      rpaUiHealthRunning = false;
+    }
+  }
+
   setTimeout(() => {
     void runEmailSync("startup");
   }, 0);
@@ -152,6 +174,12 @@ export async function registerNodeInstrumentation() {
 
   schedule("0 10,22 * * *", async () => {
     await runNaverStatusReconcile("cron");
+  }, {
+    timezone: "Asia/Seoul",
+  });
+
+  schedule("20 2,8,14,20 * * *", async () => {
+    await runRpaUiHealthMonitor("scheduled read-only check");
   }, {
     timezone: "Asia/Seoul",
   });
@@ -190,5 +218,6 @@ export async function registerNodeInstrumentation() {
   console.log("[Cron] Reservation notification monitor started (1 minute interval)");
   console.log("[Cron] ISP proxy status monitor started (5 minute interval)");
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
+  console.log("[Cron] RPA UI health monitor started (02:20/08:20/14:20/20:20 read-only checks)");
   console.log("[Cron] Competitor monitor started (07:00 today+tomorrow, 12:00/18:00/23:00 next 7 days, monthly baseline at 07:00 on day 1)");
 }

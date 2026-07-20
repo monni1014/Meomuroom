@@ -206,13 +206,14 @@ async function main() {
 
   const headless = resolveRpaHeadless();
   const browser = await launchRpaBrowser({ headless, reuse: headless });
+  let page;
 
   try {
     const context = await newRpaContext(browser, {
       storageState: naverStorageStatePath,
       rpaRole: "naver",
     });
-    const page = await context.newPage();
+    page = await context.newPage();
     const bookingId = target.match(/\d{9,12}/)?.[0] || null;
 
     if (bookingId) {
@@ -314,6 +315,12 @@ async function main() {
         }
       : result;
     console.log(JSON.stringify(outputResult, null, 2));
+  } catch (error) {
+    const evidencePath = page
+      ? await saveScreenshot(page, "naver-booking-detail-error").catch(() => null)
+      : null;
+    if (evidencePath) console.error(`RPA_EVIDENCE_PATH=${evidencePath}`);
+    throw error;
   } finally {
     await browser.close();
   }

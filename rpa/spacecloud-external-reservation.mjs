@@ -63,6 +63,7 @@ function usage() {
     "  --new-start=HH:00 --new-end=HH:00 required with --mode=resize",
     "  --inspect-calendar optional, print the exact selected product/date cell and exit without editing",
     "  --inspect-save-request optional, inspect and block the final save request before it reaches SpaceCloud",
+    "  --health-check optional, read-only UI contract check; exits before date/reservation interaction",
     "  --apply       actually add/delete the SpaceCloud external reservation.",
   ].join("\n");
 }
@@ -2377,6 +2378,7 @@ async function main() {
   const apply = args.apply === "true";
   const inspectCalendar = args["inspect-calendar"] === "true";
   const inspectSaveRequest = args["inspect-save-request"] === "true";
+  const healthCheck = args["health-check"] === "true";
   const claimOnly = args["claim-only"] === "true";
   const allowStillBlockedAfterDelete = args["allow-still-blocked-after-delete"] === "true";
   const claimUnlabelledBeforeDelete = args["claim-unlabelled-before-delete"] === "true";
@@ -2405,6 +2407,7 @@ async function main() {
     label: "SpaceCloud external reservation RPA",
     timeoutMs: 12 * 60 * 1000,
     staleMs: 15 * 60 * 1000,
+    failIfLocked: healthCheck,
   });
   const headless = resolveRpaHeadless();
   const browserOptions = spaceCloudBrowserOptions(headless);
@@ -2500,6 +2503,20 @@ async function main() {
     await assertCalendarView(page, "product selection");
     await selectProduct(page, room);
 
+    if (healthCheck) {
+      await assertCalendarView(page, "health check");
+      const evidencePath = await saveScreenshot(page, "spacecloud-ui-health-check");
+      console.log(JSON.stringify({
+        ok: true,
+        healthCheck: true,
+        platform: "spacecloud",
+        contract: "reservation-calendar",
+        currentUrl: page.url(),
+        evidencePath,
+      }));
+      return;
+    }
+
     await assertCalendarView(page, "month navigation");
     await navigateToMonth(page, dateValue);
     await waitForCalendarDay(
@@ -2576,7 +2593,10 @@ async function main() {
     }, null, 2));
   } catch (error) {
     console.error("SpaceCloud external reservation RPA failed:", error instanceof Error ? error.message : error);
-    await page?.screenshot?.({ path: `rpa/screenshots/spacecloud-external-error-${Date.now()}.png`, fullPage: true }).catch(() => {});
+    const evidencePath = page
+      ? await saveScreenshot(page, "spacecloud-external-error").catch(() => null)
+      : null;
+    if (evidencePath) console.error(`RPA_EVIDENCE_PATH=${evidencePath}`);
     throw error;
   } finally {
     await browser?.close();

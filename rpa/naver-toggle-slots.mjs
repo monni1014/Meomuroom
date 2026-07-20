@@ -60,6 +60,7 @@ function usage() {
     "  --mode=close|open",
     "  --product-url=... exact Naver product edit URL. Required for safety.",
     "  --apply       actually click toggles. Without this, it only navigates and screenshots.",
+    "  --health-check read-only UI contract check; exits before date/slot interaction.",
   ].join("\n");
 }
 
@@ -986,6 +987,7 @@ async function main() {
   const endHour = parseHour(requiredArg(args, "end"), "--end", true);
   const mode = args.mode || "close";
   const apply = args.apply === "true";
+  const healthCheck = args["health-check"] === "true";
   const productUrl = args["product-url"] || optionalEnv(`NAVER_ROOM${room}_PRODUCT_URL`, "");
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
@@ -1010,6 +1012,7 @@ async function main() {
   const productName = ROOM_PRODUCT_NAMES[room];
   const releaseLock = await acquireProcessLock("rpa/.locks/naver-toggle-slots.lock", {
     label: `Naver slot RPA room=${room} ${dateValue} ${args.start}-${args.end} mode=${mode}`,
+    failIfLocked: healthCheck,
   });
   let browser;
   let page;
@@ -1031,6 +1034,17 @@ async function main() {
     console.log("Open schedule tab");
     await openScheduleTab(page, { url, productName });
     await saveScreenshot(page, "naver-slots-03-schedule");
+
+    if (healthCheck) {
+      console.log(JSON.stringify({
+        ok: true,
+        healthCheck: true,
+        platform: "naver",
+        contract: "slot-schedule",
+        currentUrl: page.url(),
+      }));
+      return;
+    }
 
     const targetLabel = await navigateToDate(page, dateValue);
     console.log(`Target day: ${targetLabel}`);
@@ -1058,7 +1072,10 @@ async function main() {
     console.log(`\nDone: room ${room}, ${dateValue}, ${args.start}-${args.end}, mode=${mode}`);
   } catch (error) {
     console.error("Naver slot RPA failed:", error instanceof Error ? error.message : error);
-    await page?.screenshot?.({ path: `rpa/screenshots/naver-slots-error-${Date.now()}.png`, fullPage: true }).catch(() => {});
+    const evidencePath = page
+      ? await saveScreenshot(page, "naver-slots-error").catch(() => null)
+      : null;
+    if (evidencePath) console.error(`RPA_EVIDENCE_PATH=${evidencePath}`);
     throw error;
   } finally {
     await browser?.close();

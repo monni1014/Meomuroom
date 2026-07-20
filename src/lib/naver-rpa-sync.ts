@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { prisma } from "./prisma";
 import type { ParsedReservation } from "./email-parser";
 import { clearRpaPendingForReservation, RPA_PENDING_MARKER } from "./rpa-reservation-state";
+import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts";
 
 const execFileAsync = promisify(execFile);
 
@@ -250,13 +251,24 @@ function parseJsonFromStdout(stdout: string) {
 }
 
 async function runNodeScript(args: string[], timeout = 180_000, envOverrides: Record<string, string> = {}) {
-  const result = await execFileAsync(process.execPath, args, {
-    cwd: process.cwd(),
-    env: { ...process.env, ...envOverrides },
-    timeout,
-    maxBuffer: 1024 * 1024 * 5,
-  });
-  return result.stdout;
+  const scriptPath = args[0] || "unknown-rpa-script";
+  try {
+    const result = await execFileAsync(process.execPath, args, {
+      cwd: process.cwd(),
+      env: { ...process.env, ...envOverrides },
+      timeout,
+      maxBuffer: 1024 * 1024 * 5,
+    });
+    await resolveRpaScriptAlerts(scriptPath).catch((error) => {
+      console.error(`[RPA alert] Could not resolve successful ${scriptPath}:`, error);
+    });
+    return result.stdout;
+  } catch (error) {
+    await reportRpaScriptFailure(error, scriptPath).catch((alertError) => {
+      console.error(`[RPA alert] Could not report failed ${scriptPath}:`, alertError);
+    });
+    throw error;
+  }
 }
 
 function shouldUseSpaceCloudXvfb() {
@@ -275,17 +287,28 @@ async function runSpaceCloudNodeScript(
     return runNodeScript(args, timeout, envOverrides);
   }
 
-  const result = await execFileAsync("xvfb-run", ["-a", process.execPath, ...args], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      ...envOverrides,
-      RPA_HEADLESS: "false",
-    },
-    timeout,
-    maxBuffer: 1024 * 1024 * 5,
-  });
-  return result.stdout;
+  const scriptPath = args[0] || "unknown-rpa-script";
+  try {
+    const result = await execFileAsync("xvfb-run", ["-a", process.execPath, ...args], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        ...envOverrides,
+        RPA_HEADLESS: "false",
+      },
+      timeout,
+      maxBuffer: 1024 * 1024 * 5,
+    });
+    await resolveRpaScriptAlerts(scriptPath).catch((error) => {
+      console.error(`[RPA alert] Could not resolve successful ${scriptPath}:`, error);
+    });
+    return result.stdout;
+  } catch (error) {
+    await reportRpaScriptFailure(error, scriptPath).catch((alertError) => {
+      console.error(`[RPA alert] Could not report failed ${scriptPath}:`, alertError);
+    });
+    throw error;
+  }
 }
 
 async function markRpaCheckRequired(reservationId: string, reason: string) {

@@ -29,6 +29,25 @@ node scripts/reconcile-spacecloud-manual-blocks.mjs --plan --full
 
 There is no scheduled server reboot.
 
+## RPA UI contract monitoring
+
+The app performs read-only Naver and SpaceCloud UI checks at 02:20, 08:20,
+14:20, and 20:20 Asia/Seoul. The checks stop before any date-slot or
+reservation mutation. If another RPA process owns the platform lock, the check
+is skipped instead of competing with the live reservation job.
+
+Every live reservation RPA also reports failures through the same classifier:
+
+- missing selectors, labels, or expected layout: `RPA_UI_CHANGE`
+- expired login or 401/403: `RPA_LOGIN_SESSION`
+- proxy/DNS/connection failures: `RPA_NETWORK`
+- other automation failures: `RPA_FAILURE`
+
+Alerts are deduplicated per platform and screen, appear on the Memoroom
+dashboard, and use `ADMIN_ALERT_WEBHOOK_URL` when that optional webhook is
+configured. Failure screenshots are stored under `rpa/screenshots`; a later
+successful check of the same screen resolves its alert.
+
 ## Windows Tailscale watchdog
 
 `ops/windows/Install-MemoroomTailscaleWatchdog.ps1` installs two least-privilege

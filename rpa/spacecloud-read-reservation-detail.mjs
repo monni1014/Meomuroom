@@ -167,6 +167,7 @@ async function main() {
   const browserOptions = spaceCloudBrowserOptions(headless);
   console.log(`[SpaceCloud network] Use ${browserOptions.useProxy ? "proxy" : "direct"} session path.`);
   const browser = await launchRpaBrowser(browserOptions);
+  let page;
 
   try {
     const context = await newRpaContext(browser, {
@@ -174,7 +175,7 @@ async function main() {
       blockHeavyResources: true,
       rpaRole: "spacecloud",
     });
-    const page = await context.newPage();
+    page = await context.newPage();
 
     console.log(`Open SpaceCloud detail: ${url}`);
     await page.goto(url, { timeout: 60_000, waitUntil: "domcontentloaded" });
@@ -229,6 +230,12 @@ async function main() {
     }
 
     console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    const evidencePath = page
+      ? await saveScreenshot(page, "spacecloud-detail-error").catch(() => null)
+      : null;
+    if (evidencePath) console.error(`RPA_EVIDENCE_PATH=${evidencePath}`);
+    throw error;
   } finally {
     await browser.close();
   }
