@@ -236,9 +236,10 @@ function dayBookingMetrics(
 
   for (const cancellation of cancellations) {
     const duration = cancellation.endHour - cancellation.startHour;
-    // 과거에 잘못 저장된 값이 있더라도 트라이그라운드 1시간 무료
-    // 예약은 시간·매출 집계에서 항상 제외한다.
-    const feeRate = isTriground && duration <= 1 ? 0 : cancellation.feeRate;
+    // 무료 1시간 예약은 감지 단계에서 수수료율 0%로 저장되어 이 목록에서
+    // 제외된다. 여기 들어온 취소는 원래 2시간 이상 예약의 일부 취소일 수도
+    // 있으므로 감지 단계에서 확정한 수수료율을 그대로 사용한다.
+    const feeRate = cancellation.feeRate;
     billableHours += cancellationEquivalentHours(duration, feeRate);
     if (isTriground && duration > 1) {
       revenue += Math.round(duration * 12_000 * (feeRate || 0) / 100);
