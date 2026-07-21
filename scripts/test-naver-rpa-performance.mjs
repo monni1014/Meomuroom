@@ -4,6 +4,7 @@ import { createStepTimer } from "../rpa/lib/step-timer.mjs";
 
 const detailSource = await readFile(new URL("../rpa/naver-read-booking-detail.mjs", import.meta.url), "utf8");
 const slotSource = await readFile(new URL("../rpa/naver-toggle-slots.mjs", import.meta.url), "utf8");
+const syncSource = await readFile(new URL("../src/lib/naver-rpa-sync.ts", import.meta.url), "utf8");
 
 assert.match(detailSource, /NAVER_DETAIL_READY_TIMEOUT_MS[\s\S]*28000/);
 assert.doesNotMatch(detailSource, /naver-booking-detail-read/);
@@ -24,6 +25,8 @@ assert.match(slotSource, /assertPanelHoursReadOnly/);
 assert.match(slotSource, /--verify-only/);
 assert.match(slotSource, /verify-only-completed/);
 assert.match(slotSource, /naver-slots-error/);
+assert.match(syncSource, /scope=parallel-slot platform=\$\{platform\}/);
+assert.match(syncSource, /scope=parallel-slot platform=combined/);
 
 const lines = [];
 const originalLog = console.log;

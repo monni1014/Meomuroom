@@ -1188,6 +1188,27 @@ function settledSlotResult(result: PromiseSettledResult<SlotActionResult>) {
   return { ok: false, skipped: false, reason };
 }
 
+async function timedParallelSlotAction(
+  platform: "naver" | "spacecloud",
+  mode: "close" | "open",
+  bookingLabel: string,
+  action: () => Promise<SlotActionResult>,
+) {
+  const startedAt = Date.now();
+  try {
+    const result = await action();
+    console.log(
+      `[RPA_TIMING] scope=parallel-slot platform=${platform} mode=${mode} bookingId=${bookingLabel} elapsedMs=${Date.now() - startedAt} status=${result.ok ? "ok" : "failed"} skipped=${result.skipped}`,
+    );
+    return result;
+  } catch (error) {
+    console.log(
+      `[RPA_TIMING] scope=parallel-slot platform=${platform} mode=${mode} bookingId=${bookingLabel} elapsedMs=${Date.now() - startedAt} status=error skipped=false`,
+    );
+    throw error;
+  }
+}
+
 async function syncNaverAndSpaceCloudSlots(
   item: NormalizedNaverReservation,
   mode: "close" | "open",
@@ -1196,15 +1217,26 @@ async function syncNaverAndSpaceCloudSlots(
   options: { claimUnlabelledBeforeDelete?: boolean } = {},
 ) {
   console.log(`[NaverRPA] Start parallel slot ${mode}: ${bookingLabel}`);
+  const parallelStartedAt = Date.now();
   const naverItems = await buildNaverSlotItems(item, mode, reservationId);
   const spaceCloudItems = [item];
 
   const [naverResult, spaceCloudResult] = await Promise.allSettled([
-    runSlotItemBatch(naverItems, (slotItem) => setNaverSlot(slotItem, mode), "Naver slot"),
-    runSlotItemBatch(
-      spaceCloudItems,
-      (slotItem) => runSpaceCloudSlotAction(slotItem, mode, reservationId, options),
-      "SpaceCloud external reservation",
+    timedParallelSlotAction(
+      "naver",
+      mode,
+      bookingLabel,
+      () => runSlotItemBatch(naverItems, (slotItem) => setNaverSlot(slotItem, mode), "Naver slot"),
+    ),
+    timedParallelSlotAction(
+      "spacecloud",
+      mode,
+      bookingLabel,
+      () => runSlotItemBatch(
+        spaceCloudItems,
+        (slotItem) => runSpaceCloudSlotAction(slotItem, mode, reservationId, options),
+        "SpaceCloud external reservation",
+      ),
     ),
   ]);
 
@@ -1229,6 +1261,9 @@ async function syncNaverAndSpaceCloudSlots(
   console.log(`[NaverRPA] Slot ${mode} result for ${bookingLabel}: ${naverSlot.ok ? "ok" : naverSlot.reason}`);
   console.log(
     `[NaverRPA] SpaceCloud external ${mode} result for ${bookingLabel}: ${spaceCloudSlot.ok ? "ok" : spaceCloudSlot.reason}`,
+  );
+  console.log(
+    `[RPA_TIMING] scope=parallel-slot platform=combined mode=${mode} bookingId=${bookingLabel} elapsedMs=${Date.now() - parallelStartedAt} status=${naverSlot.ok && spaceCloudSlot.ok ? "ok" : "failed"} skipped=${naverSlot.skipped && spaceCloudSlot.skipped}`,
   );
 
   return { naverSlot, spaceCloudSlot };
