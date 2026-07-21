@@ -61,6 +61,7 @@ function usage() {
     "  --mode=close|open",
     "  --product-url=... exact Naver product edit URL. Required for safety.",
     "  --apply       actually click toggles. Without this, it only navigates and validates.",
+    "  --verify-only read and freshly recheck the requested state without clicking or saving.",
     "  --health-check read-only UI contract check; exits before date/slot interaction.",
   ].join("\n");
 }
@@ -984,6 +985,7 @@ async function main() {
   const endHour = parseHour(requiredArg(args, "end"), "--end", true);
   const mode = args.mode || "close";
   const apply = args.apply === "true";
+  const verifyOnly = args["verify-only"] === "true";
   const healthCheck = args["health-check"] === "true";
   const productUrl = args["product-url"] || optionalEnv(`NAVER_ROOM${room}_PRODUCT_URL`, "");
   const timer = createStepTimer("naver-slots", {
@@ -993,6 +995,7 @@ async function main() {
     end: args.end,
     mode,
     apply,
+    verifyOnly,
   });
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
@@ -1003,6 +1006,9 @@ async function main() {
   }
   if (endHour <= startHour) {
     throw new Error("--end must be after --start");
+  }
+  if (verifyOnly && apply) {
+    throw new Error("--verify-only cannot be combined with --apply");
   }
   if (!existsSync(naverStorageStatePath)) {
     throw new Error("Naver login session is missing. Run `npm run rpa:naver-login` first.");
@@ -1060,6 +1066,24 @@ async function main() {
 
     await openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour);
     timer.mark("slot-panel-ready");
+
+    if (verifyOnly) {
+      await assertPanelHoursReadOnly(page, startHour, endHour, mode);
+      timer.mark("current-state-verified");
+      await verifySavedSlotState(page, { url, productName, dateValue, startHour, endHour, mode });
+      timer.mark("verify-only-completed", { status: "ok" });
+      console.log(JSON.stringify({
+        ok: true,
+        verifyOnly: true,
+        platform: "naver",
+        room,
+        date: dateValue,
+        start: args.start,
+        end: args.end,
+        mode,
+      }));
+      return;
+    }
 
     if (!apply) {
       timer.mark("dry-run-completed", { status: "ok" });

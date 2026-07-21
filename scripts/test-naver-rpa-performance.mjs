@@ -21,6 +21,8 @@ for (const normalScreenshot of [
 }
 assert.match(slotSource, /verifySavedSlotState/);
 assert.match(slotSource, /assertPanelHoursReadOnly/);
+assert.match(slotSource, /--verify-only/);
+assert.match(slotSource, /verify-only-completed/);
 assert.match(slotSource, /naver-slots-error/);
 
 const lines = [];
