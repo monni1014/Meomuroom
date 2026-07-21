@@ -7,6 +7,12 @@ import {
 import { markEmailProcessed } from "./processed-email";
 import { markRpaJobCheckRequired } from "./rpa-reservation-state";
 import { processSpaceCloudEmailWithRpa } from "./spacecloud-rpa-sync";
+import {
+  CANCELLATION_MAX_QUEUE_WAIT_MS,
+  cancellationQueueWaitMs,
+  isCancellationPriorityJob,
+  selectNextRpaJobIndex,
+} from "./rpa-job-priority";
 
 export type RpaEmailJob = {
   messageId: string;
@@ -17,6 +23,7 @@ export type RpaEmailJob = {
   parsedReservation: ParsedReservation;
   receivedAt?: Date;
   supersededConfirmationJobs?: RpaEmailJob[];
+  enqueuedAt?: number;
 };
 
 type RpaQueueState = {
@@ -45,7 +52,7 @@ const MAX_AUTO_FAILURES = 3;
 const SLOT_RECHECK_COOLDOWN_MS = 10 * 60 * 1000;
 
 function isCancellationJob(job: RpaEmailJob) {
-  return Boolean(job.parsedReservation.isCancelled);
+  return isCancellationPriorityJob(job);
 }
 
 function extractJobBookingKey(job: RpaEmailJob) {
@@ -144,7 +151,9 @@ function pushJobByPriority(state: RpaQueueState, job: RpaEmailJob) {
   if (isCancellationJob(job)) {
     removeQueuedConfirmationForCancellation(state, job);
     state.queue.push(job);
-    console.log(`[RPAQueue] Queued cancellation job after pending confirmations: ${job.messageId}`);
+    console.log(
+      `[RPAQueue] Queued cancellation behind confirmations (max wait ${CANCELLATION_MAX_QUEUE_WAIT_MS / 1000}s): ${job.messageId}`,
+    );
     return true;
   }
 
@@ -239,6 +248,8 @@ export function enqueueRpaEmailJobs(jobs: RpaEmailJob[]) {
   for (const job of jobs) {
     if (isRpaEmailJobActive(job.messageId)) continue;
 
+    job.enqueuedAt ??= Date.now();
+
     const queued = pushJobByPriority(state, job);
     if (queued) state.activeIds.add(job.messageId);
     if (queued || state.supersededConfirmationIds.has(job.messageId)) accepted += 1;
@@ -256,10 +267,18 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
   state.runningSources.add(source);
   try {
     while (true) {
-      const jobIndex = state.queue.findIndex((queuedJob) => queuedJob.source === source);
+      const now = Date.now();
+      const firstSourceJobIndex = state.queue.findIndex((queuedJob) => queuedJob.source === source);
+      const jobIndex = selectNextRpaJobIndex(state.queue, source, now);
       if (jobIndex === -1) break;
       const [job] = state.queue.splice(jobIndex, 1);
       if (!job) continue;
+
+      if (jobIndex !== firstSourceJobIndex && isCancellationJob(job)) {
+        console.log(
+          `[RPAQueue] Cancellation wait limit reached (${Math.round(cancellationQueueWaitMs(job, now) / 1000)}s). Run before later confirmations: ${job.messageId}`,
+        );
+      }
       state.currentJobs[source] = job;
 
       try {
@@ -374,6 +393,13 @@ export function enqueueNaverStatusReconcile() {
 
 export function getRpaQueueStatus() {
   const state = getState();
+  const now = Date.now();
+  const oldestCancellationWaitMs = state.queue.reduce((oldest, job) => (
+    isCancellationJob(job)
+      ? Math.max(oldest, cancellationQueueWaitMs(job, now))
+      : oldest
+  ), 0);
+
   return {
     queued: state.queue.length,
     activeOrCoolingDown:
@@ -389,5 +415,7 @@ export function getRpaQueueStatus() {
     },
     slotRecheckRunning: state.slotRecheckRunning,
     naverStatusReconcileRunning: state.naverStatusReconcileRunning,
+    oldestCancellationWaitMs,
+    cancellationMaxWaitMs: CANCELLATION_MAX_QUEUE_WAIT_MS,
   };
 }
