@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   CANCELLATION_MAX_QUEUE_WAIT_MS,
+  MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION,
   cancellationQueueWaitMs,
   selectNextRpaJobIndex,
 } from "../src/lib/rpa-job-priority.ts";
@@ -23,6 +24,17 @@ assert.equal(
   selectNextRpaJobIndex(recentCancellation, "naver", NOW),
   0,
   "A new confirmation stays ahead while the cancellation is within the wait limit.",
+);
+assert.equal(
+  selectNextRpaJobIndex(
+    recentCancellation,
+    "naver",
+    NOW,
+    CANCELLATION_MAX_QUEUE_WAIT_MS,
+    MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION,
+  ),
+  1,
+  "A cancellation runs after two confirmations even before the time limit.",
 );
 
 const overdueCancellation = [

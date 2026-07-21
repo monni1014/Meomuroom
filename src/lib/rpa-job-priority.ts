@@ -1,4 +1,5 @@
 export const CANCELLATION_MAX_QUEUE_WAIT_MS = 3 * 60 * 1000;
+export const MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION = 2;
 
 export type RpaPriorityJob = {
   source: "naver" | "spacecloud";
@@ -20,15 +21,22 @@ export function selectNextRpaJobIndex<T extends RpaPriorityJob>(
   source: T["source"],
   now = Date.now(),
   cancellationMaxWaitMs = CANCELLATION_MAX_QUEUE_WAIT_MS,
+  confirmationRunsWhileCancellationWaiting = 0,
+  maxConfirmationRuns = MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION,
 ) {
   const firstSourceIndex = queue.findIndex((job) => job.source === source);
   if (firstSourceIndex === -1) return -1;
 
-  const overdueCancellationIndex = queue.findIndex((job) => (
+  const firstCancellationIndex = queue.findIndex((job) => (
     job.source === source
     && isCancellationPriorityJob(job)
-    && cancellationQueueWaitMs(job, now) >= cancellationMaxWaitMs
   ));
+  if (firstCancellationIndex === -1) return firstSourceIndex;
 
-  return overdueCancellationIndex === -1 ? firstSourceIndex : overdueCancellationIndex;
+  const cancellationIsOverdue = cancellationQueueWaitMs(queue[firstCancellationIndex], now) >= cancellationMaxWaitMs;
+  const confirmationRunLimitReached = confirmationRunsWhileCancellationWaiting >= maxConfirmationRuns;
+
+  return cancellationIsOverdue || confirmationRunLimitReached
+    ? firstCancellationIndex
+    : firstSourceIndex;
 }

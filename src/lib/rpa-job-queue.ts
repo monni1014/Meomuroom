@@ -9,6 +9,7 @@ import { markRpaJobCheckRequired } from "./rpa-reservation-state";
 import { processSpaceCloudEmailWithRpa } from "./spacecloud-rpa-sync";
 import {
   CANCELLATION_MAX_QUEUE_WAIT_MS,
+  MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION,
   cancellationQueueWaitMs,
   isCancellationPriorityJob,
   selectNextRpaJobIndex,
@@ -41,6 +42,7 @@ type RpaQueueState = {
   lastSlotRecheckAt: number;
   naverStatusReconcileRunning: boolean;
   lastNaverStatusReconcileAt: number;
+  confirmationRunsWhileCancellationWaiting: Record<RpaEmailJob["source"], number>;
 };
 
 type RpaQueueGlobal = typeof globalThis & {
@@ -193,10 +195,12 @@ function getState() {
     lastSlotRecheckAt: 0,
     naverStatusReconcileRunning: false,
     lastNaverStatusReconcileAt: 0,
+    confirmationRunsWhileCancellationWaiting: { naver: 0, spacecloud: 0 },
   };
   const state = g.__memoroomRpaQueue;
   state.runningSources ??= new Set<RpaEmailJob["source"]>();
   state.currentJobs ??= {};
+  state.confirmationRunsWhileCancellationWaiting ??= { naver: 0, spacecloud: 0 };
   return state;
 }
 
@@ -269,14 +273,21 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
     while (true) {
       const now = Date.now();
       const firstSourceJobIndex = state.queue.findIndex((queuedJob) => queuedJob.source === source);
-      const jobIndex = selectNextRpaJobIndex(state.queue, source, now);
+      const confirmationRunCount = state.confirmationRunsWhileCancellationWaiting[source];
+      const jobIndex = selectNextRpaJobIndex(
+        state.queue,
+        source,
+        now,
+        CANCELLATION_MAX_QUEUE_WAIT_MS,
+        confirmationRunCount,
+      );
       if (jobIndex === -1) break;
       const [job] = state.queue.splice(jobIndex, 1);
       if (!job) continue;
 
       if (jobIndex !== firstSourceJobIndex && isCancellationJob(job)) {
         console.log(
-          `[RPAQueue] Cancellation wait limit reached (${Math.round(cancellationQueueWaitMs(job, now) / 1000)}s). Run before later confirmations: ${job.messageId}`,
+          `[RPAQueue] Cancellation fairness threshold reached (wait ${Math.round(cancellationQueueWaitMs(job, now) / 1000)}s, confirmations ${confirmationRunCount}/${MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION}). Run before later confirmations: ${job.messageId}`,
         );
       }
       state.currentJobs[source] = job;
@@ -333,6 +344,14 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
       } finally {
         state.activeIds.delete(job.messageId);
         delete state.currentJobs[source];
+
+        if (isCancellationJob(job)) {
+          state.confirmationRunsWhileCancellationWaiting[source] = 0;
+        } else if (state.queue.some((queuedJob) => queuedJob.source === source && isCancellationJob(queuedJob))) {
+          state.confirmationRunsWhileCancellationWaiting[source] += 1;
+        } else {
+          state.confirmationRunsWhileCancellationWaiting[source] = 0;
+        }
       }
     }
   } finally {
@@ -417,5 +436,7 @@ export function getRpaQueueStatus() {
     naverStatusReconcileRunning: state.naverStatusReconcileRunning,
     oldestCancellationWaitMs,
     cancellationMaxWaitMs: CANCELLATION_MAX_QUEUE_WAIT_MS,
+    maxConfirmationRunsBeforeCancellation: MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION,
+    confirmationRunsWhileCancellationWaiting: { ...state.confirmationRunsWhileCancellationWaiting },
   };
 }
