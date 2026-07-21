@@ -4,6 +4,7 @@ import { prisma } from "./prisma";
 import type { ParsedReservation } from "./email-parser";
 import { clearRpaPendingForReservation, RPA_PENDING_MARKER } from "./rpa-reservation-state";
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts";
+import { resolveCancellationOperationalTimes } from "./reservation-operational-time";
 
 const execFileAsync = promisify(execFile);
 
@@ -594,7 +595,11 @@ async function cancelNaverReservation(
       return { reservation: existing, created: false, changed: false };
     }
 
-    const preserveOperationalTime = existing.memo?.includes(RPA_TIME_OVERRIDE_MARKER) === true;
+    // The calendar is the source of truth for cancellation coverage. An owner
+    // may have expanded the Naver time to include preparation/cleanup time and
+    // manually resized the matching Naver/SpaceCloud blocks. Never replace
+    // that operational range with the shorter time returned by Naver here.
+    const operationalTimes = resolveCancellationOperationalTimes(existing, item);
     const updated = await prisma.reservation.update({
       where: { id: existing.id },
       data: {
@@ -603,8 +608,8 @@ async function cancelNaverReservation(
         roomName: item.roomName,
         customerName: isMaskedOrFallbackName(item.customerName) ? existing.customerName : item.customerName,
         phone: item.phone || existing.phone,
-        startTime: preserveOperationalTime ? existing.startTime : item.startTime,
-        endTime: preserveOperationalTime ? existing.endTime : item.endTime,
+        startTime: operationalTimes.startTime,
+        endTime: operationalTimes.endTime,
         price: cancellationPrice,
         status: "CANCELLED",
         paymentMethod: item.paymentMethod,
