@@ -6,6 +6,7 @@ import { humanClick, humanClickElement, humanDelay } from "./lib/human.mjs";
 import { naverStorageStatePath } from "./lib/paths.mjs";
 import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
+import { createStepTimer } from "./lib/step-timer.mjs";
 
 const BIZ_ITEMS_URL = "https://partner.booking.naver.com/bizes/1473933/biz-items";
 
@@ -59,7 +60,7 @@ function usage() {
     "  --end=HH:00",
     "  --mode=close|open",
     "  --product-url=... exact Naver product edit URL. Required for safety.",
-    "  --apply       actually click toggles. Without this, it only navigates and screenshots.",
+    "  --apply       actually click toggles. Without this, it only navigates and validates.",
     "  --health-check read-only UI contract check; exits before date/slot interaction.",
   ].join("\n");
 }
@@ -225,7 +226,6 @@ async function openScheduleTab(page, { url, productName }) {
       console.log(`Schedule range is not loaded after schedule URL. Retry. attempt=${attempt}`);
     }
 
-    await saveScreenshot(page, `naver-slots-schedule-retry-${attempt}`);
   }
 
   throw new Error(`Could not open Naver schedule tab for ${productName}.`);
@@ -529,7 +529,6 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour
     await humanDelay(page, "after failed panel attempt escape", 500, 1100);
   }
 
-  await saveScreenshot(page, "naver-slots-date-mismatch");
   throw new Error(
     `Opened wrong date panel. Expected ${expectedPanelTitle}. Refusing to toggle or save.`
   );
@@ -955,7 +954,6 @@ async function clickSlotPanelSave(page) {
   }, null, { timeout: 8_000 }).then(() => true).catch(() => false);
 
   if (!closed) {
-    await saveScreenshot(page, "naver-slots-save-not-closed");
     throw new Error("Slot save did not close the panel. Refusing to mark the slot operation as successful.");
   }
 
@@ -967,7 +965,6 @@ async function verifySavedSlotState(page, { url, productName, dateValue, startHo
   await openScheduleTab(page, { url, productName });
   const targetLabel = await navigateToDate(page, dateValue);
   await openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour);
-  await saveScreenshot(page, "naver-slots-07-verify-panel");
   await assertPanelHoursReadOnly(page, startHour, endHour, mode);
   await page.keyboard.press("Escape");
   await quickSlotDelay(page, "after verification escape", 250, 600);
@@ -989,6 +986,14 @@ async function main() {
   const apply = args.apply === "true";
   const healthCheck = args["health-check"] === "true";
   const productUrl = args["product-url"] || optionalEnv(`NAVER_ROOM${room}_PRODUCT_URL`, "");
+  const timer = createStepTimer("naver-slots", {
+    room,
+    date: dateValue,
+    start: args.start,
+    end: args.end,
+    mode,
+    apply,
+  });
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
     throw new Error("--date must be YYYY-MM-DD");
@@ -1018,6 +1023,7 @@ async function main() {
   let page;
 
   try {
+    timer.mark("lock-acquired");
     const headless = resolveRpaHeadless();
     browser = await launchRpaBrowser({ headless, reuse: headless });
     const context = await newRpaContext(browser, {
@@ -1025,15 +1031,16 @@ async function main() {
       rpaRole: "naver",
     });
     page = await context.newPage();
+    timer.mark("browser-ready", { headless, reuse: headless });
 
     console.log(`Open: ${url}`);
     await page.goto(url, { timeout: 60_000, waitUntil: "domcontentloaded" });
     await humanDelay(page, "after page open", 1200, 2800);
-    await saveScreenshot(page, "naver-slots-01-product-url");
+    timer.mark("product-page-ready");
 
     console.log("Open schedule tab");
     await openScheduleTab(page, { url, productName });
-    await saveScreenshot(page, "naver-slots-03-schedule");
+    timer.mark("schedule-ready");
 
     if (healthCheck) {
       console.log(JSON.stringify({
@@ -1043,38 +1050,51 @@ async function main() {
         contract: "slot-schedule",
         currentUrl: page.url(),
       }));
+      timer.mark("health-check-completed", { status: "ok" });
       return;
     }
 
     const targetLabel = await navigateToDate(page, dateValue);
     console.log(`Target day: ${targetLabel}`);
-    await saveScreenshot(page, "naver-slots-04-target-week");
+    timer.mark("target-date-visible");
 
     await openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour);
-    await saveScreenshot(page, "naver-slots-05-slot-panel");
+    timer.mark("slot-panel-ready");
 
     if (!apply) {
+      timer.mark("dry-run-completed", { status: "ok" });
       console.log("\nDry run complete. Add --apply to actually click toggles.");
       return;
     }
 
     const changedCount = await assertSlotPanelState(page, startHour, endHour, mode);
+    timer.mark("target-state-prepared", { changedCount });
 
     if (changedCount > 0) {
       await clickSlotPanelSave(page);
-      await saveScreenshot(page, "naver-slots-06-after-toggle");
+      timer.mark("slot-panel-saved", { changedCount });
     } else {
       console.log(`All target slots are already ${mode}. Skip save.`);
-      await saveScreenshot(page, "naver-slots-06-already-target-state");
+      timer.mark("save-skipped", { changedCount: 0 });
     }
 
     await verifySavedSlotState(page, { url, productName, dateValue, startHour, endHour, mode });
+    timer.mark("final-state-verified", { status: "ok" });
     console.log(`\nDone: room ${room}, ${dateValue}, ${args.start}-${args.end}, mode=${mode}`);
   } catch (error) {
+    timer.mark("failed", {
+      status: "error",
+      error: error instanceof Error ? error.name : "unknown",
+    });
     console.error("Naver slot RPA failed:", error instanceof Error ? error.message : error);
     const evidencePath = page
       ? await saveScreenshot(page, "naver-slots-error").catch(() => null)
       : null;
+    if (page) {
+      const title = await page.title().catch(() => "");
+      console.error(`RPA_DIAGNOSTIC_URL=${page.url()}`);
+      console.error(`RPA_DIAGNOSTIC_TITLE=${title}`);
+    }
     if (evidencePath) console.error(`RPA_EVIDENCE_PATH=${evidencePath}`);
     throw error;
   } finally {

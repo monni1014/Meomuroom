@@ -13,6 +13,7 @@
     "test:rpa-queue": "node --experimental-strip-types scripts/test-rpa-job-priority.mjs",
     "test:competitor-ranges": "node --experimental-strip-types scripts/test-competitor-scan-ranges.mjs",
     "test:competitor-cancellations": "node --experimental-strip-types scripts/test-competitor-cancellations.mjs",
+    "test:naver-rpa-performance": "node scripts/test-naver-rpa-performance.mjs",
     "rpa:configure-proxy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-rpa-proxy.ps1",
     "rpa:test-proxy": "node rpa/test-proxy.mjs",
     "rpa:proxy-status": "node rpa/proxy-seller-status.mjs",

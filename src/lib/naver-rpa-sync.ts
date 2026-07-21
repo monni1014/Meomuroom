@@ -14,6 +14,15 @@ const FAST_SLOT_RPA_ENV = {
   RPA_LOCK_RETRY_MAX_MS: "700",
 };
 
+const FAST_DETAIL_RPA_ENV = {
+  // The previous default multiplier was 2.0. A value of 1.0 keeps human-like
+  // interaction pauses while cutting those fixed waits roughly in half.
+  RPA_DELAY_MULTIPLIER: "1.0",
+  RPA_MIN_RANDOM_DELAY_FLOOR_MS: "600",
+  NAVER_DETAIL_READY_TIMEOUT_MS: "28000",
+  NAVER_BOOKING_LINK_TIMEOUT_MS: "12000",
+};
+
 const FAST_SPACECLOUD_SLOT_RPA_ENV = {
   RPA_DELAY_MULTIPLIER: "0.55",
   RPA_MIN_RANDOM_DELAY_FLOOR_MS: "350",
@@ -252,6 +261,11 @@ function parseJsonFromStdout(stdout: string) {
 
 async function runNodeScript(args: string[], timeout = 180_000, envOverrides: Record<string, string> = {}) {
   const scriptPath = args[0] || "unknown-rpa-script";
+  const writeTimingLogs = (stdout: string | undefined) => {
+    for (const line of String(stdout || "").split(/\r?\n/)) {
+      if (line.startsWith("[RPA_TIMING]")) console.log(line);
+    }
+  };
   try {
     const result = await execFileAsync(process.execPath, args, {
       cwd: process.cwd(),
@@ -259,11 +273,13 @@ async function runNodeScript(args: string[], timeout = 180_000, envOverrides: Re
       timeout,
       maxBuffer: 1024 * 1024 * 5,
     });
+    writeTimingLogs(result.stdout);
     await resolveRpaScriptAlerts(scriptPath).catch((error) => {
       console.error(`[RPA alert] Could not resolve successful ${scriptPath}:`, error);
     });
     return result.stdout;
   } catch (error) {
+    writeTimingLogs((error as { stdout?: string }).stdout);
     await reportRpaScriptFailure(error, scriptPath).catch((alertError) => {
       console.error(`[RPA alert] Could not report failed ${scriptPath}:`, alertError);
     });
@@ -363,7 +379,7 @@ async function clearRpaCheckRequired(reservationId: string, shouldRemove?: (line
 async function readNaverDetail(bookingId: string, dateValue?: string) {
   const args = ["rpa/naver-read-booking-detail.mjs", bookingId];
   if (dateValue) args.push(`--date=${dateValue}`);
-  return parseJsonFromStdout(await runNodeScript(args));
+  return parseJsonFromStdout(await runNodeScript(args, 180_000, FAST_DETAIL_RPA_ENV));
 }
 
 function normalizeDetail(detail: NaverDetailResult, fallbackDiscount = 0): NormalizedNaverReservation {

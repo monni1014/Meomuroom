@@ -1,11 +1,14 @@
 import { existsSync } from "node:fs";
 import { launchRpaBrowser, newRpaContext, resolveRpaHeadless } from "./lib/browser.mjs";
 import { optionalEnv } from "./lib/env.mjs";
-import { humanClickElement, humanDelay, humanMouseMove } from "./lib/human.mjs";
+import { humanClickElement, humanDelay } from "./lib/human.mjs";
 import { naverStorageStatePath } from "./lib/paths.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
+import { createStepTimer } from "./lib/step-timer.mjs";
 
 const BOOKING_LIST_URL = "https://partner.booking.naver.com/bizes/1473933/booking-list-view";
+const DETAIL_READY_TIMEOUT_MS = Number(optionalEnv("NAVER_DETAIL_READY_TIMEOUT_MS", "28000"));
+const BOOKING_LINK_TIMEOUT_MS = Number(optionalEnv("NAVER_BOOKING_LINK_TIMEOUT_MS", "12000"));
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -166,7 +169,7 @@ function extractUseDateTime(text) {
   return { dateText: null, timeText: null, combined: null };
 }
 
-async function waitForVisiblePhone(page, bookingId, timeout = 55_000) {
+async function waitForVisiblePhone(page, bookingId, timeout = DETAIL_READY_TIMEOUT_MS) {
   await page.waitForFunction(
     (id) => {
       const text = document.body?.innerText || document.body?.textContent || "";
@@ -182,15 +185,17 @@ async function waitForVisiblePhone(page, bookingId, timeout = 55_000) {
   );
 }
 
-async function retryNaverDetailReadiness(page, bookingId) {
+async function retryNaverDetailReadiness(page, bookingId, timer) {
   try {
-    await waitForVisiblePhone(page, bookingId, 55_000);
+    await waitForVisiblePhone(page, bookingId);
     return;
   } catch {
+    timer.mark("detail-ready-timeout", { status: "retry" });
     console.log("Naver detail phone was not visible yet. Reload once before final parse.");
     await page.reload({ timeout: 60_000, waitUntil: "domcontentloaded" });
-    await humanDelay(page, "after naver detail reload", 2800, 6200);
-    await waitForVisiblePhone(page, bookingId, 55_000);
+    timer.mark("detail-reload-dom-ready");
+    await waitForVisiblePhone(page, bookingId);
+    timer.mark("detail-retry-ready");
   }
 }
 
@@ -204,28 +209,33 @@ async function main() {
     throw new Error("Naver login session is missing. Run `npm run rpa:naver-login` first.");
   }
 
+  const bookingId = target.match(/\d{9,12}/)?.[0] || null;
+  const timer = createStepTimer("naver-detail", {
+    bookingId: bookingId || "direct-url",
+  });
   const headless = resolveRpaHeadless();
-  const browser = await launchRpaBrowser({ headless, reuse: headless });
+  let browser;
   let page;
 
   try {
+    browser = await launchRpaBrowser({ headless, reuse: headless });
     const context = await newRpaContext(browser, {
       storageState: naverStorageStatePath,
       rpaRole: "naver",
     });
     page = await context.newPage();
-    const bookingId = target.match(/\d{9,12}/)?.[0] || null;
+    timer.mark("browser-ready", { headless, reuse: headless });
 
     if (bookingId) {
       await page.goto(buildBookingListUrl(args.date), { timeout: 60_000, waitUntil: "domcontentloaded" });
-      await humanDelay(page, "after booking list open", 3200, 5800);
+      timer.mark("booking-list-dom-ready");
 
       const bookingLink = page.getByText(bookingId, { exact: true }).first();
-      await bookingLink.waitFor({ state: "visible", timeout: 20_000 });
+      await bookingLink.waitFor({ state: "visible", timeout: BOOKING_LINK_TIMEOUT_MS });
+      timer.mark("booking-link-visible");
       await humanDelay(page, "before booking detail click", 1800, 3600);
       await humanClickElement(page, bookingLink, "booking detail link");
-      await humanDelay(page, "after booking detail click", 2800, 6200);
-      await humanMouseMove(page, 1020, 360, "Naver booking detail read");
+      timer.mark("booking-detail-clicked");
       await page.waitForFunction((id) => {
         const sideText = [...document.querySelectorAll('[class*="SideLayer__visible"], [class*="SideFrame__"], [class*="Detail__"]')]
           .map((element) => element.textContent || "")
@@ -238,14 +248,13 @@ async function main() {
         return text.includes("예약 상세정보")
           && compact.includes(id)
           && /01[016789]-?\d{3,4}-?\d{4}/.test(compact);
-      }, bookingId, { timeout: 55_000 }).catch(async () => {
-        await retryNaverDetailReadiness(page, bookingId);
+      }, bookingId, { timeout: DETAIL_READY_TIMEOUT_MS }).catch(async () => {
+        await retryNaverDetailReadiness(page, bookingId, timer);
       });
-      await humanDelay(page, "after booking detail ready", 2200, 4800);
+      timer.mark("booking-detail-ready");
     } else {
       await page.goto(target, { timeout: 60_000, waitUntil: "domcontentloaded" });
-      await humanDelay(page, "after booking detail url open", 2800, 6200);
-      await humanMouseMove(page, 1020, 360, "Naver booking detail url read");
+      timer.mark("booking-detail-url-dom-ready");
       await page.waitForFunction(() => {
         const text = [...document.querySelectorAll('[class*="SideLayer__visible"], [class*="SideFrame__"], [class*="Detail__"]')]
           .map((element) => element.textContent || "")
@@ -254,13 +263,12 @@ async function main() {
         return text.includes("예약 상세정보")
           && compact.includes("예약자")
           && /01[016789]-?\d{3,4}-?\d{4}/.test(compact);
-      }, null, { timeout: 55_000 }).catch(async () => {
-        await retryNaverDetailReadiness(page, null);
+      }, null, { timeout: DETAIL_READY_TIMEOUT_MS }).catch(async () => {
+        await retryNaverDetailReadiness(page, null, timer);
       });
-      await humanDelay(page, "after booking detail ready", 2200, 4800);
+      timer.mark("booking-detail-ready");
     }
 
-    const screenshot = await saveScreenshot(page, "naver-booking-detail-read");
     const bodyText = await page.locator("body").innerText({ timeout: 20_000 });
     const supplementalText = await page.evaluate(() => {
       const selectors = [
@@ -284,7 +292,7 @@ async function main() {
 
     const result = {
       currentUrl: page.url(),
-      screenshot,
+      screenshot: null,
       bookingStatus: extractBookingStatus(detailText),
       bookingNumber: extractValueAfterLabels(detailText, ["예약번호", "예약 번호"]) || bookingId || extractBookingNumber(detailText),
       customerName: extractValueAfterLabels(detailText, ["예약자", "예약자명", "이름"]) || listRow.customerName || compactInfo.customerName,
@@ -298,6 +306,7 @@ async function main() {
       priceText: extractValueAfterLabels(detailText, ["결제금액", "결제 금액", "결제금액 합계"]),
       visibleTextSample: detailText.slice(0, 1200),
     };
+    timer.mark("detail-parsed");
 
     if (!result.customerName || result.customerName.includes("*")) {
       throw new Error("Naver detail customer name was not fully visible after retry.");
@@ -314,15 +323,25 @@ async function main() {
           visibleTextSample: "[redacted]",
         }
       : result;
+    timer.mark("completed", { status: "ok" });
     console.log(JSON.stringify(outputResult, null, 2));
   } catch (error) {
+    timer.mark("failed", {
+      status: "error",
+      error: error instanceof Error ? error.name : "unknown",
+    });
     const evidencePath = page
       ? await saveScreenshot(page, "naver-booking-detail-error").catch(() => null)
       : null;
+    if (page) {
+      const title = await page.title().catch(() => "");
+      console.error(`RPA_DIAGNOSTIC_URL=${page.url()}`);
+      console.error(`RPA_DIAGNOSTIC_TITLE=${title}`);
+    }
     if (evidencePath) console.error(`RPA_EVIDENCE_PATH=${evidencePath}`);
     throw error;
   } finally {
-    await browser.close();
+    await browser?.close();
   }
 }
 
