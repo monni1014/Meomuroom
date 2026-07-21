@@ -25,8 +25,8 @@ const FAST_DETAIL_RPA_ENV = {
 };
 
 const FAST_SPACECLOUD_SLOT_RPA_ENV = {
-  RPA_DELAY_MULTIPLIER: "0.55",
-  RPA_MIN_RANDOM_DELAY_FLOOR_MS: "350",
+  RPA_DELAY_MULTIPLIER: "0.42",
+  RPA_MIN_RANDOM_DELAY_FLOOR_MS: "250",
   RPA_LOCK_RETRY_MIN_MS: "300",
   RPA_LOCK_RETRY_MAX_MS: "700",
 };
@@ -260,13 +260,14 @@ function parseJsonFromStdout(stdout: string) {
   return JSON.parse(stdout.slice(start, end + 1)) as NaverDetailResult;
 }
 
+function writeRpaTimingLogs(stdout: string | undefined) {
+  for (const line of String(stdout || "").split(/\r?\n/)) {
+    if (line.startsWith("[RPA_TIMING]")) console.log(line);
+  }
+}
+
 async function runNodeScript(args: string[], timeout = 180_000, envOverrides: Record<string, string> = {}) {
   const scriptPath = args[0] || "unknown-rpa-script";
-  const writeTimingLogs = (stdout: string | undefined) => {
-    for (const line of String(stdout || "").split(/\r?\n/)) {
-      if (line.startsWith("[RPA_TIMING]")) console.log(line);
-    }
-  };
   try {
     const result = await execFileAsync(process.execPath, args, {
       cwd: process.cwd(),
@@ -274,13 +275,13 @@ async function runNodeScript(args: string[], timeout = 180_000, envOverrides: Re
       timeout,
       maxBuffer: 1024 * 1024 * 5,
     });
-    writeTimingLogs(result.stdout);
+    writeRpaTimingLogs(result.stdout);
     await resolveRpaScriptAlerts(scriptPath).catch((error) => {
       console.error(`[RPA alert] Could not resolve successful ${scriptPath}:`, error);
     });
     return result.stdout;
   } catch (error) {
-    writeTimingLogs((error as { stdout?: string }).stdout);
+    writeRpaTimingLogs((error as { stdout?: string }).stdout);
     await reportRpaScriptFailure(error, scriptPath).catch((alertError) => {
       console.error(`[RPA alert] Could not report failed ${scriptPath}:`, alertError);
     });
@@ -316,11 +317,13 @@ async function runSpaceCloudNodeScript(
       timeout,
       maxBuffer: 1024 * 1024 * 5,
     });
+    writeRpaTimingLogs(result.stdout);
     await resolveRpaScriptAlerts(scriptPath).catch((error) => {
       console.error(`[RPA alert] Could not resolve successful ${scriptPath}:`, error);
     });
     return result.stdout;
   } catch (error) {
+    writeRpaTimingLogs((error as { stdout?: string }).stdout);
     await reportRpaScriptFailure(error, scriptPath).catch((alertError) => {
       console.error(`[RPA alert] Could not report failed ${scriptPath}:`, alertError);
     });

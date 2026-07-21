@@ -7,6 +7,7 @@ import { spaceCloudStorageStatePath } from "./lib/paths.mjs";
 import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
 import { spaceCloudBrowserOptions } from "./lib/spacecloud-session.mjs";
+import { createStepTimer } from "./lib/step-timer.mjs";
 
 const TEXT = {
   hostLogout: "\ud638\uc2a4\ud2b8 \ub85c\uadf8\uc544\uc6c3",
@@ -1013,11 +1014,66 @@ async function clickModalDatePickerMonthArrow(page, direction) {
   const picker = await getModalDatePickerInfo(page);
   if (!picker) throw new Error("Could not find SpaceCloud modal date picker.");
 
-  const x = direction === "previous" ? picker.x + 28 : picker.x + picker.width - 28;
-  const y = picker.y + 34;
-  await humanDelay(page, `before modal date picker ${direction} month click`, 700, 1700);
-  await humanClick(page, x, y, `modal date picker ${direction} month`);
-  await humanDelay(page, `after modal date picker ${direction} month click`, 900, 2000);
+  const control = await page.evaluate(({ direction }) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    const header = [...document.querySelectorAll(".calendar_ly_repeat .calendar_tit")]
+      .find(visible);
+    if (!header) return null;
+
+    const rect = header.getBoundingClientRect();
+    return {
+      x: direction === "previous" ? rect.x + 16 : rect.x + rect.width - 16,
+      y: rect.y + rect.height / 2,
+      tag: header.tagName,
+      className: typeof header.className === "string" ? header.className : "",
+    };
+  }, { direction });
+
+  const x = control?.x ?? (direction === "previous" ? picker.x + 28 : picker.x + picker.width - 28);
+  const y = control?.y ?? picker.y + 34;
+  const startingIndex = monthIndex(picker.year, picker.month);
+  const expectedIndex = monthIndex(picker.year, picker.month) + (direction === "previous" ? -1 : 1);
+  console.log(`SpaceCloud modal date picker ${direction} control: ${JSON.stringify(control || { fallback: true })}`);
+
+  for (let clickAttempt = 1; clickAttempt <= 2; clickAttempt += 1) {
+    const beforeClick = await getModalDatePickerInfo(page);
+    if (!beforeClick) {
+      throw new Error("SpaceCloud modal date picker closed while changing month.");
+    }
+    const beforeClickIndex = monthIndex(beforeClick.year, beforeClick.month);
+    if (beforeClickIndex === expectedIndex) {
+      console.log(`SpaceCloud modal date picker moved to ${beforeClick.year}.${beforeClick.month}.`);
+      return;
+    }
+    if (beforeClickIndex !== startingIndex) {
+      throw new Error(`SpaceCloud modal date picker moved to an unexpected month: ${beforeClick.year}.${beforeClick.month}.`);
+    }
+
+    // The picker is visible slightly before its click handlers become ready.
+    // A short readiness pause plus state polling is much faster than the old
+    // multi-second fixed wait while still proving that each click took effect.
+    await page.waitForTimeout(350);
+    await humanClick(page, x, y, `modal date picker ${direction} month`);
+
+    const deadline = Date.now() + 2_500;
+    while (Date.now() < deadline) {
+      const updatedPicker = await getModalDatePickerInfo(page);
+      if (updatedPicker && monthIndex(updatedPicker.year, updatedPicker.month) === expectedIndex) {
+        console.log(`SpaceCloud modal date picker moved to ${updatedPicker.year}.${updatedPicker.month}.`);
+        return;
+      }
+      await page.waitForTimeout(100);
+    }
+
+    console.log(`SpaceCloud modal date picker ${direction} click did not register; retrying once.`);
+  }
+
+  throw new Error(`SpaceCloud modal date picker did not move ${direction}.`);
 }
 
 async function navigateModalDatePickerToMonth(page, dateValue) {
@@ -1795,6 +1851,7 @@ async function addExternalReservation(page, {
   apply,
   claimOnly = false,
   skipCalendarPrecheck = false,
+  timingStep = () => {},
 }) {
   if (!skipCalendarPrecheck) {
     const alreadyAdded = await findAndOpenExternalReservation(page, {
@@ -1864,6 +1921,7 @@ async function addExternalReservation(page, {
 
   await clickAddReservation(page);
   await saveScreenshot(page, "spacecloud-external-add-modal");
+  timingStep("add-modal-ready");
   await typeModalDate(page, dateValue);
   await assertModalDate(page, dateValue);
 
@@ -1874,6 +1932,7 @@ async function addExternalReservation(page, {
   if (phone) await fillInputByIndex(page, 2, phone);
   await fillInputByIndex(page, 3, marker);
   await saveScreenshot(page, "spacecloud-external-add-filled");
+  timingStep("add-form-ready");
 
   if (!apply) {
     console.log("Dry run complete. Add --apply to create SpaceCloud external reservation.");
@@ -1933,6 +1992,7 @@ async function addExternalReservation(page, {
   }
   await humanDelay(page, "after SpaceCloud external save", 900, 2200);
   await saveScreenshot(page, "spacecloud-external-after-add");
+  timingStep("external-reservation-saved");
 
   await verifyExternalReservationAdded(page, {
     room,
@@ -1943,6 +2003,7 @@ async function addExternalReservation(page, {
     customerName,
     phone,
   });
+  timingStep("external-reservation-verified");
 
   return { ok: true, created: true, dryRun: false };
 }
@@ -2196,6 +2257,7 @@ async function deleteExternalReservation(page, {
   apply,
   allowStillBlockedAfterDelete = false,
   claimUnlabelledBeforeDelete = false,
+  timingStep = () => {},
 }) {
   let opened = await findAndOpenExternalReservation(page, {
     dateValue,
@@ -2285,6 +2347,7 @@ async function deleteExternalReservation(page, {
   }
 
   await saveScreenshot(page, "spacecloud-external-delete-modal");
+  timingStep("delete-modal-ready");
 
   if (!apply) {
     console.log("Dry run complete. Add --apply to delete matching SpaceCloud external reservation.");
@@ -2309,6 +2372,7 @@ async function deleteExternalReservation(page, {
   await humanDelay(page, "after SpaceCloud external delete", 900, 2200);
   throwIfSpaceCloudMutationFailed(page, "external reservation delete");
   await saveScreenshot(page, "spacecloud-external-after-delete");
+  timingStep("external-reservation-deleted");
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     await reopenCalendarForVerification(page, {
@@ -2353,6 +2417,7 @@ async function deleteExternalReservation(page, {
     }
 
     await saveScreenshot(page, "spacecloud-external-delete-verified");
+    timingStep("external-reservation-delete-verified");
     console.log("SpaceCloud external reservation deletion was verified from a freshly loaded calendar.");
     return { ok: true, alreadyOpen: false, dryRun: false };
   }
@@ -2388,6 +2453,14 @@ async function main() {
   const newEndHour = mode === "resize"
     ? parseHour(requiredArg(args, "new-end"), "--new-end", true)
     : null;
+  const timer = createStepTimer("spacecloud-external", {
+    room,
+    date: dateValue,
+    start: args.start,
+    end: args.end,
+    mode,
+    apply,
+  });
 
   if (!["close", "open", "resize"].includes(mode)) throw new Error("--mode must be close, open, or resize");
   if (claimOnly && mode !== "close") throw new Error("--claim-only can only be used with --mode=close");
@@ -2409,6 +2482,7 @@ async function main() {
     staleMs: 15 * 60 * 1000,
     failIfLocked: healthCheck,
   });
+  timer.mark("lock-acquired");
   const headless = resolveRpaHeadless();
   const browserOptions = spaceCloudBrowserOptions(headless);
   console.log(`[SpaceCloud network] Use ${browserOptions.useProxy ? "proxy" : "direct"} session path.`);
@@ -2423,6 +2497,7 @@ async function main() {
       rpaRole: "spacecloud",
     });
     page = await context.newPage();
+    timer.mark("browser-ready", { headless, reuse: browserOptions.reuse });
     if (inspectSaveRequest) {
       await page.route(
         "https://api.spacecloud.kr/partner/products/*/external_schedules",
@@ -2439,9 +2514,17 @@ async function main() {
             }
           }).catch(() => "");
           let bodyKeys = [];
+          let schedule = {};
           try {
             const body = request.postDataJSON();
             bodyKeys = body && typeof body === "object" ? Object.keys(body).sort() : [];
+            schedule = body && typeof body === "object"
+              ? Object.fromEntries(
+                ["SDATE", "EDATE", "SHOUR", "EHOUR"]
+                  .filter((key) => key in body)
+                  .map((key) => [key, String(body[key])]),
+              )
+              : {};
           } catch {
             // Keep malformed or non-JSON bodies redacted.
           }
@@ -2457,6 +2540,7 @@ async function main() {
               && authorizationToken === localStorageToken,
             headerNames: Object.keys(headers).sort(),
             bodyKeys,
+            schedule,
           })}`);
           await route.fulfill({
             status: 418,
@@ -2499,9 +2583,11 @@ async function main() {
 
     await openReservationList(page);
     await saveScreenshot(page, "spacecloud-external-01-list");
+    timer.mark("reservation-list-ready");
     await openCalendarView(page);
     await assertCalendarView(page, "product selection");
     await selectProduct(page, room);
+    timer.mark("calendar-ready");
 
     if (healthCheck) {
       await assertCalendarView(page, "health check");
@@ -2529,6 +2615,7 @@ async function main() {
       mode === "open" ? "date selection" : mode === "resize" ? "resize selection" : "add reservation precheck",
     );
     await saveScreenshot(page, "spacecloud-external-02-calendar");
+    timer.mark("target-date-ready");
 
     if (inspectCalendar) {
       console.log(JSON.stringify({
@@ -2551,19 +2638,21 @@ async function main() {
         apply,
         claimOnly,
         skipCalendarPrecheck: false,
+        timingStep: (step, fields) => timer.mark(step, fields),
       })
       : mode === "open"
         ? await deleteExternalReservation(page, {
-        room,
-        dateValue,
-        startHour,
-        endHour,
-        marker,
-        customerName,
-        phone,
-        apply,
-        allowStillBlockedAfterDelete,
+          room,
+          dateValue,
+          startHour,
+          endHour,
+          marker,
+          customerName,
+          phone,
+          apply,
+          allowStillBlockedAfterDelete,
           claimUnlabelledBeforeDelete,
+          timingStep: (step, fields) => timer.mark(step, fields),
         })
         : await resizeExternalReservation(page, {
           room,
@@ -2577,6 +2666,7 @@ async function main() {
           phone,
           apply,
         });
+    timer.mark("action-completed", { status: result.ok ? "ok" : "failed" });
 
     console.log(JSON.stringify({
       ...result,
@@ -2592,6 +2682,7 @@ async function main() {
       marker,
     }, null, 2));
   } catch (error) {
+    timer.mark("failed", { status: "error" });
     console.error("SpaceCloud external reservation RPA failed:", error instanceof Error ? error.message : error);
     const evidencePath = page
       ? await saveScreenshot(page, "spacecloud-external-error").catch(() => null)
