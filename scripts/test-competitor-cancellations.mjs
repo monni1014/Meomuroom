@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   cancellationEquivalentHours,
   competitorCancellationFeeRate,
+  shouldDisplayZeroFeeCancellationAsNew,
 } from "../src/lib/competitor-cancellation.ts";
 
 const dayBefore = new Date("2026-07-21T09:00:00.000Z"); // 2026-07-21 18:00 KST
@@ -24,5 +25,10 @@ assert.equal(
 assert.equal(cancellationEquivalentHours(2, 50), 1);
 assert.equal(cancellationEquivalentHours(3, 30), 0.9);
 assert.equal(cancellationEquivalentHours(1, 0), 0);
+assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-a", 1, 0), true);
+assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-b", 1, 0), true);
+assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-b", 2, 0), false);
+assert.equal(shouldDisplayZeroFeeCancellationAsNew("synergy", 1, 0), false);
+assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-b", 1, 50), false);
 
 console.log("Competitor cancellation tests passed.");

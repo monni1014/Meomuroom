@@ -39,3 +39,11 @@ export function cancellationEquivalentHours(durationHours: number, feeRate: numb
   const safeRate = Number.isFinite(feeRate) ? Math.min(100, Math.max(0, feeRate || 0)) : 0;
   return Math.round(safeDuration * safeRate) / 100;
 }
+
+export function shouldDisplayZeroFeeCancellationAsNew(
+  competitorId: string,
+  durationHours: number,
+  feeRate: number | null,
+) {
+  return competitorId.startsWith("triground-") && durationHours === 1 && feeRate === 0;
+}

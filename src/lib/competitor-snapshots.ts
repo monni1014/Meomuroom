@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { shouldDisplayZeroFeeCancellationAsNew } from "@/lib/competitor-cancellation";
 
 const COMPETITOR_IDS = ["synergy", "triground-a", "triground-b"] as const;
 
@@ -282,7 +283,15 @@ export async function getCompetitorSnapshots(year: number, month: number) {
     };
   })
     .filter((event) => !event.eventIds.every((id) => supersededBookingIds.has(id)))
-    .filter((event) => !(event.eventType === "CANCELLED" && event.feeRate === 0));
+    .filter((event) => (
+      event.eventType !== "CANCELLED"
+      || event.feeRate !== 0
+      || shouldDisplayZeroFeeCancellationAsNew(
+        event.competitorId,
+        event.endHour - event.startHour,
+        event.feeRate,
+      )
+    ));
 
   return {
     days,
