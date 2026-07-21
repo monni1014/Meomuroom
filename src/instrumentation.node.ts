@@ -122,7 +122,7 @@ export async function registerNodeInstrumentation() {
 
   async function runCompetitorMonitor(
     label: string,
-    mode: "today" | "today-next" | "today-plus-seven" | "next-week" | "daily" | "weekly" | "monthly",
+    mode: "today" | "today-next" | "today-plus-seven" | "night-month-horizon" | "next-week" | "daily" | "weekly" | "monthly",
     skipIfRecentMinutes?: number,
   ) {
     if (competitorScanRunning) {
@@ -230,7 +230,7 @@ export async function registerNodeInstrumentation() {
   });
 
   schedule("0 23 * * *", async () => {
-    await runCompetitorMonitor("23:00 next seven days", "next-week");
+    await runCompetitorMonitor("23:00 tomorrow through month horizon", "night-month-horizon");
   }, {
     timezone: "Asia/Seoul",
   });
@@ -247,5 +247,5 @@ export async function registerNodeInstrumentation() {
   console.log("[Cron] ISP proxy status monitor started (5 minute interval)");
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
   console.log("[Cron] RPA UI health monitor started (02:20/08:20/14:20/20:20 read-only checks)");
-  console.log("[Cron] Competitor monitor started (07:00 today+tomorrow, 12:00/18:00 today+7 days, 23:00 tomorrow+7 days, monthly baseline at 07:00 on day 1)");
+  console.log("[Cron] Competitor monitor started (07:00 today+tomorrow, 12:00/18:00 today+7 days, 23:00 tomorrow through month-end or next-month day 15 in the final 7 days, monthly baseline at 07:00 on day 1)");
 }

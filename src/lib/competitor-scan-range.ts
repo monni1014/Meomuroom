@@ -2,6 +2,7 @@ export type CompetitorScanMode =
   | "today"
   | "today-next"
   | "today-plus-seven"
+  | "night-month-horizon"
   | "next-week"
   | "daily"
   | "weekly"
@@ -30,6 +31,18 @@ function endOfMonthKey(dateKey: string) {
   return `${year}-${String(month).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`;
 }
 
+function nextMonthDayKey(dateKey: string, day: number) {
+  const [year, month] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month, day, 12));
+  return date.toISOString().slice(0, 10);
+}
+
+function isInLastSevenDaysOfMonth(dateKey: string) {
+  const day = Number(dateKey.slice(8, 10));
+  const endDay = Number(endOfMonthKey(dateKey).slice(8, 10));
+  return day >= endDay - 6;
+}
+
 function calendarWeekday(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay();
@@ -46,6 +59,14 @@ export function resolveCompetitorScanRange(options: RangeOptions, today = kstDat
     return { startKey: today, endKey: addDays(today, 7) };
   }
   if (options.mode === "next-week") return { startKey: addDays(today, 1), endKey: addDays(today, 7) };
+  if (options.mode === "night-month-horizon") {
+    return {
+      startKey: addDays(today, 1),
+      endKey: isInLastSevenDaysOfMonth(today)
+        ? nextMonthDayKey(today, 15)
+        : endOfMonthKey(today),
+    };
+  }
   if (options.mode === "monthly") return { startKey: today, endKey: endOfMonthKey(today) };
 
   const daysUntilSunday = (7 - calendarWeekday(today)) % 7;
