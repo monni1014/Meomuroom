@@ -1,0 +1,41 @@
+const KST_TIME_ZONE = "Asia/Seoul";
+
+function kstDateKey(date: Date) {
+  return date.toLocaleDateString("en-CA", { timeZone: KST_TIME_ZONE });
+}
+
+function daysBetween(fromKey: string, toKey: string) {
+  const from = new Date(`${fromKey}T00:00:00+09:00`);
+  const to = new Date(`${toKey}T00:00:00+09:00`);
+  return Math.round((to.getTime() - from.getTime()) / 86_400_000);
+}
+
+export function competitorCancellationFeeRate(
+  competitorId: string,
+  useDateKey: string,
+  checkedAt: Date,
+  bookingDurationHours: number,
+) {
+  // 트라이그라운드의 독립된 1시간 예약은 공유오피스 이용자에게
+  // 무료로 제공되므로 취소 시에도 매출과 취소수수료가 없다.
+  if (competitorId.startsWith("triground-") && bookingDurationHours <= 1) return 0;
+
+  const remainingDays = daysBetween(kstDateKey(checkedAt), useDateKey);
+  if (competitorId === "synergy") {
+    if (remainingDays >= 7) return 0;
+    if (remainingDays === 6) return 30;
+    if (remainingDays === 5) return 50;
+    if (remainingDays === 4) return 70;
+    return 100;
+  }
+
+  if (remainingDays >= 2) return 0;
+  if (remainingDays === 1) return 50;
+  return 100;
+}
+
+export function cancellationEquivalentHours(durationHours: number, feeRate: number | null) {
+  const safeDuration = Number.isFinite(durationHours) ? Math.max(0, durationHours) : 0;
+  const safeRate = Number.isFinite(feeRate) ? Math.min(100, Math.max(0, feeRate || 0)) : 0;
+  return Math.round(safeDuration * safeRate) / 100;
+}

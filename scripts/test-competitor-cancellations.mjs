@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import {
+  cancellationEquivalentHours,
+  competitorCancellationFeeRate,
+} from "../src/lib/competitor-cancellation.ts";
+
+const dayBefore = new Date("2026-07-21T09:00:00.000Z"); // 2026-07-21 18:00 KST
+
+assert.equal(
+  competitorCancellationFeeRate("triground-b", "2026-07-22", dayBefore, 1),
+  0,
+  "A one-hour Triground booking is free and must never create a cancellation fee.",
+);
+assert.equal(
+  competitorCancellationFeeRate("triground-b", "2026-07-22", dayBefore, 2),
+  50,
+  "A two-hour Triground booking keeps the normal day-before cancellation policy.",
+);
+assert.equal(
+  competitorCancellationFeeRate("synergy", "2026-07-22", dayBefore, 2),
+  100,
+  "Synergy keeps its own cancellation policy.",
+);
+assert.equal(cancellationEquivalentHours(2, 50), 1);
+assert.equal(cancellationEquivalentHours(3, 30), 0.9);
+assert.equal(cancellationEquivalentHours(1, 0), 0);
+
+console.log("Competitor cancellation tests passed.");

@@ -8,6 +8,7 @@ import {
   resolveCompetitorScanRange,
   type CompetitorScanMode,
 } from "@/lib/competitor-scan-range";
+import { competitorCancellationFeeRate } from "@/lib/competitor-cancellation";
 import { prisma } from "@/lib/prisma";
 
 const execFileAsync = promisify(execFile);
@@ -80,12 +81,6 @@ function addDays(dateKey: string, amount: number) {
   return kstDateKey(date);
 }
 
-function daysBetween(fromKey: string, toKey: string) {
-  const from = new Date(`${fromKey}T00:00:00+09:00`);
-  const to = new Date(`${toKey}T00:00:00+09:00`);
-  return Math.round((to.getTime() - from.getTime()) / 86_400_000);
-}
-
 function processIsRunning(pid: number | null) {
   if (!pid || !Number.isInteger(pid) || pid <= 0) return null;
   try {
@@ -137,21 +132,6 @@ async function acquireMonitorLock() {
   }
 
   return null;
-}
-
-function cancellationFeeRate(competitorId: string, useDateKey: string, checkedAt: Date) {
-  const remainingDays = daysBetween(kstDateKey(checkedAt), useDateKey);
-  if (competitorId === "synergy") {
-    if (remainingDays >= 7) return 0;
-    if (remainingDays === 6) return 30;
-    if (remainingDays === 5) return 50;
-    if (remainingDays === 4) return 70;
-    return 100;
-  }
-
-  if (remainingDays >= 2) return 0;
-  if (remainingDays === 1) return 50;
-  return 100;
 }
 
 function parseScannerResult(stdout: string) {
@@ -650,6 +630,28 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
   let bookingEvents = 0;
   let cancellationEvents = 0;
 
+  const originalBookingDurationHours = (current: ExistingSlot | undefined) => {
+    if (!current) return 1;
+    const bookingIdentity = current.lastBookedAt?.getTime() ?? null;
+    let duration = 1;
+
+    for (const direction of [-1, 1]) {
+      let hour = current.hour + direction;
+      while (true) {
+        const adjacent = currentMap.get(`${current.competitorId}|${current.dateKey}|${hour}`);
+        if (!adjacent) break;
+        const adjacentIdentity = adjacent.lastBookedAt?.getTime() ?? null;
+        if (adjacentIdentity !== bookingIdentity) break;
+        // Baseline slots have no booking identity. Only contiguous slots that
+        // are still booked can safely be treated as the same original block.
+        if (bookingIdentity === null && adjacent.state !== "BOOKED") break;
+        duration += 1;
+        hour += direction;
+      }
+    }
+    return duration;
+  };
+
   for (const [groupKey, observations] of observationGroups) {
     const plans = observations.map((observation) => {
       const key = `${observation.competitorId}|${observation.dateKey}|${observation.hour}`;
@@ -664,8 +666,16 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
         // newly won competitor booking or an opportunity lost by Memoroom.
         opportunityLostRooms = "NONE";
       }
+      const bookingDurationHours = resolved.eventType === "CANCELLED"
+        ? originalBookingDurationHours(current)
+        : 0;
       const feeRate = resolved.eventType === "CANCELLED"
-        ? cancellationFeeRate(observation.competitorId, observation.dateKey, resolved.eventObservedAt)
+        ? competitorCancellationFeeRate(
+            observation.competitorId,
+            observation.dateKey,
+            resolved.eventObservedAt,
+            bookingDurationHours,
+          )
         : null;
       return {
         key,
