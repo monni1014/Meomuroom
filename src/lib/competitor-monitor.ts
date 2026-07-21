@@ -4,6 +4,10 @@ import { mkdir, open, readFile, rm, stat, unlink, writeFile } from "node:fs/prom
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createAdminAlert, resolveAdminAlertsByType } from "@/lib/admin-alerts";
+import {
+  resolveCompetitorScanRange,
+  type CompetitorScanMode,
+} from "@/lib/competitor-scan-range";
 import { prisma } from "@/lib/prisma";
 
 const execFileAsync = promisify(execFile);
@@ -12,14 +16,7 @@ const ALERT_TYPE = "COMPETITOR_MONITOR";
 const STALE_SCAN_MINUTES = 15;
 const SCAN_LOCK_PATH = resolve("rpa/.locks/competitor-monitor.lock");
 
-export type CompetitorScanMode =
-  | "today"
-  | "today-next"
-  | "next-week"
-  | "daily"
-  | "weekly"
-  | "monthly"
-  | "range";
+export type { CompetitorScanMode } from "@/lib/competitor-scan-range";
 
 type ScannerObservation = {
   competitorId: string;
@@ -87,33 +84,6 @@ function daysBetween(fromKey: string, toKey: string) {
   const from = new Date(`${fromKey}T00:00:00+09:00`);
   const to = new Date(`${toKey}T00:00:00+09:00`);
   return Math.round((to.getTime() - from.getTime()) / 86_400_000);
-}
-
-function endOfMonthKey(dateKey: string) {
-  const [year, month] = dateKey.split("-").map(Number);
-  const endDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return `${year}-${String(month).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`;
-}
-
-function calendarWeekday(dateKey: string) {
-  const [year, month, day] = dateKey.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay();
-}
-
-function resolveRange(options: RunOptions) {
-  const today = kstDateKey();
-  if (options.mode === "range") {
-    if (!options.startKey || !options.endKey) throw new Error("Range scan requires startKey and endKey");
-    return { startKey: options.startKey, endKey: options.endKey };
-  }
-  if (options.mode === "today") return { startKey: today, endKey: today };
-  if (options.mode === "today-next") return { startKey: today, endKey: addDays(today, 1) };
-  if (options.mode === "next-week") return { startKey: addDays(today, 1), endKey: addDays(today, 7) };
-  if (options.mode === "daily") return { startKey: today, endKey: addDays(today, 7) };
-  if (options.mode === "monthly") return { startKey: today, endKey: endOfMonthKey(today) };
-
-  const daysUntilSunday = (7 - calendarWeekday(today)) % 7;
-  return { startKey: today, endKey: addDays(today, daysUntilSunday) };
 }
 
 function processIsRunning(pid: number | null) {
@@ -804,7 +774,7 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
 }
 
 async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
-  const range = resolveRange(options);
+  const range = resolveCompetitorScanRange(options);
 
   // The scanner itself has a 12-minute hard timeout. Any older RUNNING row
   // belongs to an interrupted server/request and must not remain active.
