@@ -154,7 +154,7 @@ export default function CalendarPage() {
   const [isCleanUpBad, setIsCleanUpBad] = useState(false);
   const [memo, setMemo] = useState("");
   const [complaints, setComplaints] = useState("");
-  const [formSource, setFormSource] = useState("naver"); // 예약 루트 (네이버/스페이스클라우드)
+  const [formSource, setFormSource] = useState("manual"); // 예약 루트 (수기/네이버/스페이스클라우드)
   const [formRoom, setFormRoom] = useState("머무룸1");
   const [formDates, setFormDates] = useState<string[]>([format(new Date(), "yyyy-MM-dd")]);
 
@@ -304,7 +304,7 @@ export default function CalendarPage() {
       setIsCleanUpBad(false);
       setMemo("");
       setComplaints("");
-      setFormSource("naver");
+      setFormSource("manual");
       setIsModalOpen(false);
       fetchReservations();
       alert("저장되었습니다.");
@@ -323,7 +323,7 @@ export default function CalendarPage() {
     setFormName(res.customerName || "");
     setFormPhone(res.phone || "");
     setCustomerType(normalizeCustomerType(res.customerType));
-    setFormSource(res.source === "spacecloud" ? "spacecloud" : "naver");
+    setFormSource(["manual", "naver", "spacecloud"].includes(res.source) ? res.source : "manual");
     setFormRoom(res.roomName || "머무룸1");
     setFormDates([format(s, "yyyy-MM-dd")]);
     setFormStartTime(hhmm(s));
@@ -858,6 +858,7 @@ export default function CalendarPage() {
                     onChange={(e) => setFormSource(e.target.value)}
                     className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium bg-white"
                   >
+                    <option value="manual">수기</option>
                     <option value="naver">네이버</option>
                     <option value="spacecloud">스페이스클라우드</option>
                   </select>

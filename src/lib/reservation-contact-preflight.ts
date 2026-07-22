@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 const ALERT_TYPE = "RESERVATION_CONTACT_MISSING";
 const DAY_MS = 24 * 60 * 60 * 1000;
+const CONTACT_LOOKAHEAD_DAYS = 7;
 
 function alertKey(reservationId: string) {
   return `reservation-contact:${reservationId}`;
@@ -23,11 +24,15 @@ function formatKstDateTime(value: Date) {
 }
 
 export async function runReservationContactPreflight(now = new Date()) {
+  const lookaheadEnd = new Date(now.getTime() + CONTACT_LOOKAHEAD_DAYS * DAY_MS);
   const reservations = await prisma.reservation.findMany({
     where: {
       status: "CONFIRMED",
       isNoShow: false,
-      startTime: { gt: now },
+      startTime: {
+        gt: now,
+        lte: lookaheadEnd,
+      },
     },
     select: {
       id: true,
