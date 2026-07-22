@@ -1,4 +1,5 @@
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
+import { getKstDateKey } from "@/lib/kst-time";
 import { isValidKoreanMobilePhone } from "@/lib/phone-number";
 import { prisma } from "@/lib/prisma";
 
@@ -45,20 +46,28 @@ export async function runReservationContactPreflight(now = new Date()) {
     orderBy: { startTime: "asc" },
   });
 
-  const missing = reservations.filter((reservation) => !isValidKoreanMobilePhone(reservation.phone));
+  const todayKey = getKstDateKey(now);
+  const missing = reservations.filter((reservation) =>
+    !isValidKoreanMobilePhone(reservation.phone)
+    && (reservation.source !== "manual" || getKstDateKey(reservation.startTime) === todayKey)
+  );
   const missingKeys = new Set(missing.map((reservation) => alertKey(reservation.id)));
 
   for (const reservation of missing) {
     const hoursUntilStart = (reservation.startTime.getTime() - now.getTime()) / (60 * 60 * 1000);
-    const severity = hoursUntilStart <= 24 ? "CRITICAL" : "WARNING";
+    const isManual = reservation.source === "manual";
+    const severity = isManual || hoursUntilStart <= 24 ? "CRITICAL" : "WARNING";
     const dedupeKey = alertKey(reservation.id);
-    const message = `${reservation.roomName} / ${formatKstDateTime(reservation.startTime)} / ${reservation.source} 예약의 고객번호가 없어 2시간 전 안내를 보낼 수 없습니다.`;
+    const title = isManual ? "수기 예약 안내 확인 필요" : "예약 고객번호 확인 필요";
+    const message = isManual
+      ? `${reservation.roomName} / ${formatKstDateTime(reservation.startTime)} / 수기 예약에 전화번호가 없어 자동 문자를 보낼 수 없습니다. 카톡 등 수동 안내를 확인해 주세요.`
+      : `${reservation.roomName} / ${formatKstDateTime(reservation.startTime)} / ${reservation.source} 예약의 고객번호가 없어 2시간 전 안내를 보낼 수 없습니다.`;
     const existing = await prisma.adminAlert.findUnique({ where: { dedupeKey } });
     if (existing && !existing.resolved) {
-      if (existing.severity !== severity || existing.message !== message) {
+      if (existing.severity !== severity || existing.title !== title || existing.message !== message) {
         await prisma.adminAlert.update({
           where: { id: existing.id },
-          data: { severity, message, dismissedAt: null },
+          data: { severity, title, message, dismissedAt: null },
         });
       }
       continue;
@@ -66,7 +75,7 @@ export async function runReservationContactPreflight(now = new Date()) {
     await createAdminAlert({
       type: ALERT_TYPE,
       severity,
-      title: "예약 고객번호 확인 필요",
+      title,
       message,
       dedupeKey,
     });
