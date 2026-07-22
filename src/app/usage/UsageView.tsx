@@ -656,10 +656,10 @@ export default function UsagePage() {
         </div>
 
         {/* 인원/시간 컨트롤러: 예약(읽기전용) / 실제(스테퍼) / 추가(스테퍼) / 추가시간(스테퍼) */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
           {/* 예약 이용인원 - 메일 자동, 읽기전용 */}
           <div className="space-y-3">
-            <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
+            <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 sm:text-sm">
               <Users className="w-4 h-4 text-slate-400" />
               예약 인원 <span className="text-[10px] font-medium text-slate-400">(메일)</span>
             </label>
@@ -670,21 +670,21 @@ export default function UsagePage() {
 
           {/* 실제 이용인원 - 메인 저장값 */}
           <div className="space-y-3">
-            <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
+            <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 sm:text-sm">
               <Users className="w-4 h-4 text-indigo-500" />
               실제 인원
             </label>
-            <div className="flex items-center justify-between bg-indigo-50/60 p-2 rounded-xl border border-indigo-100">
+            <div className="flex min-w-0 items-center justify-between gap-1 rounded-xl border border-indigo-100 bg-indigo-50/60 p-1.5 sm:p-2">
               <button
                 onClick={() => handleHeadCountChange(Math.max(0, headCount - 1))}
-                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-base font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-90 sm:h-10 sm:w-10 sm:text-lg"
               >
                 -
               </button>
-              <span className="text-xl font-bold text-indigo-700">{headCount}명</span>
+              <span className="shrink-0 whitespace-nowrap text-base font-bold text-indigo-700 sm:text-xl">{headCount}명</span>
               <button
                 onClick={() => handleHeadCountChange(headCount + 1)}
-                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-base font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-90 sm:h-10 sm:w-10 sm:text-lg"
               >
                 +
               </button>
@@ -693,21 +693,21 @@ export default function UsagePage() {
 
           {/* 추가 인원 - 실제 = 예약 초과분. +/- 누르면 실제 인원에 반영 */}
           <div className="space-y-3">
-            <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
+            <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 sm:text-sm">
               <Users className="w-4 h-4 text-emerald-500" />
               추가 인원
             </label>
-            <div className="flex items-center justify-between bg-emerald-50/60 p-2 rounded-xl border border-emerald-100">
+            <div className="flex min-w-0 items-center justify-between gap-1 rounded-xl border border-emerald-100 bg-emerald-50/60 p-1.5 sm:p-2">
               <button
                 onClick={() => handleHeadCountChange(Math.max(reserved, headCount - 1))}
-                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-base font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-90 sm:h-10 sm:w-10 sm:text-lg"
               >
                 -
               </button>
-              <span className="text-xl font-bold text-emerald-600">{headCount - reserved > 0 ? `+${headCount - reserved}` : 0}명</span>
+              <span className="shrink-0 whitespace-nowrap text-base font-bold text-emerald-600 sm:text-xl">{headCount - reserved > 0 ? `+${headCount - reserved}` : 0}명</span>
               <button
                 onClick={() => handleHeadCountChange(headCount + 1)}
-                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-base font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-90 sm:h-10 sm:w-10 sm:text-lg"
               >
                 +
               </button>
@@ -716,21 +716,21 @@ export default function UsagePage() {
 
           {/* 추가 시간 - 스테퍼 */}
           <div className="space-y-3">
-            <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
+            <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 sm:text-sm">
               <Clock className="w-4 h-4 text-emerald-500" />
               추가 시간
             </label>
-            <div className="flex items-center justify-between bg-emerald-50/60 p-2 rounded-xl border border-emerald-100">
+            <div className="flex min-w-0 items-center justify-between gap-1 rounded-xl border border-emerald-100 bg-emerald-50/60 p-1.5 sm:p-2">
               <button
                 onClick={() => addExtraTime(-1)}
-                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-base font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-90 sm:h-10 sm:w-10 sm:text-lg"
               >
                 -
               </button>
-              <span className="text-xl font-bold text-emerald-600">{extraTime > 0 ? `+${extraTime}` : extraTime}시간</span>
+              <span className="shrink-0 whitespace-nowrap text-base font-bold text-emerald-600 sm:text-xl">{extraTime > 0 ? `+${extraTime}` : extraTime}시간</span>
               <button
                 onClick={() => addExtraTime(1)}
-                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-base font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-90 sm:h-10 sm:w-10 sm:text-lg"
               >
                 +
               </button>
@@ -739,21 +739,21 @@ export default function UsagePage() {
 
           {/* 구매한 커피 */}
           <div className="space-y-3">
-            <label className="text-sm font-semibold text-slate-700 flex items-center gap-1">
+            <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 sm:text-sm">
               <Coffee className="w-4 h-4 text-amber-500" />
               구매한 커피
             </label>
-            <div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-200">
+            <div className="flex min-w-0 items-center justify-between gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1.5 sm:p-2">
               <button
                 onClick={() => setCoffeeCount(Math.max(0, coffeeCount - 1))}
-                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-base font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-90 sm:h-10 sm:w-10 sm:text-lg"
               >
                 -
               </button>
-              <span className="text-xl font-bold text-slate-900">{coffeeCount}잔</span>
+              <span className="shrink-0 whitespace-nowrap text-base font-bold text-slate-900 sm:text-xl">{coffeeCount}잔</span>
               <button
                 onClick={() => setCoffeeCount(coffeeCount + 1)}
-                className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center font-bold text-slate-700 text-lg hover:bg-slate-50 border border-slate-200 transition active:scale-90"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-base font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-90 sm:h-10 sm:w-10 sm:text-lg"
               >
                 +
               </button>
