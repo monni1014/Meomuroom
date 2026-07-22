@@ -24,7 +24,10 @@ import {
 } from "@/lib/manual-table-colors";
 import { cn } from "@/lib/utils";
 import type { CompetitorSnapshotPayload } from "@/lib/competitor-snapshots";
-import { cancellationEquivalentHours } from "@/lib/competitor-cancellation";
+import {
+  cancellationDetectedDateLabel,
+  cancellationEquivalentHours,
+} from "@/lib/competitor-cancellation";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 
 type SlotState = "available" | "closed" | "policy_closed" | "need_check" | "not_collected";
@@ -291,16 +294,13 @@ function cancellationAtHour(cancellations: CancellationSnapshot[], hour: number)
 
 function cancellationCellLabel(cancellation: CancellationSnapshot, hour: number) {
   const feeRate = `${cancellation.feeRate ?? 0}%`;
+  const detectedDate = cancellationDetectedDateLabel(cancellation.occurredAt);
   const isStart = hour === cancellation.startHour;
   const isEnd = hour === cancellation.endHour - 1;
-  if (isStart && isEnd) return `취소 ${feeRate}`;
-  if (isStart) return "취소";
+  if (isStart && isEnd) return `취소 ${detectedDate}`;
+  if (isStart) return `취소 ${detectedDate}`;
   if (isEnd) return feeRate;
   return "";
-}
-
-function hourAmountLabel(hours: number) {
-  return Number.isInteger(hours) ? String(hours) : hours.toFixed(2).replace(/0+$/, "");
 }
 
 function scanStatusLabel(scan: ScanSnapshot | null) {
@@ -997,13 +997,6 @@ export default function CompetitorsView({
                       const noteParts = [
                         snapshot?.checkedAt ? `확인 ${format(new Date(snapshot.checkedAt), "HH:mm")}` : null,
                         pendingCount > 0 ? `취소 재확인 ${pendingCount}칸` : null,
-                        ...cancellations.map((event) => {
-                          const adjustedHours = cancellationEquivalentHours(
-                            event.endHour - event.startHour,
-                            event.feeRate,
-                          );
-                          return `취소 ${event.startHour}~${event.endHour}시 · 수수료 ${event.feeRate ?? 0}% · 집계 ${hourAmountLabel(adjustedHours)}시간`;
-                        }),
                       ].filter(Boolean);
                       return (
                         <tr key={`${competitor.id}-${dateKey}`} className={MONTHLY_GRID_BODY_ROW_CLASS}>
@@ -1057,7 +1050,7 @@ export default function CompetitorsView({
                                 data-manual-cell-key={key}
                                 data-manual-color={manualCell.color || ""}
                                 title={showCancellation && visibleCancellation
-                                  ? `취소 ${visibleCancellation.startHour}~${visibleCancellation.endHour}시 · 수수료 ${visibleCancellation.feeRate ?? 0}%`
+                                  ? `취소 ${visibleCancellation.startHour}~${visibleCancellation.endHour}시 · ${cancellationDetectedDateLabel(visibleCancellation.occurredAt)} 발견 · 수수료 ${visibleCancellation.feeRate ?? 0}%`
                                   : undefined}
                                 onMouseDown={(event) => {
                                   if (paintSelection !== null || isCancellationPaint) {

@@ -40,6 +40,12 @@ export function cancellationEquivalentHours(durationHours: number, feeRate: numb
   return Math.round(safeDuration * safeRate) / 100;
 }
 
+export function cancellationDetectedDateLabel(occurredAt: string | Date) {
+  const date = occurredAt instanceof Date ? occurredAt : new Date(occurredAt);
+  const [, month, day] = kstDateKey(date).split("-").map(Number);
+  return `${month}/${day}`;
+}
+
 export function shouldDisplayZeroFeeCancellationAsNew(
   competitorId: string,
   durationHours: number,

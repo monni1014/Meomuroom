@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  cancellationDetectedDateLabel,
   cancellationEquivalentHours,
   competitorCancellationFeeRate,
   shouldDisplayZeroFeeCancellationAsNew,
@@ -25,6 +26,11 @@ assert.equal(
 assert.equal(cancellationEquivalentHours(2, 50), 1);
 assert.equal(cancellationEquivalentHours(3, 30), 0.9);
 assert.equal(cancellationEquivalentHours(1, 0), 0);
+assert.equal(
+  cancellationDetectedDateLabel("2026-07-22T15:30:00.000Z"),
+  "7/23",
+  "Cancellation discovery dates must be shown in Korea time even across a UTC date boundary.",
+);
 assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-a", 1, 0), true);
 assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-b", 1, 0), true);
 assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-b", 2, 0), false);
