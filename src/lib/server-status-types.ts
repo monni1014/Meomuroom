@@ -12,7 +12,7 @@ export type ServerStatusSnapshot = {
   hostname: string;
   services: {
     app: ServerServiceStatus;
-    database: ServerServiceStatus & { responseMs: number | null };
+    database: ServerServiceStatus & { responseMs: number | null; sizeBytes: number | null };
     tailscale: ServerServiceStatus & { ip: string | null };
   };
   memory: {
@@ -24,6 +24,22 @@ export type ServerStatusSnapshot = {
     appHeapUsedBytes: number;
     swapTotalBytes: number;
     swapUsedBytes: number;
+    processes: Array<{
+      key: string;
+      label: string;
+      processCount: number;
+      rssBytes: number;
+      usedPercent: number;
+    }>;
+    observedPeak: {
+      monitoringSince: string;
+      lastSampledAt: string;
+      sampleCount: number;
+      systemUsedBytes: number;
+      systemUsedPercent: number;
+      appBytes: number;
+      appPercent: number;
+    } | null;
   };
   disk: {
     totalBytes: number;
@@ -41,6 +57,16 @@ export type ServerStatusSnapshot = {
   uptime: {
     systemSeconds: number;
     appSeconds: number;
+  };
+  billing: {
+    provider: "Vultr";
+    planId: string;
+    startedAt: string;
+    hourlyCostUsd: number;
+    monthlyCostUsd: number;
+    currentMonthEstimatedUsd: number;
+    lifetimeEstimatedUsd: number;
+    estimate: true;
   };
   warnings: string[];
 };

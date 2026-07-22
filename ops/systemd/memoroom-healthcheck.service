@@ -15,5 +15,5 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/run/memoroom-healthcheck /srv/memoroom/app
+ReadWritePaths=/run/memoroom-healthcheck /srv/memoroom/app /srv/memoroom/shared
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

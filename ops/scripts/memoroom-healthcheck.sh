@@ -7,6 +7,7 @@ STATE_DIR="${MEMOROOM_HEALTH_STATE_DIR:-/run/memoroom-healthcheck}"
 MAX_FAILURES="${MEMOROOM_HEALTH_MAX_FAILURES:-3}"
 RESTART_COOLDOWN_SECONDS="${MEMOROOM_HEALTH_RESTART_COOLDOWN_SECONDS:-600}"
 OPS_ALERT_SCRIPT="${MEMOROOM_OPS_ALERT_SCRIPT:-/srv/memoroom/app/ops/scripts/memoroom-ops-alert.mjs}"
+SERVER_METRICS_SCRIPT="${MEMOROOM_SERVER_METRICS_SCRIPT:-/srv/memoroom/app/ops/scripts/memoroom-record-server-metrics.mjs}"
 
 FAILURE_FILE="$STATE_DIR/failures"
 LAST_RESTART_FILE="$STATE_DIR/last-restart"
@@ -29,6 +30,14 @@ send_ops_alert() {
     /usr/bin/node "$OPS_ALERT_SCRIPT" "$alert_mode" || \
     log_message "Ops alert delivery failed for mode=$alert_mode; recovery will continue."
 }
+
+record_server_metrics() {
+  if [[ -f "$SERVER_METRICS_SCRIPT" ]]; then
+    timeout 15s /usr/bin/node "$SERVER_METRICS_SCRIPT" || true
+  fi
+}
+
+record_server_metrics
 
 check_health() {
   local response

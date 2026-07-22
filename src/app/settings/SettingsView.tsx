@@ -115,6 +115,13 @@ function formatDuration(totalSeconds: number) {
   return `${minutes}분`;
 }
 
+function formatUsd(value: number) {
+  return `US$${value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 function serverStatusClass(status: ServerStatusSnapshot["overallStatus"]) {
   if (status === "OK") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "WARNING") return "border-amber-200 bg-amber-50 text-amber-700";
@@ -235,6 +242,9 @@ function ServerMetricCard({
   detail,
   percentValue,
   iconClassName,
+  onIconClick,
+  iconButtonLabel,
+  iconExpanded,
 }: {
   icon: React.ElementType;
   title: string;
@@ -242,6 +252,9 @@ function ServerMetricCard({
   detail: string;
   percentValue?: number;
   iconClassName: string;
+  onIconClick?: () => void;
+  iconButtonLabel?: string;
+  iconExpanded?: boolean;
 }) {
   const safePercent = percentValue === undefined ? null : Math.min(100, Math.max(0, percentValue));
   return (
@@ -251,9 +264,25 @@ function ServerMetricCard({
           <p className="text-sm font-bold text-slate-500">{title}</p>
           <p className="mt-2 text-2xl font-black tracking-tight text-slate-950">{value}</p>
         </div>
-        <div className={cn("rounded-full p-3", iconClassName)}>
-          <Icon className="h-5 w-5" />
-        </div>
+        {onIconClick ? (
+          <button
+            type="button"
+            onClick={onIconClick}
+            aria-label={iconButtonLabel}
+            aria-expanded={iconExpanded}
+            title={iconButtonLabel}
+            className={cn(
+              "rounded-full p-3 transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-300",
+              iconClassName,
+            )}
+          >
+            <Icon className="h-5 w-5" />
+          </button>
+        ) : (
+          <div className={cn("rounded-full p-3", iconClassName)}>
+            <Icon className="h-5 w-5" />
+          </div>
+        )}
       </div>
       {safePercent !== null && (
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -323,6 +352,7 @@ export default function SettingsView({
   );
   const [googlePeopleStatus, setGooglePeopleStatus] = useState<GooglePeopleStatus>(initialGooglePeopleStatus);
   const [serverStatus, setServerStatus] = useState<ServerStatusSnapshot | null>(null);
+  const [showRamDetails, setShowRamDetails] = useState(false);
   const [isLoadingSolapi, setIsLoadingSolapi] = useState(false);
   const [selectedSenderNumber, setSelectedSenderNumber] = useState(initialSolapiStatus.senderNumber || "");
   const [isSavingSenderNumber, setIsSavingSenderNumber] = useState(false);
@@ -1349,7 +1379,7 @@ export default function SettingsView({
             </section>
           ) : serverStatus ? (
             <>
-              <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <ServerMetricCard
                   icon={MemoryStick}
                   title="서버 RAM"
@@ -1357,6 +1387,9 @@ export default function SettingsView({
                   detail={`${formatBytes(serverStatus.memory.usedBytes)} / ${formatBytes(serverStatus.memory.totalBytes)} · 여유 ${formatBytes(serverStatus.memory.availableBytes)}`}
                   percentValue={serverStatus.memory.usedPercent}
                   iconClassName="bg-violet-50 text-violet-600"
+                  onIconClick={() => setShowRamDetails((visible) => !visible)}
+                  iconButtonLabel={showRamDetails ? "RAM 상세 닫기" : "RAM 상세 보기"}
+                  iconExpanded={showRamDetails}
                 />
                 <ServerMetricCard
                   icon={Activity}
@@ -1364,6 +1397,18 @@ export default function SettingsView({
                   value={formatBytes(serverStatus.memory.appRssBytes)}
                   detail={`실제 점유 RAM · JS 사용 ${formatBytes(serverStatus.memory.appHeapUsedBytes)}`}
                   iconClassName="bg-indigo-50 text-indigo-600"
+                />
+                <ServerMetricCard
+                  icon={Activity}
+                  title="머무룸+RPA RAM 최고"
+                  value={serverStatus.memory.observedPeak
+                    ? formatBytes(serverStatus.memory.observedPeak.appBytes)
+                    : "측정 준비 중"}
+                  detail={serverStatus.memory.observedPeak
+                    ? `${formatDateTime(serverStatus.memory.observedPeak.monitoringSince)} 이후 · ${serverStatus.memory.observedPeak.sampleCount.toLocaleString("ko-KR")}회 측정`
+                    : "1분 간격 최고 사용량 기록을 시작합니다."}
+                  percentValue={serverStatus.memory.observedPeak?.appPercent}
+                  iconClassName="bg-fuchsia-50 text-fuchsia-600"
                 />
                 <ServerMetricCard
                   icon={HardDrive}
@@ -1383,7 +1428,56 @@ export default function SettingsView({
                   percentValue={serverStatus.cpu.loadPerCorePercent}
                   iconClassName="bg-amber-50 text-amber-600"
                 />
+                <ServerMetricCard
+                  icon={CircleDollarSign}
+                  title="이번 달 서버 사용금액"
+                  value={formatUsd(serverStatus.billing.currentMonthEstimatedUsd)}
+                  detail={`예상금액 · 개통 후 ${formatUsd(serverStatus.billing.lifetimeEstimatedUsd)} · 월 최대 ${formatUsd(serverStatus.billing.monthlyCostUsd)}`}
+                  iconClassName="bg-emerald-50 text-emerald-600"
+                />
               </section>
+
+              {showRamDetails && (
+                <section className="rounded-xl border border-violet-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <MemoryStick className="h-5 w-5 text-violet-600" />
+                        <h2 className="text-base font-black text-slate-900">RAM 작업관리자</h2>
+                      </div>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        현재 실행 중인 작업을 종류별로 묶어 표시합니다.
+                      </p>
+                    </div>
+                    <p className="text-xs font-bold text-slate-400">30초마다 자동 갱신</p>
+                  </div>
+
+                  {serverStatus.memory.processes.length === 0 ? (
+                    <p className="mt-4 rounded-lg bg-slate-50 px-3 py-4 text-center text-sm font-bold text-slate-400">
+                      실행 중인 작업 정보를 확인하지 못했습니다.
+                    </p>
+                  ) : (
+                    <div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200">
+                      {serverStatus.memory.processes.map((process) => (
+                        <div key={process.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_100px_100px]">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-black text-slate-900">{process.label}</p>
+                            <p className="mt-0.5 text-[11px] font-semibold text-slate-400">
+                              {process.processCount.toLocaleString("ko-KR")}개 프로세스
+                            </p>
+                          </div>
+                          <p className="text-right text-sm font-black text-slate-900">{formatBytes(process.rssBytes)}</p>
+                          <p className="hidden text-right text-xs font-bold text-slate-500 sm:block">{process.usedPercent}%</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">
+                    RPA 브라우저는 예약 처리 중에만 나타나며, 작업이 끝나면 목록에서 사라집니다.
+                  </p>
+                </section>
+              )}
 
               <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center gap-2">
@@ -1402,7 +1496,7 @@ export default function SettingsView({
                       status: serverStatus.services.database.status,
                       detail: serverStatus.services.database.responseMs === null
                         ? serverStatus.services.database.detail || "응답시간 확인 불가"
-                        : `응답 ${serverStatus.services.database.responseMs}ms`,
+                        : `DB ${serverStatus.services.database.sizeBytes === null ? "크기 확인 불가" : formatBytes(serverStatus.services.database.sizeBytes)} · 응답 ${serverStatus.services.database.responseMs}ms`,
                     },
                     {
                       name: "Tailscale",
@@ -1426,6 +1520,14 @@ export default function SettingsView({
                 <div className="mt-5 grid gap-x-8 border-t border-slate-200 pt-3 md:grid-cols-2">
                   <InfoRow label="서버 전체 가동시간" value={formatDuration(serverStatus.uptime.systemSeconds)} />
                   <InfoRow label="앱 가동시간" value={formatDuration(serverStatus.uptime.appSeconds)} />
+                  <InfoRow label="Vultr 요금제" value={`2 vCPU · RAM 4GB · SSD 80GB · ${formatUsd(serverStatus.billing.monthlyCostUsd)}/월`} />
+                  <InfoRow label="요금 계산 기준" value={`${formatUsd(serverStatus.billing.hourlyCostUsd)}/시간 · 실제 청구서와 다를 수 있음`} />
+                  {serverStatus.memory.observedPeak && (
+                    <InfoRow
+                      label="서버 전체 RAM 측정 최고"
+                      value={`${formatBytes(serverStatus.memory.observedPeak.systemUsedBytes)} (${serverStatus.memory.observedPeak.systemUsedPercent}%)`}
+                    />
+                  )}
                   <InfoRow
                     label="스왑 사용량"
                     value={serverStatus.memory.swapTotalBytes > 0
