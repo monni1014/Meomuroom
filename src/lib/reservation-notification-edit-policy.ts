@@ -5,6 +5,7 @@ const SENT_NOTIFICATION_STATUSES = new Set([
   "SUBMITTED",
   "CARRIER_ACCEPTED",
   "DELIVERED",
+  "RECOVERING",
 ]);
 
 type NotificationSnapshot = {

@@ -35,7 +35,7 @@ export default async function MessagesPage() {
         {
           startTime: { gte: now, lte: twoHoursLater },
           notificationStatus: {
-            in: ["PENDING", "SENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "FAILED"],
+            in: ["PENDING", "SENDING", "RECOVERING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "FAILED"],
           },
         },
       ],

@@ -100,8 +100,12 @@ export default function MessageStatusBadge({
     );
   }
 
-  if (["SENT", "SENDING", "SUBMITTED", "CARRIER_ACCEPTED"].includes(normalizedStatus)) {
-    const label = normalizedStatus === "CARRIER_ACCEPTED" ? "통신사 처리 중" : "문자 수신 결과 확인 중";
+  if (["SENT", "SENDING", "RECOVERING", "SUBMITTED", "CARRIER_ACCEPTED"].includes(normalizedStatus)) {
+    const label = normalizedStatus === "RECOVERING"
+      ? "솔라피 발송 이력 확인 중"
+      : normalizedStatus === "CARRIER_ACCEPTED"
+        ? "통신사 처리 중"
+        : "문자 수신 결과 확인 중";
     return (
       <span
         className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 text-indigo-600 shadow-sm"

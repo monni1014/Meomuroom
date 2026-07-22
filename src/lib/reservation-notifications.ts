@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
-import { sendReservationReminder } from "@/lib/solapi-sms";
+import { lookupReservationReminderDelivery, sendReservationReminder } from "@/lib/solapi-sms";
 import { recordOutboundReservationMessage } from "@/lib/customer-messages";
 import { syncUpcomingReservationContacts } from "@/lib/google-people";
 import { isValidKoreanMobilePhone } from "@/lib/phone-number";
@@ -8,9 +9,36 @@ import { RPA_PENDING_MARKER } from "@/lib/rpa-reservation-state";
 
 const ALERT_TYPE = "NOTIFICATION_DELIVERY";
 const GOOGLE_PEOPLE_SYNC_ALERT_KEY = "google-people-sync";
+const SEND_ATTEMPT_SETTING_PREFIX = "notification.sendAttempt.";
 
 function notificationAlertKey(reservationId: string) {
   return `notification-delivery:${reservationId}`;
+}
+
+function notificationAttemptKey(reservationId: string) {
+  return `${SEND_ATTEMPT_SETTING_PREFIX}${reservationId}`;
+}
+
+type StoredNotificationAttempt = {
+  attemptId: string;
+  createdAt: string;
+};
+
+async function readNotificationAttempt(reservationId: string) {
+  const setting = await prisma.appSetting.findUnique({
+    where: { key: notificationAttemptKey(reservationId) },
+    select: { value: true },
+  });
+  if (!setting) return null;
+
+  try {
+    const parsed = JSON.parse(setting.value) as Partial<StoredNotificationAttempt>;
+    return typeof parsed.attemptId === "string" && parsed.attemptId
+      ? parsed.attemptId
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function phoneLast4(phone: string | null) {
@@ -43,6 +71,57 @@ function notificationReadyMemoWhere() {
   };
 }
 
+async function claimNotificationAttempt(reservationId: string) {
+  const attemptId = randomUUID();
+  const attempt: StoredNotificationAttempt = {
+    attemptId,
+    createdAt: new Date().toISOString(),
+  };
+
+  return prisma.$transaction(async (tx) => {
+    const claimed = await tx.reservation.updateMany({
+      where: {
+        id: reservationId,
+        notified: false,
+        notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "RECOVERING"] },
+        status: "CONFIRMED",
+        isNoShow: false,
+        ...notificationReadyMemoWhere(),
+      },
+      data: {
+        notificationStatus: "SENDING",
+        notificationError: null,
+      },
+    });
+    if (claimed.count === 0) return null;
+
+    await tx.appSetting.upsert({
+      where: { key: notificationAttemptKey(reservationId) },
+      create: {
+        key: notificationAttemptKey(reservationId),
+        value: JSON.stringify(attempt),
+      },
+      update: { value: JSON.stringify(attempt) },
+    });
+    return attemptId;
+  });
+}
+
+async function finalizeNotificationAttempt(
+  reservationId: string,
+  data: Parameters<typeof prisma.reservation.update>[0]["data"],
+) {
+  await prisma.$transaction([
+    prisma.reservation.update({
+      where: { id: reservationId },
+      data,
+    }),
+    prisma.appSetting.deleteMany({
+      where: { key: notificationAttemptKey(reservationId) },
+    }),
+  ]);
+}
+
 export async function sendDueReservationReminders() {
   const pipelineStartedAt = Date.now();
   const now = new Date();
@@ -55,8 +134,8 @@ export async function sendDueReservationReminders() {
       updatedAt: { lt: new Date(now.getTime() - 10 * 60 * 1000) },
     },
     data: {
-      notificationStatus: "PENDING",
-      notificationError: "이전 발송 작업이 중단되어 자동으로 다시 확인합니다.",
+      notificationStatus: "RECOVERING",
+      notificationError: "이전 발송 작업이 중단되어 솔라피 발송 이력을 먼저 확인합니다.",
     },
   });
 
@@ -67,7 +146,7 @@ export async function sendDueReservationReminders() {
         lte: twoHoursLater,
       },
       notified: false,
-      notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
+      notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "RECOVERING"] },
       status: "CONFIRMED",
       isNoShow: false,
       ...notificationReadyMemoWhere(),
@@ -81,6 +160,8 @@ export async function sendDueReservationReminders() {
   let waitingContactCount = 0;
   const waitingContactSyncCount = 0;
   let failedCount = 0;
+  let recoveredCount = 0;
+  let recoveryWaitingCount = 0;
   let contactSyncMs = 0;
 
   const phoneReadyReservations = [];
@@ -94,7 +175,7 @@ export async function sendDueReservationReminders() {
       where: {
         id: reservation.id,
         notified: false,
-        notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
+        notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "RECOVERING"] },
         status: "CONFIRMED",
         isNoShow: false,
         ...notificationReadyMemoWhere(),
@@ -141,24 +222,139 @@ export async function sendDueReservationReminders() {
   }
 
   for (const reservation of phoneReadyReservations) {
-    const claimed = await prisma.reservation.updateMany({
-      where: {
-        id: reservation.id,
-        notified: false,
-        notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
-        status: "CONFIRMED",
-        isNoShow: false,
-        ...notificationReadyMemoWhere(),
-      },
-      data: {
-        notificationStatus: "SENDING",
-        notificationError: null,
-      },
-    });
-    if (claimed.count === 0) continue;
+    if (reservation.notificationStatus === "RECOVERING") {
+      const attemptId = await readNotificationAttempt(reservation.id);
+      if (!attemptId) {
+        const errorMessage = "저장된 발송 시도 번호가 없어 자동 재발송을 보류합니다.";
+        await prisma.reservation.updateMany({
+          where: {
+            id: reservation.id,
+            notified: false,
+            notificationStatus: "RECOVERING",
+          },
+          data: { notificationError: errorMessage },
+        });
+        await createAdminAlert({
+          type: ALERT_TYPE,
+          severity: "WARNING",
+          title: "문자 중복 확인 대기",
+          message: `${reservation.customerName || "이름 없음"} / ${reservation.roomName} / ${errorMessage}`,
+          dedupeKey: notificationAlertKey(reservation.id),
+        });
+        results.push({
+          reservationId: reservation.id,
+          customerName: reservation.customerName,
+          roomName: reservation.roomName,
+          startTime: reservation.startTime,
+          phoneLast4: phoneLast4(reservation.phone),
+          success: false,
+          dryRun: false,
+          channel: "SMS",
+          recovered: false,
+          error: errorMessage,
+        });
+        recoveryWaitingCount += 1;
+        continue;
+      }
+      let recovered: Awaited<ReturnType<typeof lookupReservationReminderDelivery>>;
+      try {
+        recovered = await lookupReservationReminderDelivery({
+          reservationId: reservation.id,
+          notificationAttemptId: attemptId,
+          phone: reservation.phone || "",
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        await prisma.reservation.updateMany({
+          where: {
+            id: reservation.id,
+            notified: false,
+            notificationStatus: "RECOVERING",
+          },
+          data: {
+            notificationError: `솔라피 발송 이력 확인 대기: ${errorMessage}`,
+          },
+        });
+        await createAdminAlert({
+          type: ALERT_TYPE,
+          severity: "WARNING",
+          title: "문자 중복 확인 대기",
+          message: `${reservation.customerName || "이름 없음"} / ${reservation.roomName} / 솔라피 발송 이력을 확인하지 못해 중복 방지를 위해 재발송하지 않고 대기합니다. ${errorMessage}`,
+          dedupeKey: notificationAlertKey(reservation.id),
+        });
+        results.push({
+          reservationId: reservation.id,
+          customerName: reservation.customerName,
+          roomName: reservation.roomName,
+          startTime: reservation.startTime,
+          phoneLast4: phoneLast4(reservation.phone),
+          success: false,
+          dryRun: false,
+          channel: "SMS",
+          recovered: false,
+          error: errorMessage,
+        });
+        recoveryWaitingCount += 1;
+        continue;
+      }
+
+      if (recovered.found) {
+        await recordOutboundReservationMessage({
+          reservationId: reservation.id,
+          senderNumber: recovered.from,
+          recipientNumber: recovered.to,
+          body: recovered.text || "솔라피에서 복구한 예약 안내 문자",
+          channel: recovered.channel,
+          status: recovered.status,
+          providerMessageId: recovered.providerMessageId,
+          occurredAt: recovered.occurredAt,
+        });
+
+        await finalizeNotificationAttempt(reservation.id, {
+          notified: true,
+          notifiedAt: recovered.occurredAt,
+          notificationStatus: recovered.status,
+          notificationChannel: recovered.channel,
+          notificationError: recovered.error,
+        });
+
+        results.push({
+          reservationId: reservation.id,
+          customerName: reservation.customerName,
+          roomName: reservation.roomName,
+          startTime: reservation.startTime,
+          phoneLast4: phoneLast4(reservation.phone),
+          success: recovered.status !== "FAILED",
+          dryRun: false,
+          channel: recovered.channel,
+          recovered: true,
+          error: recovered.error,
+        });
+        recoveredCount += 1;
+
+        if (recovered.status === "FAILED") {
+          await createAdminAlert({
+            type: ALERT_TYPE,
+            severity: "CRITICAL",
+            title: "예약 안내 문자 발송 실패",
+            message: `${reservation.customerName || "이름 없음"} / ${reservation.roomName} / ${formatKstDateTime(reservation.startTime, reservation.endTime)} / 전화 끝자리 ${phoneLast4(reservation.phone) || "없음"} / ${recovered.error || "솔라피 발송 실패"}`,
+            dedupeKey: notificationAlertKey(reservation.id),
+          });
+          failedCount += 1;
+        } else {
+          await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
+          sentCount += 1;
+        }
+        continue;
+      }
+    }
+
+    const notificationAttemptId = await claimNotificationAttempt(reservation.id);
+    if (!notificationAttemptId) continue;
 
     const result = await sendReservationReminder({
       reservationId: reservation.id,
+      notificationAttemptId,
       customerName: reservation.customerName,
       phone: reservation.phone,
       roomName: reservation.roomName,
@@ -191,28 +387,22 @@ export async function sendDueReservationReminders() {
     });
 
     if (result.success && result.dryRun) {
-      await prisma.reservation.update({
-        where: { id: reservation.id },
-        data: {
-          notificationStatus: "DRY_RUN",
-          notificationChannel: result.channel,
-          notificationError: null,
-        },
+      await finalizeNotificationAttempt(reservation.id, {
+        notificationStatus: "DRY_RUN",
+        notificationChannel: result.channel,
+        notificationError: null,
       });
       dryRunCount += 1;
       continue;
     }
 
     if (result.success) {
-      await prisma.reservation.update({
-        where: { id: reservation.id },
-        data: {
-          notified: true,
-          notifiedAt: new Date(),
-          notificationStatus: "SUBMITTED",
-          notificationChannel: result.channel,
-          notificationError: null,
-        },
+      await finalizeNotificationAttempt(reservation.id, {
+        notified: true,
+        notifiedAt: new Date(),
+        notificationStatus: "SUBMITTED",
+        notificationChannel: result.channel,
+        notificationError: null,
       });
       await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
       sentCount += 1;
@@ -221,26 +411,20 @@ export async function sendDueReservationReminders() {
 
     if (!result.to) {
       const contactError = result.error || "Recipient phone number is missing.";
-      await prisma.reservation.update({
-        where: { id: reservation.id },
-        data: {
-          notificationStatus: "WAITING_CONTACT",
-          notificationChannel: result.channel,
-          notificationError: contactError,
-        },
+      await finalizeNotificationAttempt(reservation.id, {
+        notificationStatus: "WAITING_CONTACT",
+        notificationChannel: result.channel,
+        notificationError: contactError,
       });
       waitingContactCount += 1;
       continue;
     }
 
     const errorMessage = result.error || "Unknown notification delivery failure.";
-    await prisma.reservation.update({
-      where: { id: reservation.id },
-      data: {
-        notificationStatus: "FAILED",
-        notificationChannel: result.channel,
-        notificationError: errorMessage,
-      },
+    await finalizeNotificationAttempt(reservation.id, {
+      notificationStatus: "FAILED",
+      notificationChannel: result.channel,
+      notificationError: errorMessage,
     });
     await createAdminAlert({
       type: ALERT_TYPE,
@@ -253,7 +437,7 @@ export async function sendDueReservationReminders() {
   }
 
   return {
-    success: failedCount === 0,
+    success: failedCount === 0 && recoveryWaitingCount === 0,
     checkedCount: upcomingReservations.length,
     sentCount,
     dryRunCount,
@@ -262,6 +446,8 @@ export async function sendDueReservationReminders() {
     contactSyncMs,
     pipelineMs: Date.now() - pipelineStartedAt,
     failedCount,
+    recoveredCount,
+    recoveryWaitingCount,
     results,
   };
 }

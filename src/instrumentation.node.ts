@@ -98,7 +98,7 @@ export async function registerNodeInstrumentation() {
       const result = await sendDueReservationReminders();
       if (result.checkedCount > 0) {
         console.log(
-          `[Cron] Reservation notifications done (${label}): checked ${result.checkedCount}, sent ${result.sentCount}, dry-run ${result.dryRunCount}, waiting-contact ${result.waitingContactCount}, waiting-contact-sync ${result.waitingContactSyncCount}, failed ${result.failedCount}, google-sync ${result.contactSyncMs}ms, pipeline ${result.pipelineMs}ms`,
+          `[Cron] Reservation notifications done (${label}): checked ${result.checkedCount}, sent ${result.sentCount}, recovered ${result.recoveredCount}, recovery-waiting ${result.recoveryWaitingCount}, dry-run ${result.dryRunCount}, waiting-contact ${result.waitingContactCount}, waiting-contact-sync ${result.waitingContactSyncCount}, failed ${result.failedCount}, google-sync ${result.contactSyncMs}ms, pipeline ${result.pipelineMs}ms`,
         );
       }
     } catch (error) {

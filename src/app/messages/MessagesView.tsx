@@ -33,6 +33,7 @@ type DeliveryEntry = {
 const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   SCHEDULED: { label: "발송 예정", className: "bg-sky-50 text-sky-700 ring-sky-200" },
   SENDING: { label: "발송 준비 중", className: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
+  RECOVERING: { label: "솔라피 중복 확인 중", className: "bg-amber-50 text-amber-800 ring-amber-200" },
   WAITING_CONTACT: { label: "전화번호 확인 중", className: "bg-amber-50 text-amber-800 ring-amber-200" },
   WAITING_CONTACT_SYNC: { label: "연락처 동기화 중", className: "bg-amber-50 text-amber-800 ring-amber-200" },
   SUBMITTED: { label: "솔라피 접수", className: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
@@ -47,7 +48,7 @@ const STATUS_STYLE: Record<string, { label: string; className: string }> = {
 };
 
 const ATTENTION_STATUSES = new Set(["FAILED", "MISSING_PHONE", "OVERDUE", "DRY_RUN"]);
-const PROCESSING_STATUSES = new Set(["SENDING", "SUBMITTED", "CARRIER_ACCEPTED"]);
+const PROCESSING_STATUSES = new Set(["SENDING", "RECOVERING", "SUBMITTED", "CARRIER_ACCEPTED"]);
 const SCHEDULED_STATUSES = new Set(["SCHEDULED", "PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"]);
 
 function formatKst(value: string, includeDate = true) {
@@ -111,6 +112,7 @@ export default function MessagesView({
     if (needsAttention(entry)) return value ? `확인 필요 ${formatKst(value)}` : "확인 필요";
     if (entry.status === "CARRIER_ACCEPTED") return value ? `통신사 처리 중 ${formatKst(value)}` : "통신사 처리 중";
     if (entry.status === "SUBMITTED") return value ? `솔라피 접수 ${formatKst(value)}` : "솔라피 접수";
+    if (entry.status === "RECOVERING") return "솔라피 발송 이력 확인 중";
     if (entry.status === "SENDING") return "발송 작업 중";
     return `발송 예정 ${formatKst(entry.scheduledAt)}`;
   }

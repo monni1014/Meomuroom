@@ -3,6 +3,11 @@ import { getMessageTemplateForRoom } from "@/lib/message-templates";
 import { getSelectedSolapiSenderNumber } from "@/lib/solapi-sender-setting";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { reservationMessageSubject } from "@/lib/reservation-message-subject";
+import {
+  findReservationReminderInSolapiHistory,
+  type ReservationReminderLookupResult,
+  type SolapiHistoryMessage,
+} from "@/lib/solapi-delivery-status";
 
 type NotificationChannel = "SMS";
 
@@ -19,6 +24,7 @@ export type SendResult = {
 
 type ReservationReminderInput = {
   reservationId?: string;
+  notificationAttemptId?: string;
   customerName: string | null;
   phone: string | null;
   roomName: string;
@@ -92,6 +98,29 @@ function getSolapiErrorMessage(error: unknown) {
   return String(error);
 }
 
+export async function lookupReservationReminderDelivery(input: {
+  reservationId: string;
+  notificationAttemptId?: string | null;
+  phone: string;
+  now?: Date;
+}): Promise<ReservationReminderLookupResult> {
+  const recipient = normalizeKoreanPhone(input.phone);
+  if (!isValidKoreanMobilePhone(recipient)) return { found: false };
+
+  const now = input.now || new Date();
+  const response = await getSolapiService().getMessages({
+    to: recipient,
+    limit: 100,
+    dateType: "CREATED",
+    startDate: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+    endDate: new Date(now.getTime() + 5 * 60 * 1000),
+  });
+  return findReservationReminderInSolapiHistory(
+    Object.values(response.messageList || {}) as SolapiHistoryMessage[],
+    input,
+  );
+}
+
 export async function buildReservationReminder(input: ReservationReminderInput) {
   const customerName = input.customerName?.trim() || "고객";
   const reservationDate = formatKstDate(input.startTime);
@@ -146,7 +175,14 @@ export async function sendReservationReminder(
       subject,
       text: reminder.text,
       ...(input.reservationId
-        ? { customFields: { reservationId: input.reservationId } }
+        ? {
+            customFields: {
+              reservationId: input.reservationId,
+              ...(input.notificationAttemptId
+                ? { notificationAttemptId: input.notificationAttemptId }
+                : {}),
+            },
+          }
         : {}),
     }, { showMessageList: true });
     const messageId = response?.messageList?.[0]?.messageId || response?.groupInfo?.groupId || null;

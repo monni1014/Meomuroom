@@ -18,7 +18,7 @@ model Reservation {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   notifiedAt          DateTime?
-  notificationStatus  String    @default("PENDING") // PENDING | SUBMITTED | CARRIER_ACCEPTED | DELIVERED | FAILED | DRY_RUN
+  notificationStatus  String    @default("PENDING") // PENDING | SENDING | RECOVERING | SUBMITTED | CARRIER_ACCEPTED | DELIVERED | FAILED | DRY_RUN
   notificationChannel String?
   notificationError   String?
   notified            Boolean   @default(false) // 예약 2시간 전 알림 발송 여부

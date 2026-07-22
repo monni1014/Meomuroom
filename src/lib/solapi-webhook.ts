@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { after } from "next/server";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
 import { sendPushNotification } from "@/lib/push-notifications";
+import { mapSolapiDeliveryStatus, type SolapiDeliveryStatus } from "@/lib/solapi-delivery-status";
 
 type SolapiReport = {
   messageId?: string;
@@ -16,17 +17,8 @@ type SolapiReport = {
   customFields?: Record<string, unknown>;
 };
 
-type DeliveryStatus = "SUBMITTED" | "CARRIER_ACCEPTED" | "DELIVERED" | "FAILED";
-
 function notificationAlertKey(reservationId: string) {
   return `notification-delivery:${reservationId}`;
-}
-
-function mapDeliveryStatus(statusCode: string): DeliveryStatus {
-  if (statusCode === "2000") return "SUBMITTED";
-  if (statusCode === "3000") return "CARRIER_ACCEPTED";
-  if (statusCode === "4000") return "DELIVERED";
-  return "FAILED";
 }
 
 function formatKstReservation(startTime: Date, endTime: Date) {
@@ -74,7 +66,7 @@ export async function processSolapiReport(report: SolapiReport) {
   const message = await findMessage(report, reservationId);
   if (!message) return { processed: false, reason: "message-not-found" };
 
-  const status = mapDeliveryStatus(statusCode);
+  const status: SolapiDeliveryStatus = mapSolapiDeliveryStatus(statusCode);
   const statusChanged = message.status !== status;
   const errorMessage = status === "FAILED"
     ? `${report.statusMessage || "문자 수신 실패"} (${statusCode})`
@@ -98,6 +90,9 @@ export async function processSolapiReport(report: SolapiReport) {
           notificationChannel: report.type || message.channel,
           notificationError: errorMessage,
         },
+      });
+      await tx.appSetting.deleteMany({
+        where: { key: `notification.sendAttempt.${message.reservationId}` },
       });
     }
   });
