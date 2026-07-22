@@ -16,6 +16,8 @@ self.addEventListener("push", (event) => {
 
   event.waitUntil(self.registration.showNotification(payload.title || "머무룸", {
     body: payload.body || "문자 발송 상태가 변경되었습니다.",
+    icon: "/icon-192.png",
+    badge: "/notification-badge.png",
     tag: payload.tag || "memoroom-message-status",
     renotify: true,
     data: { url: payload.url || "/messages" },
