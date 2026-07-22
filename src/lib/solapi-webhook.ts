@@ -126,15 +126,7 @@ export async function processSolapiReport(report: SolapiReport) {
   const summary = `${reservation.roomName} · ${reservation.customerName || "이름 없음"} · ${formatKstReservation(reservation.startTime, reservation.endTime)}`;
   if (status === "DELIVERED") {
     after(async () => {
-      await Promise.all([
-        resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id)),
-        sendPushNotification({
-          title: "문자 수신 완료",
-          body: summary,
-          url: "/messages",
-          tag: `sms-delivered-${reservation.id}`,
-        }),
-      ]);
+      await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
     });
   } else if (status === "FAILED") {
     after(async () => {
