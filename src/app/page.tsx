@@ -18,6 +18,11 @@ function pad2(n: number) {
   return n.toString().padStart(2, "0");
 }
 
+function formatTenThousandWon(value: number, suffix = "만원") {
+  const amount = Math.round(value / 1_000) / 10;
+  return `${amount.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}${suffix}`;
+}
+
 function monthKey(date: Date) {
   const parts = getKstDateParts(date);
   return `${parts.year}-${pad2(parts.month)}`;
@@ -196,11 +201,12 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   // 매출 = 캘린더에 표시되는 최종금액(price) 합계. extraPrice는 추가금 사유/금액 기록용이며 중복 합산하지 않는다.
   const monthlyRevenue = thisMonthReservations.reduce((sum, res) => sum + res.price, 0);
   const sumPrice = (list: typeof thisMonthReservations) => list.reduce((s, r) => s + r.price, 0);
-  const room1Revenue = sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸1")).toLocaleString();
-  const room2Revenue = sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸2")).toLocaleString();
-  const room3Revenue = sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸3")).toLocaleString();
+  const room1Revenue = sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸1"));
+  const room2Revenue = sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸2"));
+  const room3Revenue = sumPrice(thisMonthReservations.filter(r => r.roomName === "머무룸3"));
 
   const revenueText = `${monthlyRevenue.toLocaleString()}원`;
+  const mobileRevenueText = formatTenThousandWon(monthlyRevenue);
 
   const room1Count = countedMonthly.filter(r => r.roomName === "머무룸1").length;
   const room2Count = countedMonthly.filter(r => r.roomName === "머무룸2").length;
@@ -213,11 +219,12 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   const wRoom3Guests = sumGuests(activeWeekly.filter(r => r.roomName === "머무룸3"));
   const countedWeekly = thisWeekReservations.filter(r => r.status !== "CANCELLED" || r.isNoShow);
   const weeklyRevenue = thisWeekReservations.reduce((sum, res) => sum + res.price, 0);
-  const wRoom1Revenue = sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸1")).toLocaleString();
-  const wRoom2Revenue = sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸2")).toLocaleString();
-  const wRoom3Revenue = sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸3")).toLocaleString();
+  const wRoom1Revenue = sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸1"));
+  const wRoom2Revenue = sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸2"));
+  const wRoom3Revenue = sumPrice(thisWeekReservations.filter(r => r.roomName === "머무룸3"));
 
   const wRevenueText = `${weeklyRevenue.toLocaleString()}원`;
+  const mobileWeeklyRevenueText = formatTenThousandWon(weeklyRevenue);
 
   const wRoom1Count = countedWeekly.filter(r => r.roomName === "머무룸1").length;
   const wRoom2Count = countedWeekly.filter(r => r.roomName === "머무룸2").length;
@@ -313,9 +320,17 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
                 <TrendingUp className="w-6 h-6" />
               </div>
               <p className="text-sm font-medium text-slate-500">월 매출</p>
-              <p className="text-xl font-semibold tabular-nums text-slate-900 sm:text-2xl">{revenueText}</p>
-              <p className="whitespace-nowrap text-center text-[10px] tabular-nums text-slate-400 sm:text-xs">
-                <span className="text-sky-600">룸1</span> {room1Revenue} · <span className="text-purple-600">룸2</span> {room2Revenue} · <span className="text-orange-600">룸3</span> {room3Revenue}
+              <p className="text-xl font-semibold tabular-nums text-slate-900 sm:text-2xl">
+                <span className="sm:hidden">{mobileRevenueText}</span>
+                <span className="hidden sm:inline">{revenueText}</span>
+              </p>
+              <div className="grid w-full grid-cols-3 gap-1 text-center text-[9px] tabular-nums text-slate-400 sm:hidden">
+                <span><span className="text-sky-600">룸1</span><br />{formatTenThousandWon(room1Revenue, "만")}</span>
+                <span><span className="text-purple-600">룸2</span><br />{formatTenThousandWon(room2Revenue, "만")}</span>
+                <span><span className="text-orange-600">룸3</span><br />{formatTenThousandWon(room3Revenue, "만")}</span>
+              </div>
+              <p className="hidden whitespace-nowrap text-center text-xs tabular-nums text-slate-400 sm:block">
+                <span className="text-sky-600">룸1</span> {room1Revenue.toLocaleString()} · <span className="text-purple-600">룸2</span> {room2Revenue.toLocaleString()} · <span className="text-orange-600">룸3</span> {room3Revenue.toLocaleString()}
               </p>
             </div>
           </div>
@@ -368,9 +383,17 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
                 <TrendingUp className="w-5 h-5" />
               </div>
               <p className="text-xs font-medium text-slate-500">주 매출</p>
-              <p className="text-xl font-bold text-slate-800">{wRevenueText}</p>
-              <p className="whitespace-nowrap text-center text-[10px] tabular-nums text-slate-400 sm:text-[11px]">
-                <span className="text-sky-600">룸1</span> {wRoom1Revenue} · <span className="text-purple-600">룸2</span> {wRoom2Revenue} · <span className="text-orange-600">룸3</span> {wRoom3Revenue}
+              <p className="text-xl font-bold tabular-nums text-slate-800">
+                <span className="sm:hidden">{mobileWeeklyRevenueText}</span>
+                <span className="hidden sm:inline">{wRevenueText}</span>
+              </p>
+              <div className="grid w-full grid-cols-3 gap-1 text-center text-[9px] tabular-nums text-slate-400 sm:hidden">
+                <span><span className="text-sky-600">룸1</span><br />{formatTenThousandWon(wRoom1Revenue, "만")}</span>
+                <span><span className="text-purple-600">룸2</span><br />{formatTenThousandWon(wRoom2Revenue, "만")}</span>
+                <span><span className="text-orange-600">룸3</span><br />{formatTenThousandWon(wRoom3Revenue, "만")}</span>
+              </div>
+              <p className="hidden whitespace-nowrap text-center text-[11px] tabular-nums text-slate-400 sm:block">
+                <span className="text-sky-600">룸1</span> {wRoom1Revenue.toLocaleString()} · <span className="text-purple-600">룸2</span> {wRoom2Revenue.toLocaleString()} · <span className="text-orange-600">룸3</span> {wRoom3Revenue.toLocaleString()}
               </p>
             </div>
           </div>
