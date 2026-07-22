@@ -1132,10 +1132,6 @@ export default function SettingsView({
             </div>
 
             <form onSubmit={(event) => void saveProxyPayment(event)} className="border-b border-slate-200 py-5">
-              <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold leading-6 text-sky-900">
-                입력 방법: 결제일 선택 → 카드에서 빠져나간 최종 금액 입력 → VAT 포함 여부 확인 → 내역 추가.
-                사용기간과 메모는 몰라도 비워둘 수 있습니다.
-              </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
                 <label className="space-y-1.5">
                   <span className="text-xs font-black text-slate-600">결제일</span>
