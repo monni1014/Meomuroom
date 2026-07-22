@@ -811,9 +811,6 @@ export default function SettingsView({
                   </button>
                 </div>
 
-                <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-relaxed text-amber-800">
-                  솔라피로 보낸 문자는 휴대폰 기본 메시지 앱의 보낸 내역과 자동으로 동기화되지 않습니다.
-                </p>
               </div>
 
               <div className="mt-5 grid gap-x-8 md:grid-cols-2">
