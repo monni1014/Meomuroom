@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/prisma";
+import { shouldSendAdminAlertPush } from "@/lib/admin-alert-push-policy";
+import { sendPushNotification } from "@/lib/push-notifications";
 
 export interface AdminAlertInput {
   type: string;
@@ -25,6 +27,25 @@ async function sendWebhookAlert(input: AdminAlertInput) {
     });
   } catch (error) {
     console.error("[AdminAlert] Webhook delivery failed:", error);
+  }
+}
+
+async function sendAppPushAlert(
+  input: AdminAlertInput,
+  alertId: string,
+  severity: NonNullable<AdminAlertInput["severity"]>,
+) {
+  if (!shouldSendAdminAlertPush(input.type, severity)) return;
+
+  try {
+    await sendPushNotification({
+      title: input.title,
+      body: input.message.slice(0, 300),
+      url: "/",
+      tag: `admin-alert-${input.dedupeKey || alertId}`,
+    });
+  } catch (error) {
+    console.error("[AdminAlert] App push delivery failed:", error);
   }
 }
 
@@ -67,7 +88,10 @@ export async function createAdminAlert(input: AdminAlertInput) {
         },
       });
 
-  await sendWebhookAlert(input);
+  await Promise.all([
+    sendWebhookAlert(input),
+    sendAppPushAlert(input, alert.id, severity),
+  ]);
   return alert;
 }
 

@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { after } from "next/server";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
-import { sendPushNotification } from "@/lib/push-notifications";
 import { mapSolapiDeliveryStatus, type SolapiDeliveryStatus } from "@/lib/solapi-delivery-status";
 import { reservationTestMessageDedupeKey } from "@/lib/customer-messages";
 
@@ -130,21 +129,13 @@ export async function processSolapiReport(report: SolapiReport) {
     });
   } else if (status === "FAILED") {
     after(async () => {
-      await Promise.all([
-        createAdminAlert({
-          type: "NOTIFICATION_DELIVERY",
-          severity: "CRITICAL",
-          title: "예약 안내 문자 발송 실패",
-          message: `${summary} · ${errorMessage}`,
-          dedupeKey: notificationAlertKey(reservation.id),
-        }),
-        sendPushNotification({
-          title: "문자 발송 실패",
-          body: `${summary} · ${report.statusMessage || statusCode}`,
-          url: "/messages",
-          tag: `sms-failed-${reservation.id}`,
-        }),
-      ]);
+      await createAdminAlert({
+        type: "NOTIFICATION_DELIVERY",
+        severity: "CRITICAL",
+        title: "예약 안내 문자 발송 실패",
+        message: `${summary} · ${errorMessage}`,
+        dedupeKey: notificationAlertKey(reservation.id),
+      });
     });
   }
 

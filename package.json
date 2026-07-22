@@ -10,6 +10,7 @@
     "test:email-timezones": "node --experimental-strip-types scripts/test-email-parser-timezones.mjs",
     "test:kst-time": "node --experimental-strip-types scripts/test-kst-day-boundaries.mjs",
     "test:rpa-ui-monitor": "node --experimental-strip-types scripts/test-rpa-failure-classifier.mjs",
+    "test:admin-alert-push": "node --experimental-strip-types scripts/test-admin-alert-push-policy.mjs",
     "test:rpa-queue": "node --experimental-strip-types scripts/test-rpa-job-priority.mjs",
     "test:competitor-ranges": "node --experimental-strip-types scripts/test-competitor-scan-ranges.mjs",
     "test:competitor-cancellations": "node --experimental-strip-types scripts/test-competitor-cancellations.mjs",
