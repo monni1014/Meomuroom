@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeCustomerType } from "@/lib/customer-types";
+import { reservationNotificationEditPolicy } from "@/lib/reservation-notification-edit-policy";
 
 const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
 
@@ -16,7 +17,7 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow } = body;
+    const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow, resendNotification } = body;
 
     if (roomName !== undefined && !VALID_ROOM_NAMES.has(roomName)) {
       return NextResponse.json({ error: "Invalid roomName" }, { status: 400 });
@@ -61,16 +62,42 @@ export async function PATCH(
     if (status !== undefined) updateData.status = status; // CONFIRMED ↔ CANCELLED (취소 되살리기 등)
     if (isNoShow !== undefined) updateData.isNoShow = Boolean(isNoShow); // 노쇼 표기 (취소의 하위 구분)
 
-    const notificationRelevantChanged =
-      customerName !== undefined ||
-      phone !== undefined ||
-      startTime !== undefined ||
-      endTime !== undefined ||
-      roomName !== undefined;
     const nextStartTime = parsedStartTime;
     const nextStatus = status !== undefined ? status : existing.status;
+    const notificationEditPolicy = reservationNotificationEditPolicy({
+      existing: {
+        phone: existing.phone,
+        startTime: existing.startTime,
+        endTime: existing.endTime,
+        roomName: existing.roomName,
+        status: existing.status,
+        notified: existing.notified,
+        notificationStatus: existing.notificationStatus,
+      },
+      next: {
+        phone: phone !== undefined ? (typeof phone === "string" ? phone : null) : existing.phone,
+        startTime: parsedStartTime,
+        endTime: parsedEndTime,
+        roomName: roomName !== undefined ? roomName : existing.roomName,
+        status: nextStatus,
+        notified: existing.notified,
+        notificationStatus: existing.notificationStatus,
+      },
+    });
 
-    if (notificationRelevantChanged && nextStatus === "CONFIRMED" && nextStartTime.getTime() > Date.now()) {
+    if (notificationEditPolicy.requiresConfirmation && typeof resendNotification !== "boolean") {
+      return NextResponse.json({
+        error: "안내문자 재발송 여부를 확인해 주세요.",
+        code: "NOTIFICATION_RESEND_CONFIRMATION_REQUIRED",
+        changedFields: notificationEditPolicy.changedFields,
+      }, { status: 409 });
+    }
+
+    const shouldResetNotification =
+      notificationEditPolicy.shouldResetAutomatically ||
+      (notificationEditPolicy.requiresConfirmation && resendNotification === true);
+
+    if (shouldResetNotification && nextStatus === "CONFIRMED" && nextStartTime.getTime() > Date.now()) {
       updateData.notified = false;
       updateData.notifiedAt = null;
       updateData.notificationStatus = "PENDING";

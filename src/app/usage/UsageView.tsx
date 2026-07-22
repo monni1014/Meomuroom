@@ -8,6 +8,7 @@ import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "
 import TimeSelect from "@/components/TimeSelect";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
 import { createKstDate, getKstDateKey, getKstDateParts, isKstWeekend } from "@/lib/kst-time";
+import { patchReservationWithNotificationConfirmation } from "@/lib/reservation-notification-resend-client";
 
 interface UsageLog {
   id: string;
@@ -392,12 +393,9 @@ export default function UsagePage() {
 
     try {
       setIsSubmitting(true);
-      const response = await fetch(`/api/reservations/${selectedResId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      const response = await patchReservationWithNotificationConfirmation(
+        selectedResId,
+        {
           headCount,          // 실제 이용인원
           reservedHeadCount: reserved,
           coffeeCount,
@@ -417,8 +415,8 @@ export default function UsagePage() {
           // 시간 수정 (26시 등은 익일로 변환)
           ...(editDate && editStart ? { startTime: buildISO(editDate, editStart) } : {}),
           ...(editDate && normalizedEditEnd ? { endTime: buildISO(editDate, normalizedEditEnd) } : {}),
-        }),
-      });
+        },
+      );
 
       if (response.ok) {
         setSuccessMsg("이용 기록이 안전하게 저장되었습니다.");

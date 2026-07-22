@@ -12,6 +12,7 @@ import MultiDatePicker from "@/components/MultiDatePicker";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
 import { createKstDate, getKstDateParts } from "@/lib/kst-time";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
+import { patchReservationWithNotificationConfirmation } from "@/lib/reservation-notification-resend-client";
 
 interface UsageLog {
   id: string;
@@ -275,11 +276,10 @@ export default function CalendarPage() {
       };
 
       if (modalMode === "edit" && editId) {
-        const res = await fetch(`/api/reservations/${editId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildPayload(formDates[0])),
-        });
+        const res = await patchReservationWithNotificationConfirmation(
+          editId,
+          buildPayload(formDates[0]),
+        );
         if (!res.ok) throw new Error("수정 실패");
       } else {
         const promises = formDates.map((dateStr) =>
