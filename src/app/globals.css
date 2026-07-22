@@ -25,6 +25,13 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Keep the desktop density unchanged while making phone screens slightly more compact. */
+@media (max-width: 767px), (max-height: 767px) and (pointer: coarse) {
+  html {
+    font-size: 15px;
+  }
+}
+
 html.competitor-landscape-mode [data-app-navigation] {
   display: none !important;
 }
