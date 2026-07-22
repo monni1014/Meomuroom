@@ -2,6 +2,17 @@ import { existsSync } from "node:fs";
 import { launchRpaBrowser, newRpaContext, resolveRpaHeadless } from "./lib/browser.mjs";
 import { optionalEnv } from "./lib/env.mjs";
 import { humanClickElement, humanDelay } from "./lib/human.mjs";
+import {
+  extractNaverBookingListRow,
+  isValidNaverBookingNumber,
+  isValidNaverCustomerName,
+  isValidNaverDateTimeParts,
+  isValidNaverPaymentStatus,
+  isValidNaverPhone,
+  isValidNaverPrice,
+  isValidNaverProductName,
+  isValidNaverQuantity,
+} from "./lib/naver-booking-row.mjs";
 import { naverStorageStatePath } from "./lib/paths.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
 import { createStepTimer } from "./lib/step-timer.mjs";
@@ -270,49 +281,113 @@ async function main() {
     }
 
     const bodyText = await page.locator("body").innerText({ timeout: 20_000 });
-    const supplementalText = await page.evaluate(() => {
+    const visibleDetailPanelText = await page.evaluate((id) => {
+      function visible(element) {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.visibility !== "hidden"
+          && style.display !== "none"
+          && Number(style.opacity || "1") > 0
+          && rect.width > 0
+          && rect.height > 0;
+      }
+
       const selectors = [
         '[class*="SideLayer__visible"]',
         '[class*="SideFrame__"]',
         '[class*="Detail__"]',
-        '[class*="BookingListView__list-contents"]',
-        '[class*="BookingListView__booking-list-table"]',
+        '[role="dialog"]',
       ];
-      return selectors
+      const candidates = selectors
         .flatMap((selector) => [...document.querySelectorAll(selector)])
-        .map((element) => `${element.innerText || ""}\n${element.textContent || ""}`)
-        .join("\n");
-    });
-    const text = normalizeText(`${bodyText}\n${supplementalText}`);
+        .filter(visible)
+        .map((element) => ({
+          text: element.innerText || "",
+          compact: (element.innerText || element.textContent || "").replace(/\s+/g, ""),
+        }))
+        .filter((item) => item.text.includes("예약 상세정보") && (!id || item.compact.includes(id)))
+        .sort((left, right) => left.text.length - right.text.length);
+      return candidates[0]?.text || "";
+    }, bookingId);
+    const text = normalizeText(bodyText);
     const detailStart = text.lastIndexOf("예약 상세정보");
-    const detailText = detailStart >= 0 ? text.slice(detailStart) : text;
-    const useDateTime = extractUseDateTime(detailText);
+    const detailText = normalizeText(visibleDetailPanelText)
+      || (detailStart >= 0 ? text.slice(detailStart) : text);
+    const detailUseDateTime = extractUseDateTime(detailText);
+    const listDetail = extractNaverBookingListRow(bodyText, bookingId);
     const listRow = extractListRowByBookingId(text, bookingId);
     const compactInfo = extractCompactBookingInfo(text, bookingId);
+
+    const extractedBookingNumber = extractValueAfterLabels(detailText, ["예약번호", "예약 번호"]);
+    const bookingNumber = listDetail?.bookingNumber
+      || (isValidNaverBookingNumber(extractedBookingNumber, bookingId) ? extractedBookingNumber : null)
+      || bookingId
+      || extractBookingNumber(detailText);
+    const extractedProductName = extractValueAfterLabels(detailText, ["상품", "예약상품", "상품명"]);
+    const productName = listDetail?.productName
+      || (isValidNaverProductName(extractedProductName) ? extractedProductName : null);
+    const useDateTime = isValidNaverDateTimeParts(listDetail?.useDateText, listDetail?.useTimeText)
+      ? {
+          combined: listDetail?.useDateTime || null,
+          dateText: listDetail?.useDateText || null,
+          timeText: listDetail?.useTimeText || null,
+        }
+      : detailUseDateTime;
+    const extractedCustomerName = extractValueAfterLabels(detailText, ["예약자", "예약자명", "이름"]);
+    const customerName = listDetail?.customerName
+      || (isValidNaverCustomerName(extractedCustomerName) ? extractedCustomerName : null)
+      || listRow.customerName
+      || compactInfo.customerName
+      || null;
+    const extractedPhoneValue = extractValueAfterLabels(detailText, ["전화번호", "휴대폰 번호", "연락처"]);
+    const extractedPhone = extractPhone(extractedPhoneValue || "") || extractPhone(detailText);
+    const phone = listDetail?.phone
+      || (isValidNaverPhone(extractedPhone) ? extractedPhone : null)
+      || listRow.phone
+      || compactInfo.phone
+      || null;
+    const extractedQuantity = extractValueAfterLabels(detailText, ["수량", "인원", "예약인원"]);
+    const quantity = listDetail?.quantity
+      || (isValidNaverQuantity(extractedQuantity) ? extractedQuantity : null);
+    const extractedPaymentStatus = extractValueAfterLabels(detailText, ["결제상태", "결제 상태"]);
+    const paymentStatus = listDetail?.paymentStatus
+      || (isValidNaverPaymentStatus(extractedPaymentStatus) ? extractedPaymentStatus : null);
+    const extractedPriceText = extractValueAfterLabels(detailText, ["결제금액", "결제 금액", "결제금액 합계"]);
+    const priceText = listDetail?.priceText
+      || (isValidNaverPrice(extractedPriceText) ? extractedPriceText : null);
 
     const result = {
       currentUrl: page.url(),
       screenshot: null,
-      bookingStatus: extractBookingStatus(detailText),
-      bookingNumber: extractValueAfterLabels(detailText, ["예약번호", "예약 번호"]) || bookingId || extractBookingNumber(detailText),
-      customerName: extractValueAfterLabels(detailText, ["예약자", "예약자명", "이름"]) || listRow.customerName || compactInfo.customerName,
-      phone: extractValueAfterLabels(detailText, ["전화번호", "휴대폰 번호", "연락처"]) || extractPhone(detailText) || listRow.phone || compactInfo.phone,
-      productName: extractValueAfterLabels(detailText, ["상품", "예약상품", "상품명"]),
+      bookingStatus: listDetail?.bookingStatus || extractBookingStatus(detailText) || null,
+      bookingNumber,
+      customerName,
+      phone,
+      productName,
       useDateTime: useDateTime.combined || extractValueAfterLabels(detailText, ["이용일시", "예약일시", "방문일시"]),
       useDateText: useDateTime.dateText,
       useTimeText: useDateTime.timeText,
-      quantity: extractValueAfterLabels(detailText, ["수량", "인원", "예약인원"]),
-      paymentStatus: extractValueAfterLabels(detailText, ["결제상태", "결제 상태"]),
-      priceText: extractValueAfterLabels(detailText, ["결제금액", "결제 금액", "결제금액 합계"]),
+      quantity,
+      paymentStatus,
+      priceText,
       visibleTextSample: detailText.slice(0, 1200),
     };
     timer.mark("detail-parsed");
 
-    if (!result.customerName || result.customerName.includes("*")) {
+    if (!isValidNaverCustomerName(result.customerName) || result.customerName.includes("*")) {
       throw new Error("Naver detail customer name was not fully visible after retry.");
     }
-    if (!result.phone) {
+    if (!isValidNaverPhone(result.phone)) {
       throw new Error("Naver detail phone number was not visible after retry.");
+    }
+    if (!isValidNaverBookingNumber(result.bookingNumber, bookingId)) {
+      throw new Error(`Naver detail booking number was invalid: ${result.bookingNumber || "(empty)"}`);
+    }
+    if (!isValidNaverProductName(result.productName)) {
+      throw new Error(`Naver detail product was invalid: ${result.productName || "(empty)"}`);
+    }
+    if (!isValidNaverDateTimeParts(result.useDateText, result.useTimeText)) {
+      throw new Error(`Naver detail date/time was invalid: ${result.useDateText || ""} ${result.useTimeText || ""}`.trim());
     }
 
     const outputResult = args["redact-pii"] === "true"
