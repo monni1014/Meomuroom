@@ -846,16 +846,83 @@ async function waitForCalendarDay(page, dateValue, contextLabel) {
   throw new Error(`SpaceCloud calendar data did not load for ${dateValue} before ${contextLabel}.`);
 }
 
-async function clickAddReservation(page) {
-  await clickVisibleText(page, TEXT.addReservation, 20_000);
-  await page.waitForFunction(
+async function waitForAddReservationModal(page, timeout) {
+  return page.waitForFunction(
     () => {
       const text = document.body?.innerText || "";
-      return text.includes("\uc678\ubd80\uc608\uc57d") || text.includes("\ud734\ubb34\uc77c");
+      return text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
+        && text.includes("\uc608\uc57d\ub0a0\uc9dc")
+        && text.includes("\uc608\uc57d\uc2dc\uac04");
     },
     null,
-    { timeout: 20_000 },
-  );
+    { timeout },
+  ).then(() => true).catch(() => false);
+}
+
+async function clickAddReservationElement(page) {
+  return page.evaluate((targetText) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden"
+        && style.display !== "none"
+        && rect.width > 0
+        && rect.height > 0
+        && rect.bottom >= 0
+        && rect.top <= window.innerHeight;
+    }
+
+    const candidates = [...document.querySelectorAll("button,a,[role='button'],span,div")]
+      .filter(visible)
+      .map((element) => {
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        const clickable = element.closest("button,a,[role='button']") || element;
+        const rect = clickable.getBoundingClientRect();
+        return {
+          element,
+          clickable,
+          text,
+          exact: text === targetText,
+          nativeControl: clickable.matches("button,a,[role='button']"),
+          area: rect.width * rect.height,
+        };
+      })
+      .filter((candidate) => candidate.text.includes(targetText) && visible(candidate.clickable))
+      .sort((a, b) =>
+        Number(b.exact) - Number(a.exact)
+        || Number(b.nativeControl) - Number(a.nativeControl)
+        || a.area - b.area
+      );
+
+    const candidate = candidates[0];
+    if (!candidate) return null;
+
+    candidate.clickable.scrollIntoView({ block: "center", inline: "center" });
+    candidate.clickable.click();
+    const rect = candidate.clickable.getBoundingClientRect();
+    return {
+      tag: candidate.clickable.tagName,
+      role: candidate.clickable.getAttribute("role") || "",
+      className: typeof candidate.clickable.className === "string" ? candidate.clickable.className : "",
+      text: (candidate.clickable.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120),
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  }, TEXT.addReservation);
+}
+
+async function clickAddReservation(page) {
+  await clickVisibleText(page, TEXT.addReservation, 20_000);
+  if (!(await waitForAddReservationModal(page, 5_000))) {
+    console.log("SpaceCloud add modal did not open after the human click. Retry the actual button element once.");
+    const clicked = await clickAddReservationElement(page);
+    console.log(`SpaceCloud add reservation fallback target: ${JSON.stringify(clicked)}`);
+    if (!clicked || !(await waitForAddReservationModal(page, 10_000))) {
+      throw new Error("[RPA_UI_CHANGE] SpaceCloud add reservation modal did not open after two verified click attempts.");
+    }
+  }
   await humanDelay(page, "after SpaceCloud add modal open", 1200, 2800);
 }
 
