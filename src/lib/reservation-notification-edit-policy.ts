@@ -2,6 +2,7 @@ export type NotificationResendField = "phone" | "startTime" | "endTime" | "roomN
 
 const SENT_NOTIFICATION_STATUSES = new Set([
   "SENT",
+  "SENDING",
   "SUBMITTED",
   "CARRIER_ACCEPTED",
   "DELIVERED",

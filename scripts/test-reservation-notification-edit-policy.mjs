@@ -54,6 +54,14 @@ const recoveringRoomChange = reservationNotificationEditPolicy({
 assert.equal(recoveringRoomChange.requiresConfirmation, true);
 assert.equal(recoveringRoomChange.shouldResetAutomatically, false);
 
+const sendingPhoneChange = reservationNotificationEditPolicy({
+  existing: { ...base, notified: false, notificationStatus: "SENDING" },
+  next: { ...base, notified: false, notificationStatus: "SENDING", phone: "010-9999-7777" },
+  now,
+});
+assert.equal(sendingPhoneChange.requiresConfirmation, true);
+assert.equal(sendingPhoneChange.shouldResetAutomatically, false);
+
 const pastReservation = reservationNotificationEditPolicy({
   existing: { ...base, startTime: new Date("2026-07-21T04:00:00.000Z"), endTime: new Date("2026-07-21T07:00:00.000Z") },
   next: { ...base, startTime: new Date("2026-07-21T05:00:00.000Z"), endTime: new Date("2026-07-21T08:00:00.000Z") },
