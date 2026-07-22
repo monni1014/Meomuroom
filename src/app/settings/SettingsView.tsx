@@ -32,6 +32,16 @@ type MessageTemplateState = {
   updatedAt: string;
 };
 
+type SituationMessageTemplateState = {
+  key: "DAWN_BOOKING_CONFIRMATION" | "UNPAID_RESERVATION";
+  name: string;
+  triggerDescription: string;
+  automationDescription: string;
+  subject: string;
+  content: string;
+  updatedAt: string | null;
+};
+
 type SettingsTab = "message" | "rpa";
 
 type ProxyPaymentForm = {
@@ -197,12 +207,14 @@ function TabButton({
 export default function SettingsView({
   initialSolapiStatus,
   initialMessageTemplates,
+  initialSituationMessageTemplates,
   initialProxyStatus,
   initialProxyPayments,
   initialGooglePeopleStatus,
 }: {
   initialSolapiStatus: SolapiServiceStatus;
   initialMessageTemplates: MessageTemplateState[];
+  initialSituationMessageTemplates: SituationMessageTemplateState[];
   initialProxyStatus: IspProxyStatus;
   initialProxyPayments: ProxyPaymentRecord[];
   initialGooglePeopleStatus: GooglePeopleStatus;
@@ -213,6 +225,9 @@ export default function SettingsView({
   const [proxyPayments, setProxyPayments] = useState<ProxyPaymentRecord[]>(initialProxyPayments);
   const [proxyPaymentForm, setProxyPaymentForm] = useState<ProxyPaymentForm>(emptyProxyPaymentForm);
   const [templates, setTemplates] = useState<MessageTemplateState[]>(initialMessageTemplates);
+  const [situationTemplates, setSituationTemplates] = useState<SituationMessageTemplateState[]>(
+    initialSituationMessageTemplates,
+  );
   const [googlePeopleStatus, setGooglePeopleStatus] = useState<GooglePeopleStatus>(initialGooglePeopleStatus);
   const [isLoadingSolapi, setIsLoadingSolapi] = useState(false);
   const [selectedSenderNumber, setSelectedSenderNumber] = useState(initialSolapiStatus.senderNumber || "");
@@ -220,10 +235,12 @@ export default function SettingsView({
   const [senderSaveMessage, setSenderSaveMessage] = useState<string | null>(null);
   const [isLoadingProxy, setIsLoadingProxy] = useState(false);
   const [savingRoom, setSavingRoom] = useState<string | null>(null);
+  const [savingSituation, setSavingSituation] = useState<string | null>(null);
   const [isSavingProxyPayment, setIsSavingProxyPayment] = useState(false);
   const [deletingProxyPaymentId, setDeletingProxyPaymentId] = useState<string | null>(null);
   const [proxyPaymentMessage, setProxyPaymentMessage] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [situationSaveMessage, setSituationSaveMessage] = useState<string | null>(null);
   const [isSyncingGooglePeople, setIsSyncingGooglePeople] = useState(false);
   const [googlePeopleMessage, setGooglePeopleMessage] = useState<string | null>(null);
 
@@ -341,6 +358,50 @@ export default function SettingsView({
     } finally {
       setSavingRoom(null);
       window.setTimeout(() => setSaveMessage(null), 4000);
+    }
+  };
+
+  const updateSituationTemplate = (
+    key: SituationMessageTemplateState["key"],
+    field: "subject" | "content",
+    value: string,
+  ) => {
+    setSituationTemplates((current) =>
+      current.map((template) => template.key === key ? { ...template, [field]: value } : template),
+    );
+  };
+
+  const saveSituationTemplate = async (template: SituationMessageTemplateState) => {
+    setSavingSituation(template.key);
+    setSituationSaveMessage(null);
+    try {
+      const response = await fetch("/api/settings/situation-message-templates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: template.key,
+          subject: template.subject,
+          content: template.content,
+        }),
+      });
+      const data = await response.json() as {
+        success?: boolean;
+        template?: SituationMessageTemplateState;
+        error?: string;
+      };
+      if (!response.ok || !data.success || !data.template) {
+        throw new Error(data.error || "상황별 템플릿 저장에 실패했습니다.");
+      }
+
+      setSituationTemplates((current) =>
+        current.map((item) => item.key === template.key ? data.template! : item),
+      );
+      setSituationSaveMessage(`${template.name} 템플릿을 저장했습니다.`);
+    } catch (error) {
+      setSituationSaveMessage(error instanceof Error ? error.message : "상황별 템플릿 저장에 실패했습니다.");
+    } finally {
+      setSavingSituation(null);
+      window.setTimeout(() => setSituationSaveMessage(null), 4000);
     }
   };
 
@@ -722,6 +783,103 @@ export default function SettingsView({
                 </div>
               ))}
             </div>
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-black text-slate-900">상황별 문자 템플릿</h2>
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">
+                  자동발송 연결 전
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-semibold text-slate-500">
+                상황에 맞는 제목과 본문을 먼저 작성합니다. 지금 저장해도 실제 문자는 자동으로 발송되지 않습니다.
+              </p>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              {situationTemplates.map((template) => (
+                <div key={template.key} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className={cn(
+                          "rounded-lg p-2",
+                          template.key === "DAWN_BOOKING_CONFIRMATION"
+                            ? "bg-indigo-50 text-indigo-600"
+                            : "bg-amber-50 text-amber-600",
+                        )}>
+                          {template.key === "DAWN_BOOKING_CONFIRMATION" ? (
+                            <AlertTriangle className="h-4 w-4" />
+                          ) : (
+                            <CircleDollarSign className="h-4 w-4" />
+                          )}
+                        </div>
+                        <p className="text-base font-black text-slate-900">{template.name}</p>
+                      </div>
+                      <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold leading-5 text-slate-600">
+                        조건: {template.triggerDescription}
+                      </p>
+                      <p className="mt-1.5 text-xs font-semibold text-slate-400">
+                        {template.automationDescription}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void saveSituationTemplate(template)}
+                      disabled={savingSituation === template.key}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      {savingSituation === template.key ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5" />
+                      )}
+                      저장
+                    </button>
+                  </div>
+
+                  <label className="mt-5 block">
+                    <span className="text-xs font-black text-slate-600">문자 제목</span>
+                    <input
+                      type="text"
+                      value={template.subject}
+                      onChange={(event) => updateSituationTemplate(template.key, "subject", event.target.value)}
+                      placeholder="제목을 입력해주세요."
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-hidden transition placeholder:text-slate-300 focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                    />
+                  </label>
+
+                  <label className="mt-4 block">
+                    <span className="text-xs font-black text-slate-600">문자 본문</span>
+                    <textarea
+                      value={template.content}
+                      onChange={(event) => updateSituationTemplate(template.key, "content", event.target.value)}
+                      placeholder="보낼 내용을 입력해주세요."
+                      className="mt-2 h-56 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-800 outline-hidden transition placeholder:text-slate-300 focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                      spellCheck={false}
+                    />
+                  </label>
+
+                  <div className="mt-2 flex items-center justify-between gap-3 text-xs font-semibold text-slate-400">
+                    <span>최근 수정 {formatDateTime(template.updatedAt)}</span>
+                    <span>본문 {template.content.length.toLocaleString()}자</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {situationSaveMessage && (
+              <p className={cn(
+                "rounded-lg border px-3 py-2 text-xs font-bold",
+                situationSaveMessage.includes("저장했습니다")
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-rose-200 bg-rose-50 text-rose-800",
+              )}>
+                {situationSaveMessage}
+              </p>
+            )}
           </section>
         </div>
       )}
