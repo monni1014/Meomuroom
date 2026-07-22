@@ -38,7 +38,8 @@
     "sms:configure-notifications": "node scripts/configure-notification-secrets.mjs",
     "sms:register-webhook": "node scripts/register-solapi-webhook.mjs",
     "google-people:authorize": "node scripts/authorize-google-people.mjs",
-    "test:google-people": "node --experimental-strip-types scripts/test-google-people-contact-name.mjs"
+    "test:google-people": "node --experimental-strip-types scripts/test-google-people-contact-name.mjs",
+    "test:notification-memo-filter": "node scripts/test-reservation-notification-memo-filter.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",

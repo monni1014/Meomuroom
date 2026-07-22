@@ -33,6 +33,15 @@ function formatKstDateTime(startTime: Date, endTime: Date) {
   return `${date} ${time.format(startTime)}-${time.format(endTime)}`;
 }
 
+function notificationReadyMemoWhere() {
+  return {
+    OR: [
+      { memo: null },
+      { NOT: { memo: { contains: RPA_PENDING_MARKER } } },
+    ],
+  };
+}
+
 export async function sendDueReservationReminders() {
   const pipelineStartedAt = Date.now();
   const now = new Date();
@@ -60,7 +69,7 @@ export async function sendDueReservationReminders() {
       notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
       status: "CONFIRMED",
       isNoShow: false,
-      NOT: { memo: { contains: RPA_PENDING_MARKER } },
+      ...notificationReadyMemoWhere(),
     },
     orderBy: { startTime: "asc" },
   });
@@ -87,7 +96,7 @@ export async function sendDueReservationReminders() {
         notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
         status: "CONFIRMED",
         isNoShow: false,
-        NOT: { memo: { contains: RPA_PENDING_MARKER } },
+        ...notificationReadyMemoWhere(),
       },
       data: {
         notificationStatus: "WAITING_CONTACT",
@@ -125,7 +134,7 @@ export async function sendDueReservationReminders() {
           notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
           status: "CONFIRMED",
           isNoShow: false,
-          NOT: { memo: { contains: RPA_PENDING_MARKER } },
+          ...notificationReadyMemoWhere(),
         },
         data: {
           notificationStatus: "WAITING_CONTACT_SYNC",
@@ -145,7 +154,7 @@ export async function sendDueReservationReminders() {
         notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
         status: "CONFIRMED",
         isNoShow: false,
-        NOT: { memo: { contains: RPA_PENDING_MARKER } },
+        ...notificationReadyMemoWhere(),
       },
       data: {
         notificationStatus: "SENDING",
