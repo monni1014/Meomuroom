@@ -2,6 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
 import { sendReservationReminder } from "@/lib/solapi-sms";
 import { recordOutboundReservationMessage } from "@/lib/customer-messages";
+import { syncUpcomingReservationContacts } from "@/lib/google-people";
+import { isValidKoreanMobilePhone } from "@/lib/phone-number";
+import { RPA_PENDING_MARKER } from "@/lib/rpa-reservation-state";
 
 const ALERT_TYPE = "NOTIFICATION_DELIVERY";
 
@@ -31,6 +34,7 @@ function formatKstDateTime(startTime: Date, endTime: Date) {
 }
 
 export async function sendDueReservationReminders() {
+  const pipelineStartedAt = Date.now();
   const now = new Date();
   const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
@@ -53,9 +57,10 @@ export async function sendDueReservationReminders() {
         lte: twoHoursLater,
       },
       notified: false,
-      notificationStatus: { in: ["PENDING", "WAITING_CONTACT"] },
+      notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
       status: "CONFIRMED",
       isNoShow: false,
+      NOT: { memo: { contains: RPA_PENDING_MARKER } },
     },
     orderBy: { startTime: "asc" },
   });
@@ -64,16 +69,83 @@ export async function sendDueReservationReminders() {
   let sentCount = 0;
   let dryRunCount = 0;
   let waitingContactCount = 0;
+  let waitingContactSyncCount = 0;
   let failedCount = 0;
+  let contactSyncMs = 0;
 
+  const phoneReadyReservations = [];
   for (const reservation of upcomingReservations) {
+    if (isValidKoreanMobilePhone(reservation.phone)) {
+      phoneReadyReservations.push(reservation);
+      continue;
+    }
+
+    await prisma.reservation.updateMany({
+      where: {
+        id: reservation.id,
+        notified: false,
+        notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
+        status: "CONFIRMED",
+        isNoShow: false,
+        NOT: { memo: { contains: RPA_PENDING_MARKER } },
+      },
+      data: {
+        notificationStatus: "WAITING_CONTACT",
+        notificationChannel: "SMS",
+        notificationError: "RPA에서 고객 전화번호가 채워지기를 기다리고 있습니다.",
+      },
+    });
+    waitingContactCount += 1;
+  }
+
+  let contactSyncError: string | null = null;
+  if (phoneReadyReservations.length > 0) {
+    const contactSyncRequiredAfter = new Date();
+    const contactSyncStartedAt = Date.now();
+    try {
+      const contactSync = await syncUpcomingReservationContacts(new Date(), {
+        freshAfter: contactSyncRequiredAfter,
+      });
+      if (contactSync.skipped) {
+        contactSyncError = contactSync.reason || "Google 연락처 계정이 연결되지 않았습니다.";
+      }
+    } catch (error) {
+      contactSyncError = error instanceof Error ? error.message : String(error);
+    } finally {
+      contactSyncMs = Date.now() - contactSyncStartedAt;
+    }
+  }
+
+  if (contactSyncError) {
+    for (const reservation of phoneReadyReservations) {
+      const updated = await prisma.reservation.updateMany({
+        where: {
+          id: reservation.id,
+          notified: false,
+          notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
+          status: "CONFIRMED",
+          isNoShow: false,
+          NOT: { memo: { contains: RPA_PENDING_MARKER } },
+        },
+        data: {
+          notificationStatus: "WAITING_CONTACT_SYNC",
+          notificationChannel: "SMS",
+          notificationError: `Google 연락처 동기화 대기: ${contactSyncError}`,
+        },
+      });
+      waitingContactSyncCount += updated.count;
+    }
+  }
+
+  for (const reservation of contactSyncError ? [] : phoneReadyReservations) {
     const claimed = await prisma.reservation.updateMany({
       where: {
         id: reservation.id,
         notified: false,
-        notificationStatus: { in: ["PENDING", "WAITING_CONTACT"] },
+        notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
         status: "CONFIRMED",
         isNoShow: false,
+        NOT: { memo: { contains: RPA_PENDING_MARKER } },
       },
       data: {
         notificationStatus: "SENDING",
@@ -183,6 +255,9 @@ export async function sendDueReservationReminders() {
     sentCount,
     dryRunCount,
     waitingContactCount,
+    waitingContactSyncCount,
+    contactSyncMs,
+    pipelineMs: Date.now() - pipelineStartedAt,
     failedCount,
     results,
   };

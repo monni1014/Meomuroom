@@ -57,6 +57,24 @@ function isCancellationJob(job: RpaEmailJob) {
   return isCancellationPriorityJob(job);
 }
 
+function triggerPostRpaReservationCommunication(job: RpaEmailJob, reservationId?: string | null) {
+  if (!reservationId || isCancellationJob(job)) return;
+
+  void import("./reservation-notifications")
+    .then(({ sendDueReservationReminders }) => sendDueReservationReminders())
+    .then((result) => {
+      console.log(
+        `[RPAQueue] Post-RPA contact sync/notification: reservation=${reservationId}, checked=${result.checkedCount}, sent=${result.sentCount}, waiting-contact=${result.waitingContactCount}, waiting-contact-sync=${result.waitingContactSyncCount}, google-sync=${result.contactSyncMs}ms, pipeline=${result.pipelineMs}ms`,
+      );
+    })
+    .catch((error) => {
+      console.error(
+        `[RPAQueue] Post-RPA contact sync/notification failed: reservation=${reservationId}`,
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+}
+
 function extractJobBookingKey(job: RpaEmailJob) {
   const combined = `${job.subject}\n${job.text}\n${job.html || ""}`;
 
@@ -312,6 +330,7 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
         state.failureCounts.delete(job.messageId);
         state.manualCheckIds.delete(job.messageId);
         clearRetryTimer(state, job.messageId);
+        triggerPostRpaReservationCommunication(job, result?.reservationId);
         console.log(`[RPAQueue] Done ${job.source} job: ${job.messageId}`);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);

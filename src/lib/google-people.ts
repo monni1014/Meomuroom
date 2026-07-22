@@ -404,9 +404,17 @@ export async function getGooglePeopleStatus(): Promise<GooglePeopleStatus> {
 }
 
 let syncQueue: Promise<GooglePeopleSyncResult> | null = null;
+let syncQueueStartedAt = 0;
 
-export function syncUpcomingReservationContacts(now = new Date()) {
-  if (syncQueue) return syncQueue;
+export function syncUpcomingReservationContacts(
+  now = new Date(),
+  options: { freshAfter?: Date } = {},
+): Promise<GooglePeopleSyncResult> {
+  if (syncQueue) {
+    if (!options.freshAfter || syncQueueStartedAt >= options.freshAfter.getTime()) return syncQueue;
+    return syncQueue.then(() => syncUpcomingReservationContacts(now, options));
+  }
+  syncQueueStartedAt = Date.now();
   syncQueue = runSyncUpcomingReservationContacts(now).finally(() => {
     syncQueue = null;
   });
