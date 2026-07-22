@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { eachDayOfInterval, endOfMonth, format, startOfMonth } from "date-fns";
 import Image from "next/image";
-import { Camera, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Maximize2, RefreshCw, Save, Undo2, X } from "lucide-react";
+import { Camera, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Maximize2, RefreshCw, RotateCcw, Save, Undo2, X } from "lucide-react";
 import { EditableTableCellInput } from "@/components/EditableTableCellInput";
 import {
   MONTHLY_GRID_BODY_ROW_CLASS,
@@ -128,6 +128,11 @@ interface CancellationRangeStart {
   dateKey: string;
   hour: number;
 }
+
+type LockableScreenOrientation = ScreenOrientation & {
+  lock?: (orientation: "landscape") => Promise<void>;
+  unlock?: () => void;
+};
 
 const COMPETITORS: CompetitorSpace[] = [
   { id: "synergy", displayName: "시너지" },
@@ -351,6 +356,8 @@ export default function CompetitorsView({
   const [isAcknowledging, setIsAcknowledging] = useState(false);
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceSnapshot | null>(null);
   const [dismissingEvidenceId, setDismissingEvidenceId] = useState<string | null>(null);
+  const [isLandscapeMode, setIsLandscapeMode] = useState(false);
+  const [orientationHint, setOrientationHint] = useState<string | null>(null);
 
   useEffect(() => {
     const controls = controlsRef.current;
@@ -365,6 +372,24 @@ export default function CompetitorsView({
       observer.disconnect();
       window.removeEventListener("resize", updateHeight);
     };
+  }, []);
+
+  useEffect(() => {
+    const updateOrientation = () => {
+      const landscape = window.innerWidth > window.innerHeight;
+      if (landscape) setOrientationHint(null);
+    };
+    updateOrientation();
+    window.addEventListener("resize", updateOrientation);
+    window.addEventListener("orientationchange", updateOrientation);
+    return () => {
+      window.removeEventListener("resize", updateOrientation);
+      window.removeEventListener("orientationchange", updateOrientation);
+    };
+  }, []);
+
+  useEffect(() => () => {
+    document.documentElement.classList.remove("competitor-landscape-mode");
   }, []);
 
   const currentYear = currentDate.getFullYear();
@@ -705,14 +730,57 @@ export default function CompetitorsView({
     }
   };
 
+  const toggleLandscapeView = async () => {
+    const orientation = window.screen.orientation as LockableScreenOrientation | undefined;
+    setOrientationHint(null);
+
+    if (isLandscapeMode) {
+      setIsLandscapeMode(false);
+      document.documentElement.classList.remove("competitor-landscape-mode");
+      orientation?.unlock?.();
+      if (document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen().catch(() => undefined);
+      }
+      return;
+    }
+
+    setIsLandscapeMode(true);
+    document.documentElement.classList.add("competitor-landscape-mode");
+
+    try {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+      if (!orientation?.lock) throw new Error("orientation-lock-not-supported");
+      await orientation.lock("landscape");
+    } catch {
+      setOrientationHint("휴대폰을 가로로 돌려주세요. 가로 폭에 맞춰 경쟁사 표가 넓게 표시됩니다.");
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-3 p-4 pb-24 md:p-8" style={layoutStyle}>
-      <header className="flex flex-col gap-2 pt-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+      <header className="relative flex flex-col gap-2 pt-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="pr-12 lg:pr-0">
           <h1 className="text-2xl font-bold text-slate-900">경쟁사 현황</h1>
           <p className="mt-0.5 text-sm text-slate-500">공개 예약 상태를 자동으로 기록하고, 시너지 선점 여부를 함께 확인합니다.</p>
         </div>
-        <div className="flex flex-col items-start gap-1 sm:items-end">
+        <button
+          type="button"
+          onClick={() => void toggleLandscapeView()}
+          aria-label={isLandscapeMode ? "가로 화면 보기 종료" : "가로 화면으로 보기"}
+          aria-pressed={isLandscapeMode}
+          title={isLandscapeMode ? "가로 화면 보기 종료" : "가로 화면으로 보기"}
+          className={cn(
+            "absolute right-0 top-4 inline-flex h-10 w-10 items-center justify-center rounded-xl border shadow-sm transition active:scale-95 lg:hidden",
+            isLandscapeMode
+              ? "border-indigo-600 bg-indigo-600 text-white"
+              : "border-slate-200 bg-white text-slate-700",
+          )}
+        >
+          <RotateCcw className={cn("h-5 w-5 transition-transform", isLandscapeMode && "rotate-90")} aria-hidden="true" />
+        </button>
+        <div className="flex flex-col items-start gap-1 lg:items-end">
           <p className={cn("text-xs font-bold", snapshots.latestScan?.status === "FAILED" ? "text-rose-600" : "text-slate-500")}>
             {scanStatusLabel(snapshots.latestScan)}
           </p>
@@ -730,6 +798,13 @@ export default function CompetitorsView({
           </div>
         </div>
       </header>
+
+      {orientationHint && (
+        <div className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-800 lg:hidden">
+          <RotateCcw className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {orientationHint}
+        </div>
+      )}
 
       {loadError && <div className="border-l-4 border-rose-500 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">{loadError}</div>}
 

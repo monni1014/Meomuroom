@@ -22,6 +22,7 @@ export function SideNav() {
   const pathname = usePathname();
   return (
     <nav
+      data-app-navigation
       className={cn(
         "fixed z-50 bg-white border-slate-200 flex",
         // 모바일: 하단 탭바 (가로)

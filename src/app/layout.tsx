@@ -52,7 +52,7 @@ export default function RootLayout({
       <body className="min-h-full flex bg-slate-50 text-slate-900">
         <ServiceWorkerRegistration />
         <SideNav />
-        <main className="flex-1 w-full md:ml-64 h-screen overflow-y-auto pb-20 md:pb-0">
+        <main data-app-main className="flex-1 w-full md:ml-64 h-screen overflow-y-auto pb-20 md:pb-0">
           <AppBackButton />
           {children}
         </main>
