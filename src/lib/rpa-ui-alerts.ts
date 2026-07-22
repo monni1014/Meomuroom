@@ -82,7 +82,7 @@ function alertCopy(metadata: ScriptMetadata, kind: Exclude<RpaFailureKind, "BUSY
     return {
       type: "RPA_UI_CHANGE",
       severity: "CRITICAL" as const,
-      title: `${metadata.platformLabel} 화면 변경 의심`,
+      title: `${metadata.platformLabel} UI 변경 감지`,
       description: `${metadata.operationLabel}에서 기존 버튼·문구·구조를 찾지 못했습니다.`,
     };
   }
