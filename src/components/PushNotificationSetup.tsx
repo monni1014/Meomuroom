@@ -74,7 +74,7 @@ export default function PushNotificationSetup() {
       });
       if (!response.ok) throw new Error("subscription save failed");
       setSubscribed(true);
-      setMessage("이 기기에서 문자 결과 알림을 받습니다.");
+      setMessage("이 기기에서 문자 수신 실패 알림을 받습니다.");
     } catch (error) {
       console.error("Push subscription error:", error);
       setMessage("알림 연결에 실패했습니다. 잠시 후 다시 시도해주세요.");
@@ -116,10 +116,10 @@ export default function PushNotificationSetup() {
           {subscribed ? <BellRing className="h-5 w-5 text-emerald-600" /> : <Bell className="h-5 w-5 text-indigo-600" />}
           <div>
             <p className="text-sm font-extrabold text-slate-900">
-              {subscribed ? "문자 결과 알림 켜짐" : "문자 결과를 휴대폰으로 알림"}
+              {subscribed ? "문자 실패 알림 켜짐" : "문자 실패를 휴대폰으로 알림"}
             </p>
             <p className="mt-0.5 text-xs text-slate-600">
-              {subscribed ? "수신완료와 실패를 바로 알려드립니다." : "이 기기에서 한 번만 켜면 됩니다."}
+              {subscribed ? "문자 수신 실패가 확인될 때만 알려드립니다." : "정상 발송 알림은 보내지 않습니다."}
             </p>
           </div>
         </div>
