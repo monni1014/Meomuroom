@@ -676,11 +676,11 @@ export default function CalendarPage() {
                   }}
                   title="더블클릭하면 이용현황에서 수정"
                   className={cn(
-                    "relative p-4 rounded-xl border flex justify-between items-start gap-2 cursor-pointer select-none",
+                    "relative flex flex-col gap-3 rounded-xl border p-4 cursor-pointer select-none sm:flex-row sm:items-start sm:justify-between sm:gap-2",
                     isCancelled ? "bg-slate-100 border-slate-200" : "bg-slate-50 border-slate-100 hover:border-indigo-200"
                   )}
                 >
-                  <div className="space-y-2 flex-1">
+                  <div className="min-w-0 flex-1 space-y-3">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {isCancelled && (
                         res.isNoShow ? (
@@ -735,36 +735,36 @@ export default function CalendarPage() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-y-1 gap-x-4 text-xs text-slate-500">
-                      <p className="flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5" />
+                    <div className="grid grid-cols-1 gap-2 text-xs text-slate-500 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-1">
+                      <p className="flex min-w-0 items-center gap-1">
+                        <Clock className="h-3.5 w-3.5 shrink-0" />
                         <span>{formatTime(start)} - {displayEndTime} ({formatDuration(start, end)})</span>
                       </p>
-                      <p className="flex items-center gap-1">
-                        <User className="w-3.5 h-3.5" />
+                      <p className="flex min-w-0 items-start gap-1">
+                        <User className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                         <span>인원: {res.usageLog?.headCount || 1}명 ({res.usageLog?.purpose || UNCATEGORIZED_LABEL}{res.usageLog?.detail ? ` · ${res.usageLog.detail}` : ""})</span>
                       </p>
                       {res.price > 0 && (
-                        <p className="flex items-center gap-1 text-slate-700">
-                          <Wallet className="w-3.5 h-3.5 text-slate-400" />
+                        <p className="flex min-w-0 items-center gap-1 text-slate-700">
+                          <Wallet className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                           <span>{isCancelled ? "수수료" : "요금"}: <strong className="text-slate-800">{res.price.toLocaleString()}원</strong></span>
                         </p>
                       )}
                       {res.phone && (
-                        <p className="flex items-center gap-1">
-                          <Phone className="w-3.5 h-3.5" />
+                        <p className="flex min-w-0 items-center gap-1">
+                          <Phone className="h-3.5 w-3.5 shrink-0" />
                           <span className={cn(isCancelled ? "line-through text-slate-400" : "")}>{res.phone}</span>
                         </p>
                       )}
                       {!isCancelled && res.discount > 0 && (
-                        <p className="flex items-center gap-1 text-rose-600">
+                        <p className="flex min-w-0 items-center gap-1 text-rose-600">
                           <span>🎟️ 쿠폰 사용: -{res.discount.toLocaleString()}원</span>
                         </p>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex flex-col items-end gap-1.5 pt-5">
+                  <div className="flex w-full flex-col items-end gap-2 border-t border-slate-200 pt-3 sm:w-auto sm:border-t-0 sm:pt-5">
                     {isCancelled && (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleRestore(res.id); }}
@@ -783,7 +783,7 @@ export default function CalendarPage() {
                         결제완료 처리
                       </button>
                     )}
-                    <div className="flex items-center gap-1">
+                    <div className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:flex-nowrap">
                       <button
                         onClick={(e) => { e.stopPropagation(); openEditModal(res); }}
                         className="p-2 text-slate-400 hover:text-emerald-500 rounded-lg hover:bg-emerald-50 transition active:scale-95"
