@@ -20,6 +20,8 @@ self.addEventListener("push", (event) => {
     body: payload.body || "문자 발송 상태가 변경되었습니다.",
     icon: "/icon-192.png",
     badge: self.NOTIFICATION_BADGE,
+    silent: false,
+    vibrate: [300, 150, 300],
     tag: payload.tag || "memoroom-message-status",
     renotify: true,
     data: { url: payload.url || "/messages" },
