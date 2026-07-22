@@ -1526,6 +1526,10 @@ export async function processNaverEmailWithRpa({
   const result = await upsertNaverReservation(normalized, messageId, receivedAt);
 
   if (normalized.status === "CONFIRMED") {
+    // A successful detail read supersedes parser/manual-check failures from
+    // earlier attempts. Clear them before slot sync so a new slot failure can
+    // add its own current, actionable check line.
+    await clearRpaCheckRequired(result.reservation.id);
     await syncNaverAndSpaceCloudSlots(
       normalizeReservationForSlotRecheck(result.reservation),
       "close",
