@@ -22,6 +22,7 @@ import type { SolapiServiceStatus } from "@/lib/solapi-status";
 import type { IspProxyStatus } from "@/lib/proxy-status-types";
 import type { ProxyPaymentCurrency, ProxyPaymentRecord } from "@/lib/proxy-payment-types";
 import type { GooglePeopleStatus } from "@/lib/google-people";
+import { solapiSenderDisplayName, solapiSenderDisplayOrder } from "@/lib/solapi-sender-display";
 
 type MessageTemplateState = {
   id: string;
@@ -32,11 +33,6 @@ type MessageTemplateState = {
 };
 
 type SettingsTab = "message" | "rpa";
-
-const SOLAPI_SENDER_LABELS: Record<string, string> = {
-  "01071835720": "사장님",
-  "01094431849": "와이프",
-};
 
 type ProxyPaymentForm = {
   provider: string;
@@ -137,10 +133,6 @@ function senderStatusClass(status: string | null, error: string | null) {
   if (status === "ACTIVE") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "PENDING") return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-slate-200 bg-slate-50 text-slate-600";
-}
-
-function senderOwnerLabel(phoneNumber: string) {
-  return SOLAPI_SENDER_LABELS[phoneNumber] || "등록 발신번호";
 }
 
 function proxyStatusClass(status: IspProxyStatus) {
@@ -524,7 +516,11 @@ export default function SettingsView({
                 </div>
 
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {solapiStatus.senders.map((senderOption) => {
+                  {[...solapiStatus.senders]
+                    .sort((left, right) => (
+                      solapiSenderDisplayOrder(left.phoneNumber) - solapiSenderDisplayOrder(right.phoneNumber)
+                    ))
+                    .map((senderOption) => {
                     const isSelected = selectedSenderNumber === senderOption.phoneNumber;
                     const isAvailable = senderOption.status === "ACTIVE";
                     return (
@@ -548,7 +544,7 @@ export default function SettingsView({
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="text-sm font-black text-slate-900">
-                              {senderOwnerLabel(senderOption.phoneNumber)}
+                              {solapiSenderDisplayName(senderOption.phoneNumber)}
                             </span>
                             <span className={cn(
                               "rounded-full border px-2 py-0.5 text-[10px] font-black",
@@ -624,7 +620,7 @@ export default function SettingsView({
                   <ContactRound className="h-6 w-6" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-black text-slate-900">와이프 아이폰 연락처 자동저장</h2>
+                  <h2 className="text-lg font-black text-slate-900">짹짹공주 아이폰 연락처 자동저장</h2>
                   <p className="mt-1 text-sm font-semibold text-slate-500">
                     7일 이내 예약 고객을 <span className="font-black text-slate-700">머무룸3 7/23 김종성</span> 형식으로 저장합니다. 취소 시 삭제하고 이용 종료 48시간 후 정리합니다.
                   </p>
@@ -638,7 +634,7 @@ export default function SettingsView({
                     : "border-amber-200 bg-amber-50 text-amber-700",
                 )}>
                   {googlePeopleStatus.connected ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                  {googlePeopleStatus.connected ? "연결됨" : "와이프 계정 연결 필요"}
+                  {googlePeopleStatus.connected ? "연결됨" : "짹짹공주 계정 연결 필요"}
                 </span>
                 <button
                   type="button"
@@ -653,7 +649,7 @@ export default function SettingsView({
             </div>
 
             <div className="mt-5 grid gap-x-8 md:grid-cols-2">
-              <InfoRow label="연결 계정" value={googlePeopleStatus.accountEmail || "와이프 Google 계정 연결 전"} />
+              <InfoRow label="연결 계정" value={googlePeopleStatus.accountEmail || "짹짹공주 Google 계정 연결 전"} />
               <InfoRow label="최근 성공" value={formatDateTime(googlePeopleStatus.lastSuccessAt)} />
               <InfoRow label="확인한 고객" value={`${googlePeopleStatus.checkedCount}명`} />
               <InfoRow label="최근 처리" value={`신규 ${googlePeopleStatus.createdCount} · 갱신 ${googlePeopleStatus.updatedCount} · 동일 ${googlePeopleStatus.unchangedCount}`} />
@@ -662,7 +658,7 @@ export default function SettingsView({
 
             {!googlePeopleStatus.configured && (
               <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
-                서버 OAuth 설정을 준비 중입니다. 준비가 끝난 뒤 와이프 Google 계정으로 한 번만 승인하면 됩니다.
+                서버 OAuth 설정을 준비 중입니다. 준비가 끝난 뒤 짹짹공주 Google 계정으로 한 번만 승인하면 됩니다.
               </p>
             )}
             {googlePeopleStatus.lastError && (

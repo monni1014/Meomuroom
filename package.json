@@ -40,7 +40,8 @@
     "google-people:authorize": "node scripts/authorize-google-people.mjs",
     "test:google-people": "node --experimental-strip-types scripts/test-google-people-contact-name.mjs",
     "test:notification-memo-filter": "node scripts/test-reservation-notification-memo-filter.mjs",
-    "test:message-subject": "node --experimental-strip-types scripts/test-reservation-message-subject.mjs"
+    "test:message-subject": "node --experimental-strip-types scripts/test-reservation-message-subject.mjs",
+    "test:sender-display": "node --experimental-strip-types scripts/test-solapi-sender-display.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",
