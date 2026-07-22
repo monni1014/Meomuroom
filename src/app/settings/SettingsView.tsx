@@ -107,14 +107,21 @@ function formatDateTime(value: string | null) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("ko-KR", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Seoul",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value || "";
+  const hour24 = Number(part("hour"));
+  const period = hour24 < 12 ? "오전" : "오후";
+  const hour12 = String(hour24 % 12 || 12).padStart(2, "0");
+  return `${part("year")}. ${part("month")}. ${part("day")}. ${period} ${hour12}:${part("minute")}`;
 }
 
 function senderStatusLabel(status: string | null) {
