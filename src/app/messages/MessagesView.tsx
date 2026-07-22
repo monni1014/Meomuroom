@@ -177,10 +177,10 @@ export default function MessagesView({
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-black text-slate-900">{entry.customerName || "이름 없음"}</p>
                         <span className={`rounded-md border px-2 py-1 text-[11px] font-bold ${roomBadgeStyle(entry.roomName)}`}>
                           {entry.roomName}
                         </span>
+                        <p className="font-black text-slate-900">{entry.customerName || "이름 없음"}</p>
                         {entry.isTest && (
                           <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-extrabold text-amber-800 ring-1 ring-inset ring-amber-200">
                             강제 테스트
