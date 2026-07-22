@@ -1,20 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Calendar, Home, ClipboardList, BarChart3, Building2, Table2, Radar, Settings, MessageSquareText } from "lucide-react";
+import { Calendar, Home, ClipboardList, BarChart3, Table2, Radar, Settings, MessageSquareText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProxyStatusIndicator } from "@/components/ProxyStatusIndicator";
 
 const NAV_ITEMS = [
-  { name: "대시보드", href: "/", icon: Home },
-  { name: "캘린더", href: "/calendar", icon: Calendar },
-  { name: "이용현황", href: "/usage", icon: ClipboardList },
-  { name: "문자 현황", href: "/messages", icon: MessageSquareText },
-  { name: "월간표", href: "/monthly-table", icon: Table2 },
-  { name: "경쟁사 현황", href: "/competitors", icon: Radar },
-  { name: "통계", href: "/analytics", icon: BarChart3 },
-  { name: "설정", href: "/settings", icon: Settings },
+  { name: "대시보드", href: "/", icon: Home, mobileHidden: false },
+  { name: "캘린더", href: "/calendar", icon: Calendar, mobileHidden: false },
+  { name: "이용현황", href: "/usage", icon: ClipboardList, mobileHidden: false },
+  { name: "문자 현황", href: "/messages", icon: MessageSquareText, mobileHidden: false },
+  { name: "월간표", href: "/monthly-table", icon: Table2, mobileHidden: true },
+  { name: "경쟁사 현황", href: "/competitors", icon: Radar, mobileHidden: false },
+  { name: "통계", href: "/analytics", icon: BarChart3, mobileHidden: true },
+  { name: "설정", href: "/settings", icon: Settings, mobileHidden: false },
 ];
 
 export function SideNav() {
@@ -31,8 +32,15 @@ export function SideNav() {
     >
       {/* 로고 헤더 — 데스크톱 사이드바에서만 표시 */}
       <div className="hidden md:flex items-center h-16 px-6 border-b border-slate-100">
-        <div className="flex items-center gap-3 text-indigo-600">
-          <Building2 className="w-8 h-8" />
+        <div className="flex items-center gap-3">
+          <Image
+            src="/memoroom-logo.png"
+            alt="머무룸 로고"
+            width={40}
+            height={40}
+            className="h-10 w-10 rounded-xl object-cover"
+            priority
+          />
           <span className="font-bold text-xl text-slate-900 tracking-tight">머무룸 DX</span>
         </div>
       </div>
@@ -45,7 +53,8 @@ export function SideNav() {
               key={item.href}
               href={item.href}
               className={cn(
-                "relative flex flex-1 md:flex-none flex-col md:flex-row items-center md:justify-start gap-1 md:gap-4 px-1 md:px-3 py-2 md:py-3 md:rounded-xl transition-all duration-200 group",
+                "relative flex-1 md:flex-none flex-col md:flex-row items-center md:justify-start gap-1 md:gap-4 px-1 md:px-3 py-2 md:py-3 md:rounded-xl transition-all duration-200 group",
+                item.mobileHidden ? "hidden md:flex" : "flex",
                 isActive
                   ? "text-indigo-700 md:bg-indigo-50"
                   : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
