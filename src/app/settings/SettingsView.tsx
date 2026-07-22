@@ -1,12 +1,18 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  Activity,
   AlertTriangle,
   Bot,
   CircleDollarSign,
   CheckCircle2,
+  CloudCog,
   ContactRound,
+  Cpu,
+  Database,
+  HardDrive,
+  MemoryStick,
   MessageSquareText,
   Phone,
   Plus,
@@ -22,6 +28,7 @@ import type { SolapiServiceStatus } from "@/lib/solapi-status";
 import type { IspProxyStatus } from "@/lib/proxy-status-types";
 import type { ProxyPaymentCurrency, ProxyPaymentRecord } from "@/lib/proxy-payment-types";
 import type { GooglePeopleStatus } from "@/lib/google-people";
+import type { ServerStatusSnapshot } from "@/lib/server-status-types";
 import { solapiSenderDisplayName, solapiSenderDisplayOrder } from "@/lib/solapi-sender-display";
 
 type MessageTemplateState = {
@@ -42,7 +49,7 @@ type SituationMessageTemplateState = {
   updatedAt: string | null;
 };
 
-type SettingsTab = "message" | "rpa";
+type SettingsTab = "message" | "rpa" | "server";
 
 type ProxyPaymentForm = {
   provider: string;
@@ -88,6 +95,42 @@ function formatProxyPaymentAmount(amountMinor: number, currency: ProxyPaymentCur
 function formatWon(value: number | null) {
   if (value === null) return "-";
   return `${Math.round(value).toLocaleString()}원`;
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value < 0) return "-";
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(value >= 10 * 1024 ** 3 ? 0 : 1)}GB`;
+  if (value >= 1024 ** 2) return `${Math.round(value / 1024 ** 2).toLocaleString("ko-KR")}MB`;
+  if (value >= 1024) return `${Math.round(value / 1024).toLocaleString("ko-KR")}KB`;
+  return `${Math.round(value).toLocaleString("ko-KR")}B`;
+}
+
+function formatDuration(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  if (days > 0) return `${days}일 ${hours}시간`;
+  if (hours > 0) return `${hours}시간 ${minutes}분`;
+  return `${minutes}분`;
+}
+
+function serverStatusClass(status: ServerStatusSnapshot["overallStatus"]) {
+  if (status === "OK") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "WARNING") return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-rose-200 bg-rose-50 text-rose-700";
+}
+
+function serviceStatusLabel(status: "ACTIVE" | "INACTIVE" | "UNKNOWN") {
+  if (status === "ACTIVE") return "정상";
+  if (status === "INACTIVE") return "중지/오류";
+  return "확인 불가";
+}
+
+function serviceStatusClass(status: "ACTIVE" | "INACTIVE" | "UNKNOWN") {
+  if (status === "ACTIVE") return "bg-emerald-500";
+  if (status === "INACTIVE") return "bg-rose-500";
+  return "bg-slate-400";
 }
 
 function formatPhone(value: string | null) {
@@ -185,6 +228,49 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function ServerMetricCard({
+  icon: Icon,
+  title,
+  value,
+  detail,
+  percentValue,
+  iconClassName,
+}: {
+  icon: React.ElementType;
+  title: string;
+  value: string;
+  detail: string;
+  percentValue?: number;
+  iconClassName: string;
+}) {
+  const safePercent = percentValue === undefined ? null : Math.min(100, Math.max(0, percentValue));
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-slate-500">{title}</p>
+          <p className="mt-2 text-2xl font-black tracking-tight text-slate-950">{value}</p>
+        </div>
+        <div className={cn("rounded-full p-3", iconClassName)}>
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+      {safePercent !== null && (
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+          <div
+            className={cn(
+              "h-full rounded-full transition-all",
+              safePercent >= 85 ? "bg-rose-500" : safePercent >= 70 ? "bg-amber-400" : "bg-emerald-500",
+            )}
+            style={{ width: `${safePercent}%` }}
+          />
+        </div>
+      )}
+      <p className="mt-2 text-xs font-semibold text-slate-400">{detail}</p>
+    </div>
+  );
+}
+
 function TabButton({
   active,
   icon: Icon,
@@ -236,11 +322,14 @@ export default function SettingsView({
     initialSituationMessageTemplates,
   );
   const [googlePeopleStatus, setGooglePeopleStatus] = useState<GooglePeopleStatus>(initialGooglePeopleStatus);
+  const [serverStatus, setServerStatus] = useState<ServerStatusSnapshot | null>(null);
   const [isLoadingSolapi, setIsLoadingSolapi] = useState(false);
   const [selectedSenderNumber, setSelectedSenderNumber] = useState(initialSolapiStatus.senderNumber || "");
   const [isSavingSenderNumber, setIsSavingSenderNumber] = useState(false);
   const [senderSaveMessage, setSenderSaveMessage] = useState<string | null>(null);
   const [isLoadingProxy, setIsLoadingProxy] = useState(false);
+  const [isLoadingServer, setIsLoadingServer] = useState(false);
+  const [serverStatusError, setServerStatusError] = useState<string | null>(null);
   const [savingRoom, setSavingRoom] = useState<string | null>(null);
   const [savingSituation, setSavingSituation] = useState<string | null>(null);
   const [isSavingProxyPayment, setIsSavingProxyPayment] = useState(false);
@@ -308,6 +397,31 @@ export default function SettingsView({
     }
   }, []);
 
+  const loadServerStatus = useCallback(async () => {
+    setIsLoadingServer(true);
+    try {
+      const response = await fetch("/api/settings/server-status", { cache: "no-store" });
+      const data = await response.json() as ServerStatusSnapshot & { error?: string };
+      if (!response.ok) throw new Error(data.error || "클라우드 컴퓨터 상태를 확인하지 못했습니다.");
+      setServerStatus(data);
+      setServerStatusError(null);
+    } catch (error) {
+      setServerStatusError(error instanceof Error ? error.message : "클라우드 컴퓨터 상태를 확인하지 못했습니다.");
+    } finally {
+      setIsLoadingServer(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "server") return;
+    const initialTimer = window.setTimeout(() => void loadServerStatus(), 0);
+    const timer = window.setInterval(() => void loadServerStatus(), 30_000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
+  }, [activeTab, loadServerStatus]);
+
   const syncGooglePeople = async () => {
     setIsSyncingGooglePeople(true);
     setGooglePeopleMessage(null);
@@ -368,13 +482,12 @@ export default function SettingsView({
     }
   };
 
-  const updateSituationTemplate = (
+  const updateSituationTemplateContent = (
     key: SituationMessageTemplateState["key"],
-    field: "subject" | "content",
     value: string,
   ) => {
     setSituationTemplates((current) =>
-      current.map((template) => template.key === key ? { ...template, [field]: value } : template),
+      current.map((template) => template.key === key ? { ...template, content: value } : template),
     );
   };
 
@@ -387,7 +500,7 @@ export default function SettingsView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           key: template.key,
-          subject: template.subject,
+          subject: "",
           content: template.content,
         }),
       });
@@ -507,6 +620,12 @@ export default function SettingsView({
             icon={Bot}
             label="RPA"
             onClick={() => setActiveTab("rpa")}
+          />
+          <TabButton
+            active={activeTab === "server"}
+            icon={CloudCog}
+            label="클라우드 컴퓨터"
+            onClick={() => setActiveTab("server")}
           />
         </div>
       </header>
@@ -801,13 +920,13 @@ export default function SettingsView({
                 </span>
               </div>
               <p className="mt-1 text-sm font-semibold text-slate-500">
-                상황에 맞는 제목과 본문을 먼저 작성합니다. 지금 저장해도 실제 문자는 자동으로 발송되지 않습니다.
+                현재는 짧은 SMS용이므로 제목 없이 본문만 작성합니다. 지금 저장해도 실제 문자는 자동으로 발송되지 않습니다.
               </p>
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
               {situationTemplates.map((template) => (
-                <div key={template.key} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div key={template.key} className="h-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -828,7 +947,7 @@ export default function SettingsView({
                       <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold leading-5 text-slate-600">
                         조건: {template.triggerDescription}
                       </p>
-                      <p className="mt-1.5 text-xs font-semibold text-slate-400">
+                      <p className="mt-1.5 min-h-10 text-xs font-semibold leading-5 text-slate-400">
                         {template.automationDescription}
                       </p>
                     </div>
@@ -848,21 +967,10 @@ export default function SettingsView({
                   </div>
 
                   <label className="mt-5 block">
-                    <span className="text-xs font-black text-slate-600">문자 제목</span>
-                    <input
-                      type="text"
-                      value={template.subject}
-                      onChange={(event) => updateSituationTemplate(template.key, "subject", event.target.value)}
-                      placeholder="제목을 입력해주세요."
-                      className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-hidden transition placeholder:text-slate-300 focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100"
-                    />
-                  </label>
-
-                  <label className="mt-4 block">
                     <span className="text-xs font-black text-slate-600">문자 본문</span>
                     <textarea
                       value={template.content}
-                      onChange={(event) => updateSituationTemplate(template.key, "content", event.target.value)}
+                      onChange={(event) => updateSituationTemplateContent(template.key, event.target.value)}
                       placeholder="보낼 내용을 입력해주세요."
                       className="mt-2 h-56 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-800 outline-hidden transition placeholder:text-slate-300 focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100"
                       spellCheck={false}
@@ -1169,6 +1277,170 @@ export default function SettingsView({
               <p className="rounded-lg bg-slate-50 px-3 py-3">실패/불확실 상태: 조작 중단 후 확인필요 알림</p>
             </div>
           </section>
+        </div>
+      )}
+
+      {activeTab === "server" && (
+        <div className="space-y-5">
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "rounded-full p-3",
+                  serverStatus?.overallStatus === "OK"
+                    ? "bg-emerald-50 text-emerald-600"
+                    : serverStatus?.overallStatus === "WARNING"
+                      ? "bg-amber-50 text-amber-600"
+                      : "bg-slate-100 text-slate-500",
+                )}>
+                  <CloudCog className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-500">Vultr 클라우드 컴퓨터</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <h2 className="text-2xl font-black tracking-tight text-slate-950">
+                      {serverStatus?.summary || (isLoadingServer ? "상태 확인 중" : "상태를 불러와주세요")}
+                    </h2>
+                    {serverStatus && (
+                      <span className={cn(
+                        "rounded-full border px-2.5 py-1 text-xs font-black",
+                        serverStatusClass(serverStatus.overallStatus),
+                      )}>
+                        {serverStatus.overallStatus === "OK" ? "정상" : serverStatus.overallStatus === "WARNING" ? "주의" : "오류"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs font-semibold text-slate-400">
+                    {serverStatus
+                      ? `${serverStatus.hostname} · 최근 확인 ${formatDateTime(serverStatus.checkedAt)}`
+                      : "앱·DB·Tailscale과 서버 자원을 함께 점검합니다."}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadServerStatus()}
+                disabled={isLoadingServer}
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
+              >
+                <RefreshCw className={cn("h-4 w-4", isLoadingServer && "animate-spin")} />
+                지금 점검
+              </button>
+            </div>
+
+            {serverStatusError && (
+              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-800">
+                {serverStatusError}
+              </div>
+            )}
+            {serverStatus && serverStatus.warnings.length > 0 && (
+              <div className="mt-4 space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">
+                {serverStatus.warnings.map((warning) => <p key={warning}>• {warning}</p>)}
+              </div>
+            )}
+          </section>
+
+          {!serverStatus && isLoadingServer ? (
+            <section className="flex min-h-56 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="text-center text-slate-400">
+                <RefreshCw className="mx-auto h-7 w-7 animate-spin" />
+                <p className="mt-3 text-sm font-bold">서버 상태를 확인하고 있습니다.</p>
+              </div>
+            </section>
+          ) : serverStatus ? (
+            <>
+              <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <ServerMetricCard
+                  icon={MemoryStick}
+                  title="서버 RAM"
+                  value={`${serverStatus.memory.usedPercent}% 사용`}
+                  detail={`${formatBytes(serverStatus.memory.usedBytes)} / ${formatBytes(serverStatus.memory.totalBytes)} · 여유 ${formatBytes(serverStatus.memory.availableBytes)}`}
+                  percentValue={serverStatus.memory.usedPercent}
+                  iconClassName="bg-violet-50 text-violet-600"
+                />
+                <ServerMetricCard
+                  icon={Activity}
+                  title="머무룸 앱 RAM"
+                  value={formatBytes(serverStatus.memory.appRssBytes)}
+                  detail={`실제 점유 RAM · JS 사용 ${formatBytes(serverStatus.memory.appHeapUsedBytes)}`}
+                  iconClassName="bg-indigo-50 text-indigo-600"
+                />
+                <ServerMetricCard
+                  icon={HardDrive}
+                  title="서버 SSD"
+                  value={serverStatus.disk ? `${serverStatus.disk.usedPercent}% 사용` : "확인 불가"}
+                  detail={serverStatus.disk
+                    ? `${formatBytes(serverStatus.disk.usedBytes)} / ${formatBytes(serverStatus.disk.totalBytes)} · 여유 ${formatBytes(serverStatus.disk.availableBytes)}`
+                    : "SSD 정보를 불러오지 못했습니다."}
+                  percentValue={serverStatus.disk?.usedPercent}
+                  iconClassName="bg-sky-50 text-sky-600"
+                />
+                <ServerMetricCard
+                  icon={Cpu}
+                  title="CPU 1분 부하"
+                  value={`${serverStatus.cpu.loadPerCorePercent}%`}
+                  detail={`${serverStatus.cpu.cores}코어 · 부하 ${serverStatus.cpu.load1} / ${serverStatus.cpu.load5} / ${serverStatus.cpu.load15}`}
+                  percentValue={serverStatus.cpu.loadPerCorePercent}
+                  iconClassName="bg-amber-50 text-amber-600"
+                />
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <Database className="h-5 w-5 text-slate-400" />
+                  <h2 className="text-base font-black text-slate-900">핵심 서비스 상태</h2>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  {[
+                    {
+                      name: "머무룸 앱",
+                      status: serverStatus.services.app.status,
+                      detail: `앱 가동 ${formatDuration(serverStatus.uptime.appSeconds)}`,
+                    },
+                    {
+                      name: "SQLite 데이터베이스",
+                      status: serverStatus.services.database.status,
+                      detail: serverStatus.services.database.responseMs === null
+                        ? serverStatus.services.database.detail || "응답시간 확인 불가"
+                        : `응답 ${serverStatus.services.database.responseMs}ms`,
+                    },
+                    {
+                      name: "Tailscale",
+                      status: serverStatus.services.tailscale.status,
+                      detail: serverStatus.services.tailscale.ip || serverStatus.services.tailscale.detail || "IP 확인 불가",
+                    },
+                  ].map((service) => (
+                    <div key={service.name} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-black text-slate-900">{service.name}</p>
+                        <span className="inline-flex items-center gap-1.5 text-xs font-black text-slate-600">
+                          <span className={cn("h-2.5 w-2.5 rounded-full", serviceStatusClass(service.status))} />
+                          {serviceStatusLabel(service.status)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs font-semibold text-slate-500">{service.detail}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 grid gap-x-8 border-t border-slate-200 pt-3 md:grid-cols-2">
+                  <InfoRow label="서버 전체 가동시간" value={formatDuration(serverStatus.uptime.systemSeconds)} />
+                  <InfoRow label="앱 가동시간" value={formatDuration(serverStatus.uptime.appSeconds)} />
+                  <InfoRow
+                    label="스왑 사용량"
+                    value={serverStatus.memory.swapTotalBytes > 0
+                      ? `${formatBytes(serverStatus.memory.swapUsedBytes)} / ${formatBytes(serverStatus.memory.swapTotalBytes)}`
+                      : "미사용"}
+                  />
+                  <InfoRow label="자동 점검 주기" value="30초" />
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold leading-6 text-sky-900">
+                이 화면은 상태만 읽습니다. 서버 재부팅이나 서비스 재시작은 자동으로 실행하지 않습니다.
+              </section>
+            </>
+          ) : null}
         </div>
       )}
     </div>
