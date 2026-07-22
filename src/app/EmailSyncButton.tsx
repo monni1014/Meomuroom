@@ -29,15 +29,15 @@ export default function EmailSyncButton() {
   };
 
   return (
-    <div className="flex flex-col items-end gap-2">
+    <div className="flex shrink-0 flex-col items-end gap-2">
       <button
         onClick={handleSync}
         disabled={isSyncing}
-        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-lg transition-all active:scale-95 ${
+        className={`inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-xs font-bold text-white shadow-md shadow-emerald-100 transition-all active:scale-95 sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2.5 sm:text-sm ${
           isSyncing ? "bg-slate-400 cursor-wait" : "bg-emerald-600 hover:bg-emerald-700"
         }`}
       >
-        <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin" : ""}`} />
+        <RefreshCw className={`h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4 ${isSyncing ? "animate-spin" : ""}`} />
         {isSyncing ? "동기화 중..." : "메일 동기화"}
       </button>
       {message && (

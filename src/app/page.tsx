@@ -249,12 +249,12 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   return (
     <div className="p-4 md:p-8 space-y-6 pb-20 max-w-7xl mx-auto w-full">
       <AutoRefresh />
-      <header className="pt-8 pb-4 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+      <header className="flex items-start justify-between gap-3 pb-4 pt-8 sm:items-center">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
             머무룸 대시보드
           </h1>
-          <p className="text-sm text-slate-500 mt-1">실시간 예약 및 연동 이용현황을 분석합니다.</p>
+          <p className="mt-1 text-xs leading-relaxed text-slate-500 sm:text-sm">실시간 예약 및 연동 이용현황을 분석합니다.</p>
         </div>
         <EmailSyncButton />
       </header>
