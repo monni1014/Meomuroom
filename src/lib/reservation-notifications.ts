@@ -7,6 +7,7 @@ import { isValidKoreanMobilePhone } from "@/lib/phone-number";
 import { RPA_PENDING_MARKER } from "@/lib/rpa-reservation-state";
 
 const ALERT_TYPE = "NOTIFICATION_DELIVERY";
+const GOOGLE_PEOPLE_SYNC_ALERT_KEY = "google-people-sync";
 
 function notificationAlertKey(reservationId: string) {
   return `notification-delivery:${reservationId}`;
@@ -78,7 +79,7 @@ export async function sendDueReservationReminders() {
   let sentCount = 0;
   let dryRunCount = 0;
   let waitingContactCount = 0;
-  let waitingContactSyncCount = 0;
+  const waitingContactSyncCount = 0;
   let failedCount = 0;
   let contactSyncMs = 0;
 
@@ -126,27 +127,20 @@ export async function sendDueReservationReminders() {
   }
 
   if (contactSyncError) {
-    for (const reservation of phoneReadyReservations) {
-      const updated = await prisma.reservation.updateMany({
-        where: {
-          id: reservation.id,
-          notified: false,
-          notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"] },
-          status: "CONFIRMED",
-          isNoShow: false,
-          ...notificationReadyMemoWhere(),
-        },
-        data: {
-          notificationStatus: "WAITING_CONTACT_SYNC",
-          notificationChannel: "SMS",
-          notificationError: `Google 연락처 동기화 대기: ${contactSyncError}`,
-        },
+    try {
+      await createAdminAlert({
+        type: "GOOGLE_PEOPLE_SYNC_FAILED",
+        severity: "WARNING",
+        title: "Google 연락처 동기화 실패",
+        message: `Google 연락처 동기화에 실패했지만 전화번호가 정상인 예약 안내문자는 계속 발송합니다. 연락처는 5분마다 다시 동기화합니다. 오류: ${contactSyncError}`,
+        dedupeKey: GOOGLE_PEOPLE_SYNC_ALERT_KEY,
       });
-      waitingContactSyncCount += updated.count;
+    } catch (alertError) {
+      console.error("[ReservationNotification] Failed to record Google Contacts warning:", alertError);
     }
   }
 
-  for (const reservation of contactSyncError ? [] : phoneReadyReservations) {
+  for (const reservation of phoneReadyReservations) {
     const claimed = await prisma.reservation.updateMany({
       where: {
         id: reservation.id,

@@ -5,6 +5,10 @@ const source = await readFile(
   new URL("../src/lib/reservation-notifications.ts", import.meta.url),
   "utf8",
 );
+const instrumentationSource = await readFile(
+  new URL("../src/instrumentation.node.ts", import.meta.url),
+  "utf8",
+);
 
 assert.match(
   source,
@@ -14,8 +18,26 @@ assert.match(
 
 assert.equal(
   (source.match(/\.\.\.notificationReadyMemoWhere\(\)/g) || []).length,
-  4,
-  "The same null-safe memo condition must protect selection and every send claim.",
+  3,
+  "The same null-safe memo condition must protect selection, contact waiting, and the send claim.",
 );
 
-console.log("Reservation notification memo-filter tests passed.");
+assert.doesNotMatch(
+  source,
+  /contactSyncError\s*\?\s*\[\]\s*:\s*phoneReadyReservations/,
+  "A Google Contacts failure must not suppress SMS delivery when the phone number is valid.",
+);
+
+assert.match(
+  source,
+  /if \(contactSyncError\)[\s\S]*?createAdminAlert\([\s\S]*?GOOGLE_PEOPLE_SYNC_FAILED[\s\S]*?for \(const reservation of phoneReadyReservations\)/,
+  "Google Contacts failures must raise an alert before SMS delivery continues.",
+);
+
+assert.match(
+  instrumentationSource,
+  /schedule\("\*\/5 \* \* \* \*"[\s\S]*?runGooglePeopleSync\("cron"\)/,
+  "Google Contacts synchronization must keep retrying every five minutes.",
+);
+
+console.log("Reservation notification safety tests passed.");
