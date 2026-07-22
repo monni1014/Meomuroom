@@ -8,6 +8,12 @@ type PushConfig = {
   publicKey: string | null;
 };
 
+const SERVICE_WORKER_URL = "/sw.js?v=20260723-2";
+const SERVICE_WORKER_OPTIONS: RegistrationOptions = {
+  scope: "/",
+  updateViaCache: "none",
+};
+
 function base64UrlToUint8Array(value: string) {
   const padding = "=".repeat((4 - value.length % 4) % 4);
   const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -40,7 +46,8 @@ export default function PushNotificationSetup() {
         const payload = await response.json() as PushConfig;
         if (disposed) return;
         setConfig(payload);
-        const registration = await navigator.serviceWorker.register("/sw.js");
+        const registration = await navigator.serviceWorker.register(SERVICE_WORKER_URL, SERVICE_WORKER_OPTIONS);
+        await registration.update();
         const existing = await registration.pushManager.getSubscription();
         if (!disposed) setSubscribed(Boolean(existing));
       } catch {
@@ -61,7 +68,8 @@ export default function PushNotificationSetup() {
         setMessage("알림 권한이 허용되지 않았습니다. 휴대폰 설정에서 머무룸 알림을 허용해주세요.");
         return;
       }
-      const registration = await navigator.serviceWorker.register("/sw.js");
+      const registration = await navigator.serviceWorker.register(SERVICE_WORKER_URL, SERVICE_WORKER_OPTIONS);
+      await registration.update();
       const existing = await registration.pushManager.getSubscription();
       const subscription = existing || await registration.pushManager.subscribe({
         userVisibleOnly: true,
