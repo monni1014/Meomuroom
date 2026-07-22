@@ -1,0 +1,23 @@
+[Unit]
+Description=Notify operators after the Memoroom server boots
+After=network-online.target memoroom-app.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=memoroom
+Group=memoroom
+WorkingDirectory=/srv/memoroom/app
+Environment=HOME=/srv/memoroom
+Environment=MEMOROOM_APP_ROOT=/srv/memoroom/app
+ExecStart=/usr/bin/timeout 30s /usr/bin/node /srv/memoroom/app/ops/scripts/memoroom-ops-alert.mjs server-boot
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/memoroom/app
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

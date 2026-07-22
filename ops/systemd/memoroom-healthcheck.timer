@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Memoroom health every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+RandomizedDelaySec=5s
+Unit=memoroom-healthcheck.service
+
+[Install]
+WantedBy=timers.target

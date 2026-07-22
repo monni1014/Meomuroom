@@ -1,0 +1,19 @@
+[Unit]
+Description=Check Memoroom app and database responsiveness
+After=memoroom-app.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=TZ=Asia/Seoul
+ExecStart=/usr/local/sbin/memoroom-healthcheck
+UMask=0077
+RuntimeDirectory=memoroom-healthcheck
+RuntimeDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/memoroom-healthcheck /srv/memoroom/app
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

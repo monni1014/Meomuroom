@@ -29,6 +29,44 @@ node scripts/reconcile-spacecloud-manual-blocks.mjs --plan --full
 
 There is no scheduled server reboot.
 
+## Freeze recovery
+
+`memoroom-healthcheck.timer` calls the local `/api/health` endpoint every minute.
+The endpoint verifies both the Next.js event loop and a read-only SQLite query.
+Three consecutive failures trigger one controlled restart of
+`memoroom-app.service`. A 10-minute cooldown prevents restart loops, and an app
+that still fails after restart is left running for diagnosis instead of
+rebooting the whole server.
+
+Before a controlled app restart, `memoroom-ops-alert.mjs` records a dashboard
+alert and sends Web Push plus the optional Solapi operator SMS. It sends a
+second recovery notice after the health endpoint succeeds. The boot alert
+service sends the same out-of-band notice after any full server reboot. A
+sudden hard freeze cannot execute a pre-reboot hook on the frozen VM itself, so
+that case is reported immediately after boot; a true pre-reboot warning for a
+hard freeze requires a monitor running outside this server.
+
+The Vultr VM exposes an Intel 6300ESB hardware watchdog. systemd feeds it with a
+three-minute runtime timeout. If the Linux kernel or system manager actually
+freezes and can no longer feed the device, the VM reboots automatically. A
+temporary internet, proxy, or Tailscale outage does not affect this local
+watchdog. `/etc/modules-load.d/memoroom-watchdog.conf` loads the `i6300esb`
+driver, and `/etc/systemd/system.conf.d/50-memoroom-watchdog.conf` contains the
+systemd manager settings. The driver is also included in the initramfs so the
+device exists before PID 1 starts. The unused legacy `watchdog.service` and
+`wd_keepalive.service` are masked; systemd PID 1 is the only process allowed to
+own `/dev/watchdog0`.
+
+Useful checks:
+
+```sh
+curl --fail http://127.0.0.1:3000/api/health
+systemctl status memoroom-healthcheck.timer
+journalctl -u memoroom-boot-alert.service -n 50 --no-pager
+journalctl -t memoroom-healthcheck -n 50 --no-pager
+systemctl show -p RuntimeWatchdogUSec -p RebootWatchdogUSec
+```
+
 ## RPA UI contract monitoring
 
 The app performs read-only Naver and SpaceCloud UI checks at 02:20, 08:20,
