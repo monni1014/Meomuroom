@@ -28,6 +28,7 @@ type DeliveryEntry = {
   sentAt: string | null;
   resultAt: string | null;
   providerMessageId: string | null;
+  isTest: boolean;
 };
 
 const STATUS_STYLE: Record<string, { label: string; className: string }> = {
@@ -165,6 +166,11 @@ export default function MessagesView({
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-black text-slate-900">{entry.customerName || "이름 없음"}</p>
                         <span className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">{entry.roomName}</span>
+                        {entry.isTest && (
+                          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-extrabold text-amber-800 ring-1 ring-inset ring-amber-200">
+                            강제 테스트
+                          </span>
+                        )}
                         <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ring-1 ring-inset ${style.className}`}>{style.label}</span>
                       </div>
                       <p className="mt-2 text-sm font-semibold text-slate-700">

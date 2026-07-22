@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { normalizeKoreanPhone } from "@/lib/phone-number";
 
@@ -47,66 +47,97 @@ type OutboundMessageInput = {
   recipientNumber: string;
   body: string;
   channel: string;
-  status: "SUBMITTED" | "CARRIER_ACCEPTED" | "DELIVERED" | "FAILED" | "DRY_RUN";
+  status: "SENDING" | "SUBMITTED" | "CARRIER_ACCEPTED" | "DELIVERED" | "FAILED" | "DRY_RUN";
   providerMessageId?: string | null;
   occurredAt?: Date;
 };
 
-export async function recordOutboundReservationMessage(input: OutboundMessageInput) {
+function outboundMessageData(input: OutboundMessageInput, occurredAt: Date) {
   const customerPhone = normalizeKoreanPhone(input.recipientNumber);
+  return {
+    direction: "OUTBOUND",
+    channel: input.channel,
+    status: input.status,
+    senderNumber: normalizeKoreanPhone(input.senderNumber),
+    recipientNumber: customerPhone,
+    customerPhone,
+    body: input.body,
+    providerMessageId: input.providerMessageId || null,
+    reservationId: input.reservationId,
+    occurredAt,
+    readAt: occurredAt,
+  };
+}
+
+export async function recordOutboundReservationMessage(input: OutboundMessageInput) {
   const occurredAt = input.occurredAt || new Date();
   const dedupeKey = `reservation-reminder:${input.reservationId}`;
+  const messageData = outboundMessageData(input, occurredAt);
 
   return prisma.customerMessage.upsert({
     where: { dedupeKey },
     create: {
-      direction: "OUTBOUND",
-      channel: input.channel,
-      status: input.status,
-      senderNumber: normalizeKoreanPhone(input.senderNumber),
-      recipientNumber: customerPhone,
-      customerPhone,
-      body: input.body,
-      providerMessageId: input.providerMessageId || null,
+      ...messageData,
       dedupeKey,
-      reservationId: input.reservationId,
-      occurredAt,
-      readAt: occurredAt,
     },
     update: {
-      channel: input.channel,
-      status: input.status,
-      senderNumber: normalizeKoreanPhone(input.senderNumber),
-      recipientNumber: customerPhone,
-      customerPhone,
-      body: input.body,
-      providerMessageId: input.providerMessageId || null,
-      occurredAt,
-      readAt: occurredAt,
+      ...messageData,
     },
   });
 }
 
-type OutboundTestMessageInput = Omit<OutboundMessageInput, "reservationId">;
+type OutboundTestMessageInput = OutboundMessageInput & {
+  notificationAttemptId: string;
+};
+
+export function reservationTestMessageDedupeKey(reservationId: string, notificationAttemptId: string) {
+  return `reservation-test:${reservationId}:${notificationAttemptId}`;
+}
 
 export async function recordOutboundTestMessage(input: OutboundTestMessageInput) {
-  const customerPhone = normalizeKoreanPhone(input.recipientNumber);
   const occurredAt = input.occurredAt || new Date();
-  const dedupeKey = `solapi-test:${input.providerMessageId || randomUUID()}`;
+  const dedupeKey = reservationTestMessageDedupeKey(input.reservationId, input.notificationAttemptId);
+  const messageData = outboundMessageData(input, occurredAt);
 
-  return prisma.customerMessage.create({
-    data: {
-      direction: "OUTBOUND",
-      channel: input.channel,
-      status: input.status,
-      senderNumber: normalizeKoreanPhone(input.senderNumber),
-      recipientNumber: customerPhone,
-      customerPhone,
-      body: input.body,
-      providerMessageId: input.providerMessageId || null,
+  return prisma.customerMessage.upsert({
+    where: { dedupeKey },
+    create: {
+      ...messageData,
       dedupeKey,
-      occurredAt,
-      readAt: occurredAt,
     },
+    update: messageData,
+  });
+}
+
+export async function finalizeOutboundTestMessage(input: OutboundTestMessageInput) {
+  const dedupeKey = reservationTestMessageDedupeKey(input.reservationId, input.notificationAttemptId);
+  const occurredAt = input.occurredAt || new Date();
+  await prisma.customerMessage.updateMany({
+    where: {
+      dedupeKey,
+      status: "SENDING",
+    },
+    data: outboundMessageData(input, occurredAt),
+  });
+  return prisma.customerMessage.findUniqueOrThrow({ where: { dedupeKey } });
+}
+
+export async function recordRecoveredReservationMessage(
+  input: OutboundMessageInput & { notificationAttemptId: string },
+) {
+  const testDedupeKey = reservationTestMessageDedupeKey(
+    input.reservationId,
+    input.notificationAttemptId,
+  );
+  const testMessage = await prisma.customerMessage.findUnique({
+    where: { dedupeKey: testDedupeKey },
+    select: { id: true },
+  });
+  if (!testMessage) return recordOutboundReservationMessage(input);
+
+  const occurredAt = input.occurredAt || new Date();
+  return prisma.customerMessage.update({
+    where: { id: testMessage.id },
+    data: outboundMessageData(input, occurredAt),
   });
 }

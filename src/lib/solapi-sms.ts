@@ -34,6 +34,7 @@ type ReservationReminderInput = {
 
 type SendOptions = {
   forceRealSend?: boolean;
+  forceDryRun?: boolean;
 };
 
 function env(name: string) {
@@ -159,7 +160,8 @@ export async function sendReservationReminder(
     };
   }
 
-  const dryRun = !options.forceRealSend && !isRealSendEnabledFor(to);
+  const dryRun = options.forceDryRun === true
+    || (!options.forceRealSend && !isRealSendEnabledFor(to));
 
   try {
     const from = await getSenderPhone();
@@ -208,6 +210,8 @@ export async function sendTestSms(
   const now = new Date();
   const startTime = options.startTime || new Date(now.getTime() + 2 * 60 * 60 * 1000);
   return sendReservationReminder({
+    reservationId: options.reservationId,
+    notificationAttemptId: options.notificationAttemptId,
     customerName: options.customerName ?? "테스트",
     phone: to,
     roomName: options.roomName || "머무룸1",

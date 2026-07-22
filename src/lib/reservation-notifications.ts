@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
 import { lookupReservationReminderDelivery, sendReservationReminder } from "@/lib/solapi-sms";
-import { recordOutboundReservationMessage } from "@/lib/customer-messages";
+import {
+  recordOutboundReservationMessage,
+  recordRecoveredReservationMessage,
+} from "@/lib/customer-messages";
 import { syncUpcomingReservationContacts } from "@/lib/google-people";
 import { isValidKoreanMobilePhone } from "@/lib/phone-number";
 import { RPA_PENDING_MARKER } from "@/lib/rpa-reservation-state";
@@ -299,8 +302,9 @@ export async function sendDueReservationReminders() {
       }
 
       if (recovered.found) {
-        await recordOutboundReservationMessage({
+        await recordRecoveredReservationMessage({
           reservationId: reservation.id,
+          notificationAttemptId: attemptId,
           senderNumber: recovered.from,
           recipientNumber: recovered.to,
           body: recovered.text || "솔라피에서 복구한 예약 안내 문자",

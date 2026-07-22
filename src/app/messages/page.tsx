@@ -52,6 +52,7 @@ export default async function MessagesPage() {
           occurredAt: true,
           updatedAt: true,
           providerMessageId: true,
+          dedupeKey: true,
         },
       },
     },
@@ -83,6 +84,7 @@ export default async function MessagesPage() {
       sentAt: message?.occurredAt.toISOString() || reservation.notifiedAt?.toISOString() || null,
       resultAt: message?.updatedAt.toISOString() || reservation.notifiedAt?.toISOString() || null,
       providerMessageId: message?.providerMessageId || null,
+      isTest: message?.dedupeKey.startsWith("reservation-test:") || false,
     };
   });
 

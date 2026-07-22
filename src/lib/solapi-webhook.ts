@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
 import { sendPushNotification } from "@/lib/push-notifications";
 import { mapSolapiDeliveryStatus, type SolapiDeliveryStatus } from "@/lib/solapi-delivery-status";
+import { reservationTestMessageDedupeKey } from "@/lib/customer-messages";
 
 type SolapiReport = {
   messageId?: string;
@@ -37,23 +38,40 @@ function formatKstReservation(startTime: Date, endTime: Date) {
   return `${date} ${time.format(startTime)}-${time.format(endTime)}`;
 }
 
-async function findMessage(report: SolapiReport, reservationId: string | null) {
-  const clauses: Array<Record<string, string>> = [];
-  if (report.messageId) clauses.push({ providerMessageId: report.messageId });
-  if (report.groupId) clauses.push({ providerMessageId: report.groupId });
-  if (reservationId) clauses.push({ reservationId });
-  if (clauses.length === 0) return null;
+async function findMessage(
+  report: SolapiReport,
+  reservationId: string | null,
+  notificationAttemptId: string | null,
+) {
+  const exactClauses: Array<Record<string, string>> = [];
+  if (report.messageId) exactClauses.push({ providerMessageId: report.messageId });
+  if (report.groupId) exactClauses.push({ providerMessageId: report.groupId });
+  if (reservationId && notificationAttemptId) {
+    exactClauses.push({
+      dedupeKey: reservationTestMessageDedupeKey(reservationId, notificationAttemptId),
+    });
+  }
+  if (exactClauses.length === 0 && !reservationId) return null;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const message = await prisma.customerMessage.findFirst({
-      where: { direction: "OUTBOUND", OR: clauses },
-      orderBy: { occurredAt: "desc" },
-      include: { reservation: true },
-    });
-    if (message || attempt === 2) return message;
+    for (const clause of exactClauses) {
+      const message = await prisma.customerMessage.findFirst({
+        where: { direction: "OUTBOUND", ...clause },
+        include: { reservation: true },
+      });
+      if (message) return message;
+    }
+    if (attempt === 2) break;
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
-  return null;
+
+  return reservationId
+    ? prisma.customerMessage.findFirst({
+        where: { direction: "OUTBOUND", reservationId },
+        orderBy: { occurredAt: "desc" },
+        include: { reservation: true },
+      })
+    : null;
 }
 
 export async function processSolapiReport(report: SolapiReport) {
@@ -63,7 +81,10 @@ export async function processSolapiReport(report: SolapiReport) {
   const reservationId = typeof report.customFields?.reservationId === "string"
     ? report.customFields.reservationId
     : null;
-  const message = await findMessage(report, reservationId);
+  const notificationAttemptId = typeof report.customFields?.notificationAttemptId === "string"
+    ? report.customFields.notificationAttemptId
+    : null;
+  const message = await findMessage(report, reservationId, notificationAttemptId);
   if (!message) return { processed: false, reason: "message-not-found" };
 
   const status: SolapiDeliveryStatus = mapSolapiDeliveryStatus(statusCode);
