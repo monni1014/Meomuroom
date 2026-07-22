@@ -32,7 +32,7 @@ type DeliveryEntry = {
 };
 
 const STATUS_STYLE: Record<string, { label: string; className: string }> = {
-  SCHEDULED: { label: "발송 예정", className: "bg-sky-50 text-sky-700 ring-sky-200" },
+  SCHEDULED: { label: "발송 예정", className: "bg-slate-100 text-slate-600 ring-slate-200" },
   SENDING: { label: "발송 준비 중", className: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
   RECOVERING: { label: "솔라피 중복 확인 중", className: "bg-amber-50 text-amber-800 ring-amber-200" },
   WAITING_CONTACT: { label: "전화번호 확인 중", className: "bg-amber-50 text-amber-800 ring-amber-200" },
@@ -45,7 +45,7 @@ const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   OVERDUE: { label: "발송시간 지남", className: "bg-amber-50 text-amber-800 ring-amber-200" },
   DRY_RUN: { label: "테스트 · 미발송", className: "bg-amber-50 text-amber-800 ring-amber-200" },
   CANCELLED: { label: "예약 취소", className: "bg-slate-100 text-slate-600 ring-slate-200" },
-  PENDING: { label: "발송 예정", className: "bg-sky-50 text-sky-700 ring-sky-200" },
+  PENDING: { label: "발송 예정", className: "bg-slate-100 text-slate-600 ring-slate-200" },
 };
 
 const ATTENTION_STATUSES = new Set(["FAILED", "MISSING_PHONE", "OVERDUE", "DRY_RUN"]);
@@ -150,7 +150,7 @@ export default function MessagesView({
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[
-            { label: "발송 예정", value: stats.scheduled, icon: CalendarClock, tone: "text-sky-600 bg-sky-50" },
+            { label: "발송 예정", value: stats.scheduled, icon: CalendarClock, tone: "text-slate-500 bg-slate-100" },
             { label: "처리 중 · 미완료", value: stats.processing, icon: Radio, tone: "text-indigo-600 bg-indigo-50" },
             { label: "수신 완료", value: stats.delivered, icon: CheckCheck, tone: "text-emerald-600 bg-emerald-50" },
             { label: "실패 · 확인 필요", value: stats.attention, icon: AlertTriangle, tone: "text-rose-600 bg-rose-50" },
