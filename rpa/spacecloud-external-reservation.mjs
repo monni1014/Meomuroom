@@ -1770,6 +1770,22 @@ async function claimManualExternalReservation(page, {
   if (!opened) return null;
 
   const popupText = await page.locator("body").innerText({ timeout: 10_000 }).catch(() => "");
+  if (matchesExternalReservationPopup(popupText, {
+    dateValue,
+    startHour,
+    endHour,
+    marker,
+    customerName,
+    phone,
+    strictIdentity: true,
+  })) {
+    await saveScreenshot(page, "spacecloud-external-manual-block-already-linked");
+    await page.keyboard.press("Escape").catch(() => {});
+    await humanDelay(page, "after already-linked SpaceCloud popup escape", 500, 1200);
+    console.log("Matching SpaceCloud external reservation already contains the Naver identity. Skip manual claim.");
+    return { ok: true, alreadyClosed: true, alreadyLinked: true, dryRun: !apply };
+  }
+
   if (!isClaimableManualExternalReservation(popupText, { customerName, phone })) {
     await saveScreenshot(page, "spacecloud-external-manual-block-ambiguous");
     throw new Error(
