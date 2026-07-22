@@ -18,6 +18,7 @@ export async function registerNodeInstrumentation() {
   const { checkProxySellerStatusAndAlert } = await import("@/lib/proxy-seller");
   const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
   const { runReservationContactPreflight } = await import("@/lib/reservation-contact-preflight");
+  const { syncUpcomingReservationContacts } = await import("@/lib/google-people");
   const { runCompetitorScan } = await import("@/lib/competitor-monitor");
   const { runRpaUiHealthChecks } = await import("@/lib/rpa-ui-monitor");
 
@@ -26,6 +27,7 @@ export async function registerNodeInstrumentation() {
   let naverStatusReconcileRunning = false;
   let notificationRunning = false;
   let contactPreflightRunning = false;
+  let googlePeopleSyncRunning = false;
   let competitorScanRunning = false;
   let rpaUiHealthRunning = false;
 
@@ -41,6 +43,9 @@ export async function registerNodeInstrumentation() {
       console.log(
         `[Cron] Email sync done (${label}): checked ${result.processed}, changed ${result.newReservations}, queued RPA ${result.queuedRpaJobs ?? 0}`,
       );
+      if (result.newReservations > 0) {
+        await runReservationNotifications(`after email sync: ${label}`);
+      }
     } catch (error) {
       console.error(`[Cron] Email sync failed (${label}):`, error);
     } finally {
@@ -93,7 +98,7 @@ export async function registerNodeInstrumentation() {
       const result = await sendDueReservationReminders();
       if (result.checkedCount > 0) {
         console.log(
-          `[Cron] Reservation notifications done (${label}): checked ${result.checkedCount}, sent ${result.sentCount}, dry-run ${result.dryRunCount}, failed ${result.failedCount}`,
+          `[Cron] Reservation notifications done (${label}): checked ${result.checkedCount}, sent ${result.sentCount}, dry-run ${result.dryRunCount}, waiting-contact ${result.waitingContactCount}, failed ${result.failedCount}`,
         );
       }
     } catch (error) {
@@ -117,6 +122,23 @@ export async function registerNodeInstrumentation() {
       console.error(`[Cron] Reservation contact preflight failed (${label}):`, error);
     } finally {
       contactPreflightRunning = false;
+    }
+  }
+
+  async function runGooglePeopleSync(label: string) {
+    if (googlePeopleSyncRunning) return;
+    googlePeopleSyncRunning = true;
+    try {
+      const result = await syncUpcomingReservationContacts();
+      if (!result.skipped) {
+        console.log(
+          `[Cron] Google contacts sync (${label}): checked ${result.checkedCount}, created ${result.createdCount}, updated ${result.updatedCount}, unchanged ${result.unchangedCount}, deleted ${result.deletedCount}, restored ${result.restoredCount}`,
+        );
+      }
+    } catch (error) {
+      console.error(`[Cron] Google contacts sync failed (${label}):`, error);
+    } finally {
+      googlePeopleSyncRunning = false;
     }
   }
 
@@ -180,6 +202,10 @@ export async function registerNodeInstrumentation() {
   }, 20_000);
 
   setTimeout(() => {
+    void runGooglePeopleSync("startup");
+  }, 30_000);
+
+  setTimeout(() => {
     void runCompetitorMonitor("startup", "today-next", 120);
   }, 60_000);
 
@@ -191,12 +217,16 @@ export async function registerNodeInstrumentation() {
     await runProxyStatusCheck("cron");
   });
 
-  schedule("* * * * *", async () => {
+  schedule("*/30 * * * * *", async () => {
     await runReservationNotifications("cron");
   });
 
   schedule("*/5 * * * *", async () => {
     await runContactPreflight("cron");
+  });
+
+  schedule("*/5 * * * *", async () => {
+    await runGooglePeopleSync("cron");
   });
 
   schedule("0 10,22 * * *", async () => {
@@ -242,8 +272,9 @@ export async function registerNodeInstrumentation() {
   });
 
   console.log("[Cron] Email auto sync started (15 second interval)");
-  console.log("[Cron] Reservation notification monitor started (1 minute interval)");
+  console.log("[Cron] Reservation notification monitor started (30 second interval, immediate after email changes)");
   console.log("[Cron] Reservation contact preflight started (5 minute interval)");
+  console.log("[Cron] Google contacts sync started (5 minute interval after account connection)");
   console.log("[Cron] ISP proxy status monitor started (5 minute interval)");
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
   console.log("[Cron] RPA UI health monitor started (02:20/08:20/14:20/20:20 read-only checks)");

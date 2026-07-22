@@ -6,6 +6,7 @@ import {
   Bot,
   CircleDollarSign,
   CheckCircle2,
+  ContactRound,
   MessageSquareText,
   Phone,
   Plus,
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils";
 import type { SolapiServiceStatus } from "@/lib/solapi-status";
 import type { IspProxyStatus } from "@/lib/proxy-status-types";
 import type { ProxyPaymentCurrency, ProxyPaymentRecord } from "@/lib/proxy-payment-types";
+import type { GooglePeopleStatus } from "@/lib/google-people";
 
 type MessageTemplateState = {
   id: string;
@@ -205,11 +207,13 @@ export default function SettingsView({
   initialMessageTemplates,
   initialProxyStatus,
   initialProxyPayments,
+  initialGooglePeopleStatus,
 }: {
   initialSolapiStatus: SolapiServiceStatus;
   initialMessageTemplates: MessageTemplateState[];
   initialProxyStatus: IspProxyStatus;
   initialProxyPayments: ProxyPaymentRecord[];
+  initialGooglePeopleStatus: GooglePeopleStatus;
 }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("message");
   const [solapiStatus, setSolapiStatus] = useState<SolapiServiceStatus>(initialSolapiStatus);
@@ -217,6 +221,7 @@ export default function SettingsView({
   const [proxyPayments, setProxyPayments] = useState<ProxyPaymentRecord[]>(initialProxyPayments);
   const [proxyPaymentForm, setProxyPaymentForm] = useState<ProxyPaymentForm>(emptyProxyPaymentForm);
   const [templates, setTemplates] = useState<MessageTemplateState[]>(initialMessageTemplates);
+  const [googlePeopleStatus, setGooglePeopleStatus] = useState<GooglePeopleStatus>(initialGooglePeopleStatus);
   const [isLoadingSolapi, setIsLoadingSolapi] = useState(false);
   const [selectedSenderNumber, setSelectedSenderNumber] = useState(initialSolapiStatus.senderNumber || "");
   const [isSavingSenderNumber, setIsSavingSenderNumber] = useState(false);
@@ -227,6 +232,8 @@ export default function SettingsView({
   const [deletingProxyPaymentId, setDeletingProxyPaymentId] = useState<string | null>(null);
   const [proxyPaymentMessage, setProxyPaymentMessage] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [isSyncingGooglePeople, setIsSyncingGooglePeople] = useState(false);
+  const [googlePeopleMessage, setGooglePeopleMessage] = useState<string | null>(null);
 
   const loadSolapiStatus = useCallback(async () => {
     setIsLoadingSolapi(true);
@@ -284,6 +291,28 @@ export default function SettingsView({
       setIsLoadingProxy(false);
     }
   }, []);
+
+  const syncGooglePeople = async () => {
+    setIsSyncingGooglePeople(true);
+    setGooglePeopleMessage(null);
+    try {
+      const response = await fetch("/api/settings/google-people/status", { method: "POST" });
+      const data = await response.json() as {
+        success?: boolean;
+        status?: GooglePeopleStatus;
+        error?: string;
+      };
+      if (!response.ok || !data.success || !data.status) {
+        throw new Error(data.error || "Google 연락처를 동기화하지 못했습니다.");
+      }
+      setGooglePeopleStatus(data.status);
+      setGooglePeopleMessage("예약 고객 연락처 동기화를 완료했습니다.");
+    } catch (error) {
+      setGooglePeopleMessage(error instanceof Error ? error.message : "Google 연락처를 동기화하지 못했습니다.");
+    } finally {
+      setIsSyncingGooglePeople(false);
+    }
+  };
 
   const updateTemplateContent = (roomName: string, content: string) => {
     setTemplates((current) =>
@@ -583,6 +612,74 @@ export default function SettingsView({
                 <InfoRow label="최근 수정일" value={formatDateTime(sender?.dateUpdated ?? null)} />
               </div>
             </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex gap-3">
+                <div className={cn(
+                  "h-fit rounded-full p-3",
+                  googlePeopleStatus.connected ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600",
+                )}>
+                  <ContactRound className="h-6 w-6" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-slate-900">와이프 아이폰 연락처 자동저장</h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">
+                    7일 이내 예약 고객을 <span className="font-black text-slate-700">머무룸3 7/23 김종성</span> 형식으로 저장합니다. 취소 시 삭제하고 이용 종료 48시간 후 정리합니다.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-black",
+                  googlePeopleStatus.connected
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700",
+                )}>
+                  {googlePeopleStatus.connected ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                  {googlePeopleStatus.connected ? "연결됨" : "와이프 계정 연결 필요"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void syncGooglePeople()}
+                  disabled={!googlePeopleStatus.connected || isSyncingGooglePeople}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("h-3.5 w-3.5", isSyncingGooglePeople && "animate-spin")} />
+                  지금 동기화
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-x-8 md:grid-cols-2">
+              <InfoRow label="연결 계정" value={googlePeopleStatus.accountEmail || "와이프 Google 계정 연결 전"} />
+              <InfoRow label="최근 성공" value={formatDateTime(googlePeopleStatus.lastSuccessAt)} />
+              <InfoRow label="확인한 고객" value={`${googlePeopleStatus.checkedCount}명`} />
+              <InfoRow label="최근 처리" value={`신규 ${googlePeopleStatus.createdCount} · 갱신 ${googlePeopleStatus.updatedCount} · 동일 ${googlePeopleStatus.unchangedCount}`} />
+              <InfoRow label="최근 정리" value={`삭제 ${googlePeopleStatus.deletedCount} · 원래 이름 복원 ${googlePeopleStatus.restoredCount}`} />
+            </div>
+
+            {!googlePeopleStatus.configured && (
+              <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                서버 OAuth 설정을 준비 중입니다. 준비가 끝난 뒤 와이프 Google 계정으로 한 번만 승인하면 됩니다.
+              </p>
+            )}
+            {googlePeopleStatus.lastError && (
+              <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">
+                최근 오류: {googlePeopleStatus.lastError}
+              </p>
+            )}
+            {googlePeopleMessage && (
+              <p className={cn(
+                "mt-4 rounded-lg border px-3 py-2 text-xs font-bold",
+                googlePeopleMessage.includes("완료")
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-rose-200 bg-rose-50 text-rose-800",
+              )}>
+                {googlePeopleMessage}
+              </p>
+            )}
           </section>
 
           <section className="space-y-3">

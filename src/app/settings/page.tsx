@@ -3,15 +3,17 @@ import { getSolapiServiceStatus } from "@/lib/solapi-status";
 import { getMessageTemplates } from "@/lib/message-templates";
 import { getProxySellerStatus } from "@/lib/proxy-seller";
 import { getProxyPayments } from "@/lib/proxy-payments";
+import { getGooglePeopleStatus } from "@/lib/google-people";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [solapiStatus, messageTemplates, proxyStatus, proxyPayments] = await Promise.all([
+  const [solapiStatus, messageTemplates, proxyStatus, proxyPayments, googlePeopleStatus] = await Promise.all([
     getSolapiServiceStatus(),
     getMessageTemplates(),
     getProxySellerStatus(),
     getProxyPayments(),
+    getGooglePeopleStatus(),
   ]);
 
   return (
@@ -26,6 +28,7 @@ export default async function SettingsPage() {
       }))}
       initialProxyStatus={proxyStatus}
       initialProxyPayments={proxyPayments}
+      initialGooglePeopleStatus={googlePeopleStatus}
     />
   );
 }

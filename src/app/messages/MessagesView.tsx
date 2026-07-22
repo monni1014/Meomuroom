@@ -33,6 +33,8 @@ type Filter = "ALL" | "ATTENTION" | "PROCESSING" | "SCHEDULED" | "DELIVERED";
 
 const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   SCHEDULED: { label: "발송 예정", className: "bg-sky-50 text-sky-700 ring-sky-200" },
+  SENDING: { label: "발송 준비 중", className: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
+  WAITING_CONTACT: { label: "전화번호 확인 중", className: "bg-amber-50 text-amber-800 ring-amber-200" },
   SUBMITTED: { label: "솔라피 접수", className: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
   CARRIER_ACCEPTED: { label: "통신사 처리 중", className: "bg-violet-50 text-violet-700 ring-violet-200" },
   DELIVERED: { label: "수신 완료", className: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
@@ -46,7 +48,7 @@ const STATUS_STYLE: Record<string, { label: string; className: string }> = {
 
 const ATTENTION_STATUSES = new Set(["FAILED", "MISSING_PHONE", "OVERDUE"]);
 const PROCESSING_STATUSES = new Set(["SUBMITTED", "CARRIER_ACCEPTED"]);
-const SCHEDULED_STATUSES = new Set(["SCHEDULED", "PENDING"]);
+const SCHEDULED_STATUSES = new Set(["SCHEDULED", "PENDING", "WAITING_CONTACT"]);
 
 function formatKst(value: string, includeDate = true) {
   return new Intl.DateTimeFormat("ko-KR", {

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { normalizeKoreanPhone } from "@/lib/phone-number";
 
@@ -81,6 +81,30 @@ export async function recordOutboundReservationMessage(input: OutboundMessageInp
       customerPhone,
       body: input.body,
       providerMessageId: input.providerMessageId || null,
+      occurredAt,
+      readAt: occurredAt,
+    },
+  });
+}
+
+type OutboundTestMessageInput = Omit<OutboundMessageInput, "reservationId">;
+
+export async function recordOutboundTestMessage(input: OutboundTestMessageInput) {
+  const customerPhone = normalizeKoreanPhone(input.recipientNumber);
+  const occurredAt = input.occurredAt || new Date();
+  const dedupeKey = `solapi-test:${input.providerMessageId || randomUUID()}`;
+
+  return prisma.customerMessage.create({
+    data: {
+      direction: "OUTBOUND",
+      channel: input.channel,
+      status: input.status,
+      senderNumber: normalizeKoreanPhone(input.senderNumber),
+      recipientNumber: customerPhone,
+      customerPhone,
+      body: input.body,
+      providerMessageId: input.providerMessageId || null,
+      dedupeKey,
       occurredAt,
       readAt: occurredAt,
     },

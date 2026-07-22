@@ -25,6 +25,10 @@ type ReservationReminderInput = {
   endTime: Date;
 };
 
+type SendOptions = {
+  forceRealSend?: boolean;
+};
+
 function env(name: string) {
   return process.env[name]?.trim() || "";
 }
@@ -63,8 +67,13 @@ async function getSenderPhone() {
   return sender;
 }
 
-function isRealSendEnabled() {
-  return env("SOLAPI_REAL_SEND").toLowerCase() === "true";
+function isRealSendEnabledFor(recipient: string) {
+  if (env("SOLAPI_REAL_SEND").toLowerCase() !== "true") return false;
+  const allowlist = env("SOLAPI_REAL_SEND_ALLOWLIST")
+    .split(",")
+    .map(normalizeKoreanPhone)
+    .filter(Boolean);
+  return allowlist.length === 0 || allowlist.includes(recipient);
 }
 
 function getSolapiErrorMessage(error: unknown) {
@@ -98,7 +107,10 @@ export async function buildReservationReminder(input: ReservationReminderInput) 
   };
 }
 
-export async function sendReservationReminder(input: ReservationReminderInput): Promise<SendResult> {
+export async function sendReservationReminder(
+  input: ReservationReminderInput,
+  options: SendOptions = {},
+): Promise<SendResult> {
   const to = normalizeKoreanPhone(input.phone);
   const reminder = await buildReservationReminder(input);
   const channel: NotificationChannel = "SMS";
@@ -116,7 +128,7 @@ export async function sendReservationReminder(input: ReservationReminderInput): 
     };
   }
 
-  const dryRun = !isRealSendEnabled();
+  const dryRun = !options.forceRealSend && !isRealSendEnabledFor(to);
 
   try {
     const from = await getSenderPhone();
@@ -152,6 +164,7 @@ export async function sendReservationReminder(input: ReservationReminderInput): 
 export async function sendTestSms(
   to = env("SOLAPI_TEST_TO") || env("OWNER_PHONE"),
   options: Partial<ReservationReminderInput> = {},
+  sendOptions: SendOptions = {},
 ) {
   const now = new Date();
   const startTime = options.startTime || new Date(now.getTime() + 2 * 60 * 60 * 1000);
@@ -161,5 +174,5 @@ export async function sendTestSms(
     roomName: options.roomName || "머무룸1",
     startTime,
     endTime: options.endTime || new Date(startTime.getTime() + 2 * 60 * 60 * 1000),
-  });
+  }, sendOptions);
 }

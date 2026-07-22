@@ -36,7 +36,9 @@
     "rpa:competitors": "node rpa/competitor-scan.mjs",
     "sms:provision-device": "node scripts/provision-sms-bridge-device.mjs",
     "sms:configure-notifications": "node scripts/configure-notification-secrets.mjs",
-    "sms:register-webhook": "node scripts/register-solapi-webhook.mjs"
+    "sms:register-webhook": "node scripts/register-solapi-webhook.mjs",
+    "google-people:authorize": "node scripts/authorize-google-people.mjs",
+    "test:google-people": "node --experimental-strip-types scripts/test-google-people-contact-name.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",

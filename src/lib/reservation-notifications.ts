@@ -34,6 +34,18 @@ export async function sendDueReservationReminders() {
   const now = new Date();
   const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
+  await prisma.reservation.updateMany({
+    where: {
+      notified: false,
+      notificationStatus: "SENDING",
+      updatedAt: { lt: new Date(now.getTime() - 10 * 60 * 1000) },
+    },
+    data: {
+      notificationStatus: "PENDING",
+      notificationError: "이전 발송 작업이 중단되어 자동으로 다시 확인합니다.",
+    },
+  });
+
   const upcomingReservations = await prisma.reservation.findMany({
     where: {
       startTime: {
@@ -41,6 +53,7 @@ export async function sendDueReservationReminders() {
         lte: twoHoursLater,
       },
       notified: false,
+      notificationStatus: { in: ["PENDING", "WAITING_CONTACT"] },
       status: "CONFIRMED",
       isNoShow: false,
     },
@@ -50,9 +63,25 @@ export async function sendDueReservationReminders() {
   const results = [];
   let sentCount = 0;
   let dryRunCount = 0;
+  let waitingContactCount = 0;
   let failedCount = 0;
 
   for (const reservation of upcomingReservations) {
+    const claimed = await prisma.reservation.updateMany({
+      where: {
+        id: reservation.id,
+        notified: false,
+        notificationStatus: { in: ["PENDING", "WAITING_CONTACT"] },
+        status: "CONFIRMED",
+        isNoShow: false,
+      },
+      data: {
+        notificationStatus: "SENDING",
+        notificationError: null,
+      },
+    });
+    if (claimed.count === 0) continue;
+
     const result = await sendReservationReminder({
       reservationId: reservation.id,
       customerName: reservation.customerName,
@@ -115,6 +144,20 @@ export async function sendDueReservationReminders() {
       continue;
     }
 
+    if (!result.to) {
+      const contactError = result.error || "Recipient phone number is missing.";
+      await prisma.reservation.update({
+        where: { id: reservation.id },
+        data: {
+          notificationStatus: "WAITING_CONTACT",
+          notificationChannel: result.channel,
+          notificationError: contactError,
+        },
+      });
+      waitingContactCount += 1;
+      continue;
+    }
+
     const errorMessage = result.error || "Unknown notification delivery failure.";
     await prisma.reservation.update({
       where: { id: reservation.id },
@@ -139,6 +182,7 @@ export async function sendDueReservationReminders() {
     checkedCount: upcomingReservations.length,
     sentCount,
     dryRunCount,
+    waitingContactCount,
     failedCount,
     results,
   };
