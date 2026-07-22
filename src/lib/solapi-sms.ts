@@ -2,6 +2,7 @@ import { SolapiMessageService } from "solapi";
 import { getMessageTemplateForRoom } from "@/lib/message-templates";
 import { getSelectedSolapiSenderNumber } from "@/lib/solapi-sender-setting";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
+import { reservationMessageSubject } from "@/lib/reservation-message-subject";
 
 type NotificationChannel = "SMS";
 
@@ -113,6 +114,7 @@ export async function sendReservationReminder(
 ): Promise<SendResult> {
   const to = normalizeKoreanPhone(input.phone);
   const reminder = await buildReservationReminder(input);
+  const subject = reservationMessageSubject(input.roomName);
   const channel: NotificationChannel = "SMS";
   if (!isValidKoreanMobilePhone(to)) {
     return {
@@ -133,7 +135,7 @@ export async function sendReservationReminder(
   try {
     const from = await getSenderPhone();
     if (dryRun) {
-      console.log(`[Solapi dry-run] ${channel} from=${from} to=${to} room=${input.roomName}\n${reminder.text}`);
+      console.log(`[Solapi dry-run] ${channel} from=${from} to=${to} room=${input.roomName} subject=${subject}\n${reminder.text}`);
       return { success: true, dryRun: true, channel, to, from, text: reminder.text };
     }
 
@@ -141,6 +143,7 @@ export async function sendReservationReminder(
     const response = await messageService.send({
       to,
       from,
+      subject,
       text: reminder.text,
       ...(input.reservationId
         ? { customFields: { reservationId: input.reservationId } }
