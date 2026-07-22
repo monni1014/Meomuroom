@@ -66,6 +66,19 @@ function statusStyle(status: string) {
   return STATUS_STYLE[status] || { label: status, className: "bg-slate-100 text-slate-600 ring-slate-200" };
 }
 
+function roomBadgeStyle(roomName: string) {
+  switch (roomName) {
+    case "머무룸1":
+      return "border-sky-100 bg-sky-50 text-sky-700";
+    case "머무룸2":
+      return "border-purple-100 bg-purple-50 text-purple-700";
+    case "머무룸3":
+      return "border-orange-200 bg-orange-50 text-orange-700";
+    default:
+      return "border-slate-200 bg-slate-50 text-slate-700";
+  }
+}
+
 function needsAttention(entry: DeliveryEntry) {
   return ATTENTION_STATUSES.has(entry.status);
 }
@@ -165,7 +178,9 @@ export default function MessagesView({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-black text-slate-900">{entry.customerName || "이름 없음"}</p>
-                        <span className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">{entry.roomName}</span>
+                        <span className={`rounded-md border px-2 py-1 text-[11px] font-bold ${roomBadgeStyle(entry.roomName)}`}>
+                          {entry.roomName}
+                        </span>
                         {entry.isTest && (
                           <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-extrabold text-amber-800 ring-1 ring-inset ring-amber-200">
                             강제 테스트
