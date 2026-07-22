@@ -1,27 +1,41 @@
 import MessagesView from "./MessagesView";
 import { prisma } from "@/lib/prisma";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
+import { getKstDayRange } from "@/lib/kst-time";
 
 export const dynamic = "force-dynamic";
 
 export default async function MessagesPage() {
   const now = new Date();
+  const today = getKstDayRange(now);
+  const tomorrowStart = new Date(today.end.getTime() + 1);
+  const twoHoursMs = 2 * 60 * 60 * 1000;
+  const plannedReservationStart = new Date(today.start.getTime() + twoHoursMs);
+  const plannedReservationEnd = new Date(tomorrowStart.getTime() + twoHoursMs);
+  const twoHoursLater = new Date(now.getTime() + twoHoursMs);
+
   const reservations = await prisma.reservation.findMany({
     where: {
+      status: "CONFIRMED",
       OR: [
         {
-          status: "CONFIRMED",
           startTime: {
-            gte: now,
-            lte: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000),
+            gte: plannedReservationStart,
+            lt: plannedReservationEnd,
           },
         },
         {
           messages: {
             some: {
               direction: "OUTBOUND",
-              occurredAt: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
+              occurredAt: { gte: today.start, lt: tomorrowStart },
             },
+          },
+        },
+        {
+          startTime: { gte: now, lte: twoHoursLater },
+          notificationStatus: {
+            in: ["PENDING", "SENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "FAILED"],
           },
         },
       ],
@@ -36,6 +50,7 @@ export default async function MessagesPage() {
           id: true,
           status: true,
           occurredAt: true,
+          updatedAt: true,
           providerMessageId: true,
         },
       },
@@ -48,10 +63,10 @@ export default async function MessagesPage() {
     const phone = normalizeKoreanPhone(reservation.phone);
     let status = message?.status || reservation.notificationStatus || "PENDING";
     if (status === "SENT") status = "SUBMITTED";
-    if (!message && reservation.status === "CANCELLED") status = "CANCELLED";
-    else if (!message && !isValidKoreanMobilePhone(phone)) status = "MISSING_PHONE";
-    else if (!message && status === "PENDING") {
-      status = scheduledAt.getTime() < now.getTime() ? "OVERDUE" : "SCHEDULED";
+    if (!message && !isValidKoreanMobilePhone(phone)) status = "MISSING_PHONE";
+    else if (!message && ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"].includes(status)) {
+      if (scheduledAt.getTime() < now.getTime()) status = "OVERDUE";
+      else if (status === "PENDING") status = "SCHEDULED";
     }
 
     return {
@@ -66,9 +81,10 @@ export default async function MessagesPage() {
       status,
       error: reservation.notificationError,
       sentAt: message?.occurredAt.toISOString() || reservation.notifiedAt?.toISOString() || null,
+      resultAt: message?.updatedAt.toISOString() || reservation.notifiedAt?.toISOString() || null,
       providerMessageId: message?.providerMessageId || null,
     };
   });
 
-  return <MessagesView initialEntries={entries} />;
+  return <MessagesView initialEntries={entries} todayLabel={`${today.parts.month}월 ${today.parts.day}일`} />;
 }

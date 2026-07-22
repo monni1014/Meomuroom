@@ -63,14 +63,14 @@ export default function MessageStatusBadge({
   const sendWindowExpired = now !== null && start !== null && now - start > STALE_AFTER_START_MS;
   const missingPhone = !phone?.replace(/\D/g, "");
 
-  if (normalizedStatus === "SENT" || notified) {
+  if (normalizedStatus === "DELIVERED") {
     return (
       <span
         className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm"
-        title={`예약 안내 발송완료${notificationChannel ? ` (${notificationChannel})` : ""}${notifiedAt ? ` - ${formatKst(notifiedAt)}` : ""}`}
+        title={`예약 안내 수신완료${notificationChannel ? ` (${notificationChannel})` : ""}${notifiedAt ? ` - ${formatKst(notifiedAt)}` : ""}`}
       >
         <MessageCircle className="h-3 w-3" />
-        <span className="sr-only">문자 발송완료</span>
+        <span className="sr-only">문자 수신완료</span>
       </span>
     );
   }
@@ -96,6 +96,19 @@ export default function MessageStatusBadge({
       >
         <MessageCircle className="h-3 w-3" />
         <span className="sr-only">문자 테스트모드</span>
+      </span>
+    );
+  }
+
+  if (["SENT", "SENDING", "SUBMITTED", "CARRIER_ACCEPTED"].includes(normalizedStatus)) {
+    const label = normalizedStatus === "CARRIER_ACCEPTED" ? "통신사 처리 중" : "문자 수신 결과 확인 중";
+    return (
+      <span
+        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 text-indigo-600 shadow-sm"
+        title={`${label}${notifiedAt ? ` - ${formatKst(notifiedAt)}` : ""}`}
+      >
+        <MessageCircle className="h-3 w-3" />
+        <span className="sr-only">{label}</span>
       </span>
     );
   }

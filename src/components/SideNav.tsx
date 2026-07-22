@@ -9,8 +9,8 @@ import { ProxyStatusIndicator } from "@/components/ProxyStatusIndicator";
 const NAV_ITEMS = [
   { name: "대시보드", href: "/", icon: Home },
   { name: "캘린더", href: "/calendar", icon: Calendar },
-  { name: "문자 현황", href: "/messages", icon: MessageSquareText },
   { name: "이용현황", href: "/usage", icon: ClipboardList },
+  { name: "문자 현황", href: "/messages", icon: MessageSquareText },
   { name: "월간표", href: "/monthly-table", icon: Table2 },
   { name: "경쟁사 현황", href: "/competitors", icon: Radar },
   { name: "통계", href: "/analytics", icon: BarChart3 },

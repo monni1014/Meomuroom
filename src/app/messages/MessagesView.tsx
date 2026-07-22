@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -26,10 +26,9 @@ type DeliveryEntry = {
   status: string;
   error: string | null;
   sentAt: string | null;
+  resultAt: string | null;
   providerMessageId: string | null;
 };
-
-type Filter = "ALL" | "ATTENTION" | "PROCESSING" | "SCHEDULED" | "DELIVERED";
 
 const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   SCHEDULED: { label: "발송 예정", className: "bg-sky-50 text-sky-700 ring-sky-200" },
@@ -47,8 +46,8 @@ const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   PENDING: { label: "발송 예정", className: "bg-sky-50 text-sky-700 ring-sky-200" },
 };
 
-const ATTENTION_STATUSES = new Set(["FAILED", "MISSING_PHONE", "OVERDUE"]);
-const PROCESSING_STATUSES = new Set(["SUBMITTED", "CARRIER_ACCEPTED"]);
+const ATTENTION_STATUSES = new Set(["FAILED", "MISSING_PHONE", "OVERDUE", "DRY_RUN"]);
+const PROCESSING_STATUSES = new Set(["SENDING", "SUBMITTED", "CARRIER_ACCEPTED"]);
 const SCHEDULED_STATUSES = new Set(["SCHEDULED", "PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"]);
 
 function formatKst(value: string, includeDate = true) {
@@ -61,32 +60,12 @@ function formatKst(value: string, includeDate = true) {
   }).format(new Date(value));
 }
 
-function kstDateKey(value: Date | string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(value));
-  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
-}
-
 function statusStyle(status: string) {
   return STATUS_STYLE[status] || { label: status, className: "bg-slate-100 text-slate-600 ring-slate-200" };
 }
 
 function needsAttention(entry: DeliveryEntry) {
-  if (ATTENTION_STATUSES.has(entry.status)) return true;
-  return entry.status === "DRY_RUN" && new Date(entry.endTime).getTime() >= Date.now();
-}
-
-function matchesFilter(entry: DeliveryEntry, filter: Filter) {
-  if (filter === "ALL") return entry.status !== "CANCELLED";
-  if (filter === "ATTENTION") return needsAttention(entry);
-  if (filter === "PROCESSING") return PROCESSING_STATUSES.has(entry.status);
-  if (filter === "SCHEDULED") return SCHEDULED_STATUSES.has(entry.status);
-  return entry.status === "DELIVERED";
+  return ATTENTION_STATUSES.has(entry.status);
 }
 
 function sortWeight(entry: DeliveryEntry) {
@@ -97,40 +76,44 @@ function sortWeight(entry: DeliveryEntry) {
   return 4;
 }
 
-export default function MessagesView({ initialEntries }: { initialEntries: DeliveryEntry[] }) {
+export default function MessagesView({
+  initialEntries,
+  todayLabel,
+}: {
+  initialEntries: DeliveryEntry[];
+  todayLabel: string;
+}) {
   const router = useRouter();
-  const [filter, setFilter] = useState<Filter>("ALL");
   const refresh = useCallback(() => router.refresh(), [router]);
   useDataChangePolling("/api/data-version?scope=messages", refresh, { intervalMs: 5_000 });
 
-  const todayKey = kstDateKey(new Date());
   const stats = useMemo(() => ({
-    today: initialEntries.filter((entry) =>
-      entry.reservationStatus === "CONFIRMED" && kstDateKey(entry.scheduledAt) === todayKey,
-    ).length,
-    attention: initialEntries.filter(needsAttention).length,
+    scheduled: initialEntries.filter((entry) => SCHEDULED_STATUSES.has(entry.status)).length,
     processing: initialEntries.filter((entry) => PROCESSING_STATUSES.has(entry.status)).length,
     delivered: initialEntries.filter((entry) => entry.status === "DELIVERED").length,
-  }), [initialEntries, todayKey]);
+    attention: initialEntries.filter(needsAttention).length,
+  }), [initialEntries]);
 
-  const filteredEntries = useMemo(() => initialEntries
-    .filter((entry) => matchesFilter(entry, filter))
+  const sortedEntries = useMemo(() => [...initialEntries]
     .sort((left, right) => {
       const weight = sortWeight(left) - sortWeight(right);
       if (weight !== 0) return weight;
       if (left.status === "DELIVERED" && right.status === "DELIVERED") {
-        return new Date(right.sentAt || right.startTime).getTime() - new Date(left.sentAt || left.startTime).getTime();
+        return new Date(right.resultAt || right.sentAt || right.startTime).getTime()
+          - new Date(left.resultAt || left.sentAt || left.startTime).getTime();
       }
       return new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime();
-    }), [filter, initialEntries]);
+    }), [initialEntries]);
 
-  const filters: Array<{ key: Filter; label: string }> = [
-    { key: "ALL", label: "전체" },
-    { key: "ATTENTION", label: "확인 필요" },
-    { key: "PROCESSING", label: "처리 중" },
-    { key: "SCHEDULED", label: "발송 예정" },
-    { key: "DELIVERED", label: "수신 완료" },
-  ];
+  function processingLabel(entry: DeliveryEntry) {
+    const value = entry.resultAt || entry.sentAt;
+    if (entry.status === "DELIVERED") return value ? `수신 완료 ${formatKst(value)}` : "수신 완료";
+    if (needsAttention(entry)) return value ? `확인 필요 ${formatKst(value)}` : "확인 필요";
+    if (entry.status === "CARRIER_ACCEPTED") return value ? `통신사 처리 중 ${formatKst(value)}` : "통신사 처리 중";
+    if (entry.status === "SUBMITTED") return value ? `솔라피 접수 ${formatKst(value)}` : "솔라피 접수";
+    if (entry.status === "SENDING") return "발송 작업 중";
+    return `발송 예정 ${formatKst(entry.scheduledAt)}`;
+  }
 
   return (
     <div className="min-h-full bg-slate-50 px-4 pb-24 pt-16 sm:px-6 md:pb-8 md:pt-20 lg:px-8">
@@ -140,8 +123,10 @@ export default function MessagesView({ initialEntries }: { initialEntries: Deliv
             <MessageSquareText className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight text-slate-900">문자 발송현황</h1>
-            <p className="mt-1 text-sm text-slate-500">예약 2시간 전 발송부터 고객 휴대폰 수신 결과까지 확인합니다.</p>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900">오늘 문자 현황</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              {todayLabel} 발송 대상 {initialEntries.length}건 · 고객 휴대폰의 수신 완료만 성공으로 집계합니다.
+            </p>
           </div>
         </header>
 
@@ -149,10 +134,10 @@ export default function MessagesView({ initialEntries }: { initialEntries: Deliv
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[
-            { label: "오늘 발송 대상", value: stats.today, icon: CalendarClock, tone: "text-sky-600 bg-sky-50" },
-            { label: "확인 필요", value: stats.attention, icon: AlertTriangle, tone: "text-rose-600 bg-rose-50" },
-            { label: "처리 중", value: stats.processing, icon: Radio, tone: "text-indigo-600 bg-indigo-50" },
+            { label: "발송 예정", value: stats.scheduled, icon: CalendarClock, tone: "text-sky-600 bg-sky-50" },
+            { label: "처리 중 · 미완료", value: stats.processing, icon: Radio, tone: "text-indigo-600 bg-indigo-50" },
             { label: "수신 완료", value: stats.delivered, icon: CheckCheck, tone: "text-emerald-600 bg-emerald-50" },
+            { label: "실패 · 확인 필요", value: stats.attention, icon: AlertTriangle, tone: "text-rose-600 bg-rose-50" },
           ].map((stat) => (
             <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className={`inline-flex rounded-xl p-2 ${stat.tone}`}><stat.icon className="h-5 w-5" /></div>
@@ -164,24 +149,12 @@ export default function MessagesView({ initialEntries }: { initialEntries: Deliv
 
         <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-4 sm:p-5">
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {filters.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => setFilter(item.key)}
-                  className={`shrink-0 rounded-full px-4 py-2 text-xs font-extrabold transition ${
-                    filter === item.key ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
+            <h2 className="font-black text-slate-900">{todayLabel} 발송 대상</h2>
+            <p className="mt-1 text-xs text-slate-500">확인이 필요한 문자부터 위에 표시합니다.</p>
           </div>
 
           <div className="divide-y divide-slate-100">
-            {filteredEntries.map((entry) => {
+            {sortedEntries.map((entry) => {
               const style = statusStyle(entry.status);
               return (
                 <article key={entry.reservationId} className="p-4 sm:p-5">
@@ -206,20 +179,20 @@ export default function MessagesView({ initialEntries }: { initialEntries: Deliv
                     </div>
                     <div className="flex shrink-0 items-center gap-2 text-xs text-slate-400">
                       <Clock3 className="h-4 w-4" />
-                      {entry.sentAt ? `처리 ${formatKst(entry.sentAt)}` : "아직 발송 전"}
+                      {processingLabel(entry)}
                     </div>
                   </div>
                 </article>
               );
             })}
-            {filteredEntries.length === 0 && (
-              <div className="p-12 text-center text-sm text-slate-400">이 상태에 해당하는 예약이 없습니다.</div>
+            {sortedEntries.length === 0 && (
+              <div className="p-12 text-center text-sm text-slate-400">오늘 발송 대상인 예약이 없습니다.</div>
             )}
           </div>
         </section>
 
         <p className="px-1 text-xs leading-5 text-slate-500">
-          ‘솔라피 접수’는 발송 요청이 들어간 상태이고, ‘수신 완료’는 통신사 결과가 확인된 최종 성공입니다. 결과는 5초마다 자동 갱신됩니다.
+          ‘솔라피 접수’와 ‘통신사 처리 중’은 아직 성공이 아닙니다. 고객 휴대폰의 ‘수신 완료’ 결과만 최종 성공이며, 결과는 5초마다 자동 갱신됩니다.
         </p>
       </div>
     </div>
