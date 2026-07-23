@@ -948,8 +948,13 @@ async function clickAddReservation(page, { healthCheck = false } = {}) {
     control = await locateSelfHealingControl(page, SPACECLOUD_ADD_RESERVATION_CONTROL, { healthCheck });
     await humanClickElement(page, control.locator, "SpaceCloud add reservation retry");
     if (!(await waitForAddReservationModal(page, 10_000))) {
-      markSelfHealingControlFailed(control);
-      throw new Error("[RPA_UI_CHANGE] SpaceCloud add reservation modal did not open after two verified click attempts.");
+      console.log("SpaceCloud add modal still closed. Use Playwright's actionability-checked click on the same verified control once.");
+      control = await locateSelfHealingControl(page, SPACECLOUD_ADD_RESERVATION_CONTROL, { healthCheck });
+      await control.locator.click({ timeout: 5_000 });
+      if (!(await waitForAddReservationModal(page, 10_000))) {
+        markSelfHealingControlFailed(control);
+        throw new Error("[RPA_UI_CHANGE] SpaceCloud add reservation modal did not open after three verified click strategies.");
+      }
     }
   }
 

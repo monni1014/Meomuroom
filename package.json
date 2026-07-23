@@ -20,6 +20,7 @@
     "test:naver-booking-row": "node scripts/test-naver-booking-row.mjs",
     "test:naver-cancellation-times": "node --experimental-strip-types scripts/test-naver-cancellation-times.mjs",
     "test:spacecloud-rpa-performance": "node scripts/test-spacecloud-rpa-performance.mjs",
+    "test:human-click-offscreen": "node scripts/test-human-click-offscreen.mjs",
     "test:proxy-health-alert": "node --experimental-strip-types scripts/test-proxy-health-alert-policy.mjs",
     "rpa:configure-proxy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-rpa-proxy.ps1",
     "rpa:test-proxy": "node rpa/test-proxy.mjs",

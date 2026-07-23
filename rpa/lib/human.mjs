@@ -135,6 +135,39 @@ export async function humanClickBox(page, box, label = "box click") {
 }
 
 export async function humanClickElement(page, elementOrLocator, label = "element click") {
+  const repositioned = await elementOrLocator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.x + rect.width / 2;
+    const centerY = rect.y + rect.height / 2;
+    const hitTarget = centerX >= 0
+      && centerX < window.innerWidth
+      && centerY >= 0
+      && centerY < window.innerHeight
+      ? document.elementFromPoint(centerX, centerY)
+      : null;
+    const centerIsClickable = Boolean(hitTarget && (hitTarget === element || element.contains(hitTarget)));
+    const withinSafeViewport = centerX >= 24
+      && centerX <= window.innerWidth - 24
+      && centerY >= 80
+      && centerY <= window.innerHeight - 24;
+
+    if (centerIsClickable && withinSafeViewport) return false;
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    return true;
+  });
+
+  if (repositioned) await page.waitForTimeout(randomInt(180, 320));
+
+  const clickSurfaceReady = await elementOrLocator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.x + rect.width / 2;
+    const centerY = rect.y + rect.height / 2;
+    if (centerX < 0 || centerX >= window.innerWidth || centerY < 0 || centerY >= window.innerHeight) return false;
+    const hitTarget = document.elementFromPoint(centerX, centerY);
+    return Boolean(hitTarget && (hitTarget === element || element.contains(hitTarget)));
+  });
+  if (!clickSurfaceReady) throw new Error(`Element center is not clickable after scroll: ${label}`);
+
   const box = await elementOrLocator.boundingBox();
   if (!box) throw new Error(`Cannot click invisible element: ${label}`);
   await humanClickBox(page, box, label);
