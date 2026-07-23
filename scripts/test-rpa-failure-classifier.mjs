@@ -11,6 +11,7 @@ const cases = [
   ["Could not locate exact next-week arrow button.", "UI_CHANGE"],
   ["locator.waitFor: Timeout 20000ms exceeded", "UI_CHANGE"],
   ["Naver slot RPA is already running.", "BUSY"],
+  ["Target 8.4 is not visible. Click next.\nEACCES: permission denied, open 'state.json'", "FAILURE"],
   ["Unexpected child process exit code 1", "FAILURE"],
 ];
 
@@ -31,5 +32,10 @@ assert.equal(
 );
 assert.equal(summarizeRpaFailure(error).includes("010-1234-5678"), false);
 assert.equal(summarizeRpaFailure(error).includes("1234567890"), false);
+
+assert.match(
+  summarizeRpaFailure("Target 8.4 is not visible.\nEACCES: permission denied, open 'state.json'"),
+  /EACCES|permission denied/i,
+);
 
 console.log("RPA failure classifier tests passed.");

@@ -270,6 +270,20 @@ function writeState(key, state) {
   renameSync(tempPath, filePath);
 }
 
+function persistState(key, state, { strict = false } = {}) {
+  try {
+    writeState(key, state);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[SELF_HEAL_STATE_WARNING] ${key}: ${message}`);
+    if (strict) {
+      throw new Error(`[RPA_STATE] Could not persist self-healing control state for ${key}: ${message}`);
+    }
+    return false;
+  }
+}
+
 async function collectCandidates(page, marker) {
   return page.evaluate((targetMarker) => {
     const markerAttribute = "data-memoroom-control-probe";
@@ -383,11 +397,11 @@ export async function locateSelfHealingControl(page, definition, { healthCheck =
 export function markSelfHealingControlVerified(control, { healthCheck = control.healthCheck } = {}) {
   const before = readState(control.definition.key);
   const after = advanceControlVerificationState(before, control.candidate, { healthCheck, verified: true });
-  writeState(control.definition.key, after);
+  const persisted = persistState(control.definition.key, after, { strict: healthCheck });
 
-  if (before.activeSignature !== after.activeSignature && after.activeSignature) {
+  if (persisted && before.activeSignature !== after.activeSignature && after.activeSignature) {
     console.log(`[SELF_HEAL_PROMOTED] ${control.definition.key} ${after.activeSignature}`);
-  } else if (healthCheck && !after.activeSignature) {
+  } else if (persisted && healthCheck && !after.activeSignature) {
     console.log(`[SELF_HEAL_PENDING] ${control.definition.key} passes=${after.pendingPasses}/${DEFAULT_PROMOTION_PASSES}`);
   }
   return after;
@@ -396,7 +410,7 @@ export function markSelfHealingControlVerified(control, { healthCheck = control.
 export function markSelfHealingControlFailed(control) {
   const before = readState(control.definition.key);
   const after = advanceControlVerificationState(before, control.candidate, { healthCheck: control.healthCheck, verified: false });
-  writeState(control.definition.key, after);
+  persistState(control.definition.key, after);
   console.log(`[SELF_HEAL_FAILED] ${control.definition.key} ${control.candidate.signature}`);
   return after;
 }

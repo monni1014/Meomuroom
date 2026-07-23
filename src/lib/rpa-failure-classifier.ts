@@ -59,6 +59,13 @@ export function classifyRpaFailure(errorOrText: unknown): RpaFailureKind {
     return "NETWORK";
   }
 
+  // A command can include normal navigation logs such as "target is not
+  // visible; click next" before a later filesystem error. Infrastructure
+  // failures must take precedence so they are never reported as a UI change.
+  if (/\b(?:EACCES|EPERM|EROFS|ENOSPC)\b|permission denied|read-only file system|no space left on device/i.test(text)) {
+    return "FAILURE";
+  }
+
   if (
     /\[RPA_UI_CHANGE\]|locator\.|getBy(?:Text|Role|Label)|waitForFunction|waiting for locator|selector|not visible after retry|was not visible|was not found|could not find|could not locate|did not load|grid did not load|not ready before|could not open (?:exact )?(?:Naver )?(?:schedule|calendar|product|detail)|calendar view is not ready|day header was not found|booking detail link|target day is visible/i.test(text)
   ) {
@@ -96,7 +103,7 @@ export function summarizeRpaFailure(errorOrText: unknown) {
     .filter((line) => !/^\s*(?:at |Usage:|npm run )/.test(line));
 
   const preferred = [...lines].reverse().find((line) =>
-    /RPA failed|RPA terminated|read failed|Error:|Timeout|not visible|not found|could not|did not|not ready|login required|session|ERR_|ECONN|ENET|EHOST|EAI_AGAIN/i.test(line)
+    /RPA failed|RPA terminated|read failed|Error:|Timeout|EACCES|EPERM|EROFS|ENOSPC|permission denied|not visible|not found|could not|did not|not ready|login required|session|ERR_|ECONN|ENET|EHOST|EAI_AGAIN/i.test(line)
   ) || lines.at(-1) || "Unknown RPA failure";
 
   return redactSensitiveText(preferred).slice(0, 500);

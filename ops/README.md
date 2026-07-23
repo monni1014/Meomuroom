@@ -82,6 +82,10 @@ read-only checks is promoted for live use. Ambiguous candidates never promote,
 and live mutations still require the existing fresh-page result verification.
 Promotion state is stored in the git-ignored
 `rpa/.runtime/self-healing-controls/` directory.
+Manual server-side health runs must use the `memoroom` service account (for
+example, `runuser -u memoroom -- ...`) so these runtime files never become
+root-owned. A live reservation must continue to its fresh-page verification if
+only this auxiliary state write fails.
 
 Every live reservation RPA also reports failures through the same classifier:
 
