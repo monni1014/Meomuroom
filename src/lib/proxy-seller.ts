@@ -3,6 +3,10 @@ import "server-only";
 import https from "node:https";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { createAdminAlert, resolveAdminAlertsByType } from "@/lib/admin-alerts";
+import {
+  PROXY_CONNECTION_CONFIRM_DELAYS_MS,
+  shouldConfirmProxyConnectionFailure,
+} from "@/lib/proxy-health-alert-policy";
 import type { IspProxyStatus, ProxyHealthSeverity } from "@/lib/proxy-status-types";
 
 const PROXYSELLER_API_BASE = "https://proxy-seller.com/personal/api/v1";
@@ -361,7 +365,18 @@ export async function getProxySellerStatus(options: { force?: boolean } = {}) {
 }
 
 export async function checkProxySellerStatusAndAlert() {
-  const status = await getProxySellerStatus({ force: true });
+  let status = await getProxySellerStatus({ force: true });
+
+  if (shouldConfirmProxyConnectionFailure(status)) {
+    for (const delayMs of PROXY_CONNECTION_CONFIRM_DELAYS_MS) {
+      console.warn(
+        `[Proxy] Connection check failed (${status.error || status.summary}); confirming again in ${delayMs / 1_000}s.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      status = await getProxySellerStatus({ force: true });
+      if (!shouldConfirmProxyConnectionFailure(status)) break;
+    }
+  }
 
   if (status.severity === "OK") {
     await resolveAdminAlertsByType(ALERT_TYPE);
