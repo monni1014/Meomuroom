@@ -53,6 +53,16 @@ const SPACECLOUD_MODAL_CONFIRM_CONTROL = {
   minMargin: 12,
 };
 
+const SPACECLOUD_MODAL_CANCEL_CONTROL = {
+  key: "spacecloud.external-modal.cancel",
+  primaryLabels: ["취소"],
+  aliases: ["닫기"],
+  excludeLabels: ["확인", "저장", "등록", "삭제"],
+  region: { minYRatio: 0.5, maxYRatio: 1 },
+  minScore: 85,
+  minMargin: 12,
+};
+
 const WEEKDAYS = [
   "\uc77c",
   "\uc6d4",
@@ -878,6 +888,19 @@ async function waitForAddReservationModal(page, timeout) {
       return text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
         && text.includes("\uc608\uc57d\ub0a0\uc9dc")
         && text.includes("\uc608\uc57d\uc2dc\uac04");
+    },
+    null,
+    { timeout },
+  ).then(() => true).catch(() => false);
+}
+
+async function waitForAddReservationModalClosed(page, timeout) {
+  return page.waitForFunction(
+    () => {
+      const text = document.body?.innerText || "";
+      return !(text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
+        && text.includes("\uc608\uc57d\ub0a0\uc9dc")
+        && text.includes("\uc608\uc57d\uc2dc\uac04"));
     },
     null,
     { timeout },
@@ -2705,14 +2728,19 @@ async function main() {
         ...SPACECLOUD_MODAL_CONFIRM_CONTROL,
         bounds: modalBounds,
       }, { healthCheck: true });
+      const cancelControl = await locateSelfHealingControl(page, {
+        ...SPACECLOUD_MODAL_CANCEL_CONTROL,
+        bounds: modalBounds,
+      }, { healthCheck: true });
       const evidencePath = await saveScreenshot(page, "spacecloud-ui-health-check");
-      await page.keyboard.press("Escape").catch(() => {});
-      const modalClosed = await waitForAddReservationModal(page, 1_500).then((open) => !open);
+      await humanClickElement(page, cancelControl.locator, "SpaceCloud health-check cancel");
+      const modalClosed = await waitForAddReservationModalClosed(page, 5_000);
       if (!modalClosed) {
-        throw new Error("[RPA_UI_CHANGE] SpaceCloud health check could not close the add modal without saving.");
+        throw new Error("[RPA_UI_CHANGE] SpaceCloud health check cancel did not close the add modal.");
       }
       markSelfHealingControlVerified(addControl, { healthCheck: true });
       markSelfHealingControlVerified(confirmControl, { healthCheck: true });
+      markSelfHealingControlVerified(cancelControl, { healthCheck: true });
       console.log(JSON.stringify({
         ok: true,
         healthCheck: true,
