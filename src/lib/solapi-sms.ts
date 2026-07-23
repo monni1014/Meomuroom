@@ -37,6 +37,8 @@ type SendOptions = {
   forceDryRun?: boolean;
 };
 
+const SOLAPI_SMS_MAX_BYTES = 90;
+
 function env(name: string) {
   return process.env[name]?.trim() || "";
 }
@@ -97,6 +99,13 @@ function getSolapiErrorMessage(error: unknown) {
     return error.message;
   }
   return String(error);
+}
+
+function getSolapiSmsByteLength(text: string) {
+  return Array.from(text).reduce(
+    (total, character) => total + (/^[\x00-\x7F]$/.test(character) ? 1 : 2),
+    0,
+  );
 }
 
 export async function lookupReservationReminderDelivery(input: {
@@ -252,6 +261,19 @@ export async function sendOperationalAlertSms(input: {
     };
   }
 
+  const messageBytes = getSolapiSmsByteLength(text);
+  if (messageBytes > SOLAPI_SMS_MAX_BYTES) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to,
+      from: "",
+      text,
+      error: `Operational alert exceeds the ${SOLAPI_SMS_MAX_BYTES}-byte SMS limit (${messageBytes} bytes).`,
+    };
+  }
+
   try {
     let from = await getSenderPhone();
     const ownerPhone = normalizeKoreanPhone(env("OWNER_PHONE"));
@@ -267,7 +289,7 @@ export async function sendOperationalAlertSms(input: {
       return { success: true, dryRun: true, channel, to, from, text };
     }
 
-    const response = await getSolapiService().send({ to, from, text }, { showMessageList: true });
+    const response = await getSolapiService().send({ to, from, text, type: "SMS" }, { showMessageList: true });
     const messageId = response?.messageList?.[0]?.messageId || response?.groupInfo?.groupId || null;
     return { success: true, dryRun: false, channel, to, from, text, messageId };
   } catch (error) {

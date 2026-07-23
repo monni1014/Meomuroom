@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { evaluateTailscaleDeviceObservation } from "../src/lib/tailscale-device-monitor-policy.ts";
+import fs from "node:fs";
 
 const start = new Date("2026-07-23T10:00:00.000Z");
 const firstOffline = evaluateTailscaleDeviceObservation({
@@ -58,5 +59,10 @@ const pendingDesktop = evaluateTailscaleDeviceObservation({
 });
 assert.equal(pendingDesktop.shouldAlert, false);
 assert.equal(pendingDesktop.state.registered, false);
+
+const solapiSmsSource = fs.readFileSync(new URL("../src/lib/solapi-sms.ts", import.meta.url), "utf8");
+assert.match(solapiSmsSource, /SOLAPI_SMS_MAX_BYTES = 90/);
+assert.match(solapiSmsSource, /type: "SMS"/);
+assert.match(solapiSmsSource, /Operational alert exceeds the/);
 
 console.log("Tailscale device monitor policy tests passed.");
