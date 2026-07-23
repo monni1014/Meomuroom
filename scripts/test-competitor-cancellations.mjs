@@ -30,11 +30,14 @@ assert.equal(cancellationEquivalentHours(3, 30), 0.9);
 assert.equal(cancellationEquivalentHours(1, 0), 0);
 assert.equal(trigroundBookingRevenue(1), 0);
 assert.equal(trigroundBookingRevenue(2), 24_000);
-assert.equal(trigroundBookingRevenue(3), 24_000);
+assert.equal(trigroundBookingRevenue(3), 36_000);
+assert.equal(trigroundBookingRevenue(8), 96_000);
 assert.equal(trigroundCancellationRevenue(1, 100), 0);
 assert.equal(trigroundCancellationRevenue(2, 100), 24_000);
-assert.equal(trigroundCancellationRevenue(3, 100), 24_000);
-assert.equal(trigroundCancellationRevenue(3, 50), 12_000);
+assert.equal(trigroundCancellationRevenue(3, 100), 36_000);
+assert.equal(trigroundCancellationRevenue(3, 50), 18_000);
+assert.equal(trigroundCancellationRevenue(8, 100), 96_000);
+assert.equal(trigroundCancellationRevenue(8, 50), 48_000);
 assert.equal(trigroundCancellationRevenue(3, 0), 0);
 assert.equal(
   cancellationDetectedDateLabel("2026-07-22T15:30:00.000Z"),
