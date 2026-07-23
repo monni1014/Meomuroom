@@ -8,6 +8,7 @@ export type TailscaleDeviceMonitorState = {
   consecutiveOffline: number;
   alertDedupeKey: string | null;
   smsSentAt: string | null;
+  reminderSmsSentAt: string | null;
   lastSmsError: string | null;
   lastRecoveredAt: string | null;
 };
@@ -22,6 +23,7 @@ export type TailscaleDeviceObservation = {
 export type TailscaleDeviceDecision = {
   state: TailscaleDeviceMonitorState;
   shouldAlert: boolean;
+  shouldRemind: boolean;
   recoveredAlertKey: string | null;
 };
 
@@ -35,6 +37,7 @@ export function evaluateTailscaleDeviceObservation(input: {
   deviceId: string;
   now: Date;
   offlineThresholdMinutes: number;
+  reminderDelayMinutes?: number;
   previous?: Partial<TailscaleDeviceMonitorState> | null;
   observation: TailscaleDeviceObservation;
 }): TailscaleDeviceDecision {
@@ -56,10 +59,12 @@ export function evaluateTailscaleDeviceObservation(input: {
         consecutiveOffline: 0,
         alertDedupeKey: null,
         smsSentAt: null,
+        reminderSmsSentAt: null,
         lastSmsError: null,
         lastRecoveredAt: previous.lastRecoveredAt || null,
       },
       shouldAlert: false,
+      shouldRemind: false,
       recoveredAlertKey: null,
     };
   }
@@ -77,10 +82,12 @@ export function evaluateTailscaleDeviceObservation(input: {
         consecutiveOffline: 0,
         alertDedupeKey: null,
         smsSentAt: null,
+        reminderSmsSentAt: null,
         lastSmsError: null,
         lastRecoveredAt: previous.offlineSince ? nowIso : previous.lastRecoveredAt || null,
       },
       shouldAlert: false,
+      shouldRemind: false,
       recoveredAlertKey,
     };
   }
@@ -91,6 +98,11 @@ export function evaluateTailscaleDeviceObservation(input: {
   const thresholdReached = input.now.getTime() - offlineSinceMs >= thresholdMs;
   const alertDedupeKey = previous.alertDedupeKey
     || (thresholdReached ? `tailscale-device-offline:${input.deviceId}:${offlineSince}` : null);
+  const smsSentAtMs = validIsoTime(previous.smsSentAt);
+  const reminderDelayMs = Math.max(1, input.reminderDelayMinutes ?? 60) * 60_000;
+  const shouldRemind = smsSentAtMs !== null
+    && !previous.reminderSmsSentAt
+    && input.now.getTime() - smsSentAtMs >= reminderDelayMs;
 
   return {
     state: {
@@ -103,10 +115,12 @@ export function evaluateTailscaleDeviceObservation(input: {
       consecutiveOffline: (previous.consecutiveOffline || 0) + 1,
       alertDedupeKey,
       smsSentAt: previous.smsSentAt || null,
+      reminderSmsSentAt: previous.reminderSmsSentAt || null,
       lastSmsError: previous.lastSmsError || null,
       lastRecoveredAt: previous.lastRecoveredAt || null,
     },
     shouldAlert: thresholdReached && !previous.smsSentAt,
+    shouldRemind,
     recoveredAlertKey: null,
   };
 }

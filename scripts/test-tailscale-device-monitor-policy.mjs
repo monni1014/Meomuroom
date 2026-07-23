@@ -10,6 +10,7 @@ const firstOffline = evaluateTailscaleDeviceObservation({
   observation: { registered: true, online: false },
 });
 assert.equal(firstOffline.shouldAlert, false);
+assert.equal(firstOffline.shouldRemind, false);
 assert.equal(firstOffline.state.consecutiveOffline, 1);
 
 const shortOffline = evaluateTailscaleDeviceObservation({
@@ -31,7 +32,8 @@ const longOffline = evaluateTailscaleDeviceObservation({
 assert.equal(longOffline.shouldAlert, true);
 assert.match(longOffline.state.alertDedupeKey || "", /^tailscale-device-offline:wife-iphone:/);
 
-const sentState = { ...longOffline.state, smsSentAt: new Date().toISOString() };
+const firstSmsAt = new Date(start.getTime() + 15 * 60_000);
+const sentState = { ...longOffline.state, smsSentAt: firstSmsAt.toISOString() };
 const noDuplicate = evaluateTailscaleDeviceObservation({
   deviceId: "wife-iphone",
   now: new Date(start.getTime() + 20 * 60_000),
@@ -40,16 +42,54 @@ const noDuplicate = evaluateTailscaleDeviceObservation({
   observation: { registered: true, online: false },
 });
 assert.equal(noDuplicate.shouldAlert, false);
+assert.equal(noDuplicate.shouldRemind, false);
+
+const beforeReminder = evaluateTailscaleDeviceObservation({
+  deviceId: "wife-iphone",
+  now: new Date(firstSmsAt.getTime() + 59 * 60_000),
+  offlineThresholdMinutes: 15,
+  reminderDelayMinutes: 60,
+  previous: noDuplicate.state,
+  observation: { registered: true, online: false },
+});
+assert.equal(beforeReminder.shouldRemind, false);
+
+const reminderDue = evaluateTailscaleDeviceObservation({
+  deviceId: "wife-iphone",
+  now: new Date(firstSmsAt.getTime() + 60 * 60_000),
+  offlineThresholdMinutes: 15,
+  reminderDelayMinutes: 60,
+  previous: beforeReminder.state,
+  observation: { registered: true, online: false },
+});
+assert.equal(reminderDue.shouldRemind, true);
+
+const reminderSentState = {
+  ...reminderDue.state,
+  reminderSmsSentAt: new Date(firstSmsAt.getTime() + 60 * 60_000).toISOString(),
+};
+const noThirdSms = evaluateTailscaleDeviceObservation({
+  deviceId: "wife-iphone",
+  now: new Date(firstSmsAt.getTime() + 3 * 60 * 60_000),
+  offlineThresholdMinutes: 15,
+  reminderDelayMinutes: 60,
+  previous: reminderSentState,
+  observation: { registered: true, online: false },
+});
+assert.equal(noThirdSms.shouldAlert, false);
+assert.equal(noThirdSms.shouldRemind, false);
 
 const recovered = evaluateTailscaleDeviceObservation({
   deviceId: "wife-iphone",
   now: new Date(start.getTime() + 25 * 60_000),
   offlineThresholdMinutes: 15,
-  previous: noDuplicate.state,
+  previous: noThirdSms.state,
   observation: { registered: true, online: true, dnsName: "iphone-14.tail11465e.ts.net." },
 });
-assert.equal(recovered.recoveredAlertKey, noDuplicate.state.alertDedupeKey);
+assert.equal(recovered.recoveredAlertKey, noThirdSms.state.alertDedupeKey);
 assert.equal(recovered.state.offlineSince, null);
+assert.equal(recovered.state.smsSentAt, null);
+assert.equal(recovered.state.reminderSmsSentAt, null);
 
 const pendingDesktop = evaluateTailscaleDeviceObservation({
   deviceId: "owner-desktop",

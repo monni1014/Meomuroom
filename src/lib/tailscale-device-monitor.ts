@@ -32,6 +32,7 @@ type DeviceMonitorConfig = {
   enabled: boolean;
   intervalMinutes: number;
   offlineThresholdMinutes: number;
+  reminderDelayMinutes?: number;
   devices: DeviceTarget[];
 };
 
@@ -135,8 +136,12 @@ async function readTailscaleStatus() {
   return JSON.parse(stdout) as TailscaleStatus;
 }
 
-function buildOfflineMessage(label: string, thresholdMinutes: number) {
-  return `[머무룸] ${label} Tailscale이 ${thresholdMinutes}분째 꺼져 있습니다. 앱을 열어 연결을 켜주세요.`;
+function buildOfflineMessage(thresholdMinutes: number) {
+  return `[머무룸] Tailscale이 ${thresholdMinutes}분째 꺼져 있습니다. 앱을 열어 연결을 켜주세요.`;
+}
+
+function buildReminderMessage() {
+  return "[머무룸 재알림] Tailscale이 계속 꺼져 있습니다. 앱을 열어 연결을 켜주세요.";
 }
 
 export async function checkTailscaleDevicesAndAlert(now = new Date()) {
@@ -150,7 +155,7 @@ export async function checkTailscaleDevicesAndAlert(now = new Date()) {
 
   const peers = flattenPeers(status);
   const state = await readJsonSetting<StoredState>(STATE_KEY, {});
-  const results: Array<{ id: string; label: string; status: string; smsSent: boolean }> = [];
+  const results: Array<{ id: string; label: string; status: string; smsSent: boolean; reminderSmsSent: boolean }> = [];
 
   for (const target of config.devices.filter((device) => device.enabled !== false)) {
     const previous = state[target.id];
@@ -160,6 +165,7 @@ export async function checkTailscaleDevicesAndAlert(now = new Date()) {
       deviceId: target.id,
       now,
       offlineThresholdMinutes: config.offlineThresholdMinutes,
+      reminderDelayMinutes: config.reminderDelayMinutes ?? 60,
       previous,
       observation: {
         registered: explicitlyRegistered || Boolean(peer) || previous?.registered === true,
@@ -175,6 +181,7 @@ export async function checkTailscaleDevicesAndAlert(now = new Date()) {
     }
 
     let smsSent = false;
+    let reminderSmsSent = false;
     if (decision.shouldAlert && decision.state.alertDedupeKey) {
       await createAdminAlert({
         type: "TAILSCALE_DEVICE_OFFLINE",
@@ -186,7 +193,7 @@ export async function checkTailscaleDevicesAndAlert(now = new Date()) {
 
       const sms = await sendOperationalAlertSms({
         to: target.recipientPhone,
-        text: buildOfflineMessage(target.label, config.offlineThresholdMinutes),
+        text: buildOfflineMessage(config.offlineThresholdMinutes),
       });
       if (sms.success && !sms.dryRun) {
         state[target.id] = {
@@ -203,11 +210,34 @@ export async function checkTailscaleDevicesAndAlert(now = new Date()) {
       }
     }
 
+    if (decision.shouldRemind) {
+      const reminderSms = await sendOperationalAlertSms({
+        to: target.recipientPhone,
+        text: buildReminderMessage(),
+      });
+      if (reminderSms.success && !reminderSms.dryRun) {
+        state[target.id] = {
+          ...state[target.id],
+          reminderSmsSentAt: now.toISOString(),
+          lastSmsError: null,
+        };
+        reminderSmsSent = true;
+      } else {
+        state[target.id] = {
+          ...state[target.id],
+          lastSmsError: reminderSms.dryRun
+            ? "Solapi real send is disabled for this recipient."
+            : reminderSms.error || "Unknown Solapi reminder error",
+        };
+      }
+    }
+
     results.push({
       id: target.id,
       label: target.label,
       status: !state[target.id].registered ? "UNREGISTERED" : peer?.online ? "ONLINE" : "OFFLINE",
       smsSent,
+      reminderSmsSent,
     });
   }
 
