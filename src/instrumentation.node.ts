@@ -21,6 +21,7 @@ export async function registerNodeInstrumentation() {
   const { syncUpcomingReservationContacts } = await import("@/lib/google-people");
   const { runCompetitorScan } = await import("@/lib/competitor-monitor");
   const { runRpaUiHealthChecks } = await import("@/lib/rpa-ui-monitor");
+  const { checkTailscaleDevicesAndAlert } = await import("@/lib/tailscale-device-monitor");
 
   let running = false;
   let proxyStatusRunning = false;
@@ -30,6 +31,7 @@ export async function registerNodeInstrumentation() {
   let googlePeopleSyncRunning = false;
   let competitorScanRunning = false;
   let rpaUiHealthRunning = false;
+  let tailscaleDeviceMonitorRunning = false;
 
   async function runEmailSync(label: string) {
     if (running) {
@@ -185,6 +187,24 @@ export async function registerNodeInstrumentation() {
     }
   }
 
+  async function runTailscaleDeviceMonitor(label: string) {
+    if (tailscaleDeviceMonitorRunning) {
+      console.log(`[Cron] Previous Tailscale device check is still running. Skipping ${label}.`);
+      return;
+    }
+
+    tailscaleDeviceMonitorRunning = true;
+    try {
+      const result = await checkTailscaleDevicesAndAlert();
+      const summary = result.results.map((item) => `${item.label}=${item.status}`).join(", ");
+      console.log(`[Cron] Tailscale device check ${result.skipped ? "skipped" : "done"} (${label}): ${summary || result.reason || "-"}`);
+    } catch (error) {
+      console.error(`[Cron] Tailscale device check failed (${label}):`, error);
+    } finally {
+      tailscaleDeviceMonitorRunning = false;
+    }
+  }
+
   setTimeout(() => {
     void runEmailSync("startup");
   }, 0);
@@ -209,6 +229,10 @@ export async function registerNodeInstrumentation() {
     void runCompetitorMonitor("startup", "today-next", 120);
   }, 60_000);
 
+  setTimeout(() => {
+    void runTailscaleDeviceMonitor("startup");
+  }, 40_000);
+
   schedule("*/15 * * * * *", async () => {
     await runEmailSync("cron");
   });
@@ -227,6 +251,10 @@ export async function registerNodeInstrumentation() {
 
   schedule("*/5 * * * *", async () => {
     await runGooglePeopleSync("cron");
+  });
+
+  schedule("*/5 * * * *", async () => {
+    await runTailscaleDeviceMonitor("cron");
   });
 
   schedule("0 10,22 * * *", async () => {
@@ -278,5 +306,6 @@ export async function registerNodeInstrumentation() {
   console.log("[Cron] ISP proxy status monitor started (5 minute interval)");
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
   console.log("[Cron] RPA UI health monitor started (02:20/08:20/14:20/20:20 read-only checks)");
+  console.log("[Cron] Tailscale device monitor started (5 minute interval, alert after 15 continuous offline minutes)");
   console.log("[Cron] Competitor monitor started (07:00 today+tomorrow, 12:00/18:00 today+7 days, 23:00 tomorrow through month-end or next-month day 15 in the final 7 days, monthly baseline at 07:00 on day 1)");
 }

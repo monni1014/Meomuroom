@@ -219,3 +219,66 @@ export async function sendTestSms(
     endTime: options.endTime || new Date(startTime.getTime() + 2 * 60 * 60 * 1000),
   }, sendOptions);
 }
+
+export async function sendOperationalAlertSms(input: {
+  to: string;
+  text: string;
+}): Promise<SendResult> {
+  const to = normalizeKoreanPhone(input.to);
+  const text = input.text.trim();
+  const channel: NotificationChannel = "SMS";
+
+  if (!isValidKoreanMobilePhone(to)) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to: "",
+      from: "",
+      text,
+      error: "Operational alert recipient phone number is invalid.",
+    };
+  }
+
+  if (!text) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to,
+      from: "",
+      text,
+      error: "Operational alert text is empty.",
+    };
+  }
+
+  try {
+    let from = await getSenderPhone();
+    const ownerPhone = normalizeKoreanPhone(env("OWNER_PHONE"));
+
+    // A registered alternate sender avoids sending an operational warning
+    // from and to the same phone number when the selected sender is the wife.
+    if (from === to && isValidKoreanMobilePhone(ownerPhone) && ownerPhone !== to) {
+      from = ownerPhone;
+    }
+
+    if (!isRealSendEnabledFor(to)) {
+      console.log(`[Solapi operational dry-run] from=${from} to=${to} text=${text}`);
+      return { success: true, dryRun: true, channel, to, from, text };
+    }
+
+    const response = await getSolapiService().send({ to, from, text }, { showMessageList: true });
+    const messageId = response?.messageList?.[0]?.messageId || response?.groupInfo?.groupId || null;
+    return { success: true, dryRun: false, channel, to, from, text, messageId };
+  } catch (error) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to,
+      from: "",
+      text,
+      error: getSolapiErrorMessage(error),
+    };
+  }
+}
