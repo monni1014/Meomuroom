@@ -36,7 +36,7 @@ export function buildReservationNotificationFailureAlert(input: ReservationFailu
   const customerName = input.customerName?.trim() || "이름 없음";
   const reason = input.error?.trim() || "문자 수신 실패";
   return {
-    title: `문자 수신 실패 · ${roomName}`,
-    message: `${customerName} · ${formatReservationTime(input.startTime, input.endTime)} 예약\n사유: ${reason}`,
+    title: "문자 수신 실패",
+    message: `${roomName}\n${customerName} · ${formatReservationTime(input.startTime, input.endTime)} 예약\n사유: ${reason}`,
   };
 }
