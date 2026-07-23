@@ -15,6 +15,30 @@ type RangeOptions = {
   endKey?: string;
 };
 
+export function resolveCompetitorStartupMode(
+  date = new Date(),
+): Exclude<CompetitorScanMode, "range"> {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    day: "numeric",
+    hour: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const day = Number(parts.find((part) => part.type === "day")?.value || 0);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+
+  if (day === 1 && hour >= 7) return "monthly";
+  if (hour >= 23) return "night-month-horizon";
+  if (hour >= 12) return "today-plus-seven";
+  return "today-next";
+}
+
+export function resolveCancellationConfirmationRange(dateKeys: string[]) {
+  const sorted = [...new Set(dateKeys.filter((dateKey) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey)))].sort();
+  if (sorted.length === 0) return null;
+  return { startKey: sorted[0], endKey: sorted.at(-1)! };
+}
+
 function kstDateKey(date = new Date()) {
   return date.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }

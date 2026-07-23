@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { resolveCompetitorScanRange } from "../src/lib/competitor-scan-range.ts";
+import {
+  resolveCancellationConfirmationRange,
+  resolveCompetitorScanRange,
+  resolveCompetitorStartupMode,
+} from "../src/lib/competitor-scan-range.ts";
 
 const today = "2026-07-21";
 
@@ -8,6 +12,17 @@ assert.deepEqual(
   { startKey: "2026-07-21", endKey: "2026-07-28" },
   "The noon/evening scan must include today and the following seven days.",
 );
+
+assert.equal(resolveCompetitorStartupMode(new Date("2026-07-23T14:01:00.000Z")), "night-month-horizon");
+assert.equal(resolveCompetitorStartupMode(new Date("2026-07-23T09:01:00.000Z")), "today-plus-seven");
+assert.equal(resolveCompetitorStartupMode(new Date("2026-07-22T22:01:00.000Z")), "today-next");
+assert.equal(resolveCompetitorStartupMode(new Date("2026-07-31T22:01:00.000Z")), "monthly");
+
+assert.deepEqual(
+  resolveCancellationConfirmationRange(["2026-07-26", "2026-07-24", "2026-07-26"]),
+  { startKey: "2026-07-24", endKey: "2026-07-26" },
+);
+assert.equal(resolveCancellationConfirmationRange([]), null);
 
 assert.deepEqual(
   resolveCompetitorScanRange({ mode: "night-month-horizon" }, today),

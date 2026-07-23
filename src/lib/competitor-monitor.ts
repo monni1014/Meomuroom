@@ -5,6 +5,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createAdminAlert, resolveAdminAlertsByType } from "@/lib/admin-alerts";
 import {
+  resolveCancellationConfirmationRange,
   resolveCompetitorScanRange,
   type CompetitorScanMode,
 } from "@/lib/competitor-scan-range";
@@ -786,13 +787,11 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
 async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
   const range = resolveCompetitorScanRange(options);
 
-  // The scanner itself has a 12-minute hard timeout. Any older RUNNING row
-  // belongs to an interrupted server/request and must not remain active.
+  // This function runs only after this process acquired the exclusive scan lock.
+  // Therefore every pre-existing RUNNING row belongs to an interrupted process
+  // and can be closed immediately instead of lingering for 15 minutes.
   await prisma.competitorScan.updateMany({
-    where: {
-      status: "RUNNING",
-      startedAt: { lt: new Date(Date.now() - STALE_SCAN_MINUTES * 60_000) },
-    },
+    where: { status: "RUNNING" },
     data: {
       status: "FAILED",
       error: "Competitor scan was interrupted before completion.",
@@ -826,15 +825,50 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
     const changes = await persistScannerResult(scan.id, scannerResult);
     await persistScannerEvidence(scan.id, scannerResult);
     await resolveRecoveredEvidence(scannerResult);
-    const uncertainSlots = scannerResult.observations.filter(
+
+    const pendingCancellationDates = await prisma.competitorSlot.findMany({
+      where: {
+        dateKey: { gte: range.startKey, lte: range.endKey },
+        state: "BOOKED",
+        pendingState: "AVAILABLE",
+        pendingCount: { gte: 1 },
+      },
+      distinct: ["dateKey"],
+      orderBy: { dateKey: "asc" },
+      select: { dateKey: true },
+    });
+    const confirmationRange = resolveCancellationConfirmationRange(
+      pendingCancellationDates.map((item) => item.dateKey),
+    );
+    let confirmationResult: ScannerResult | null = null;
+    let confirmationChanges = { changedSlots: 0, bookingEvents: 0, cancellationEvents: 0 };
+    if (confirmationRange) {
+      console.log(
+        `[Competitor] Confirming possible cancellations ${confirmationRange.startKey}..${confirmationRange.endKey}.`,
+      );
+      confirmationResult = await executeScanner(confirmationRange.startKey, confirmationRange.endKey);
+      confirmationChanges = await persistScannerResult(scan.id, confirmationResult);
+      await persistScannerEvidence(scan.id, confirmationResult);
+      await resolveRecoveredEvidence(confirmationResult);
+    }
+
+    const allObservations = [
+      ...scannerResult.observations,
+      ...(confirmationResult?.observations || []),
+    ];
+    const allErrors = [
+      ...scannerResult.errors,
+      ...(confirmationResult?.errors || []),
+    ];
+    const uncertainSlots = allObservations.filter(
       (observation) => observation.observedState === "UNKNOWN",
     ).length;
-    const status = scannerResult.observations.length === 0
+    const status = allObservations.length === 0
       ? "FAILED"
-      : scannerResult.errors.length > 0 || uncertainSlots > 0
+      : allErrors.length > 0 || uncertainSlots > 0
         ? "PARTIAL"
         : "COMPLETED";
-    const issueMessages = scannerResult.errors.map((item) => `${item.competitorId}: ${item.message}`);
+    const issueMessages = allErrors.map((item) => `${item.competitorId}: ${item.message}`);
     if (uncertainSlots > 0) issueMessages.push(`${uncertainSlots} slot(s) need screenshot review`);
     const error = issueMessages.length > 0 ? issueMessages.join(" / ").slice(0, 2000) : null;
 
@@ -842,8 +876,8 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
       where: { id: scan.id },
       data: {
         status,
-        checkedSlots: scannerResult.observations.length,
-        changedSlots: changes.changedSlots,
+        checkedSlots: allObservations.length,
+        changedSlots: changes.changedSlots + confirmationChanges.changedSlots,
         error,
         finishedAt: new Date(),
       },
@@ -865,13 +899,13 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
       skipped: false,
       scanId: scan.id,
       status,
-      checkedSlots: scannerResult.observations.length,
-      changedSlots: changes.changedSlots,
-      bookingEvents: changes.bookingEvents,
-      cancellationEvents: changes.cancellationEvents,
+      checkedSlots: allObservations.length,
+      changedSlots: changes.changedSlots + confirmationChanges.changedSlots,
+      bookingEvents: changes.bookingEvents + confirmationChanges.bookingEvents,
+      cancellationEvents: changes.cancellationEvents + confirmationChanges.cancellationEvents,
       startKey: range.startKey,
       endKey: range.endKey,
-      errors: scannerResult.errors,
+      errors: allErrors,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

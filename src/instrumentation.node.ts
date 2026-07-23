@@ -20,6 +20,7 @@ export async function registerNodeInstrumentation() {
   const { runReservationContactPreflight } = await import("@/lib/reservation-contact-preflight");
   const { syncUpcomingReservationContacts } = await import("@/lib/google-people");
   const { runCompetitorScan } = await import("@/lib/competitor-monitor");
+  const { resolveCompetitorStartupMode } = await import("@/lib/competitor-scan-range");
   const { runRpaUiHealthChecks } = await import("@/lib/rpa-ui-monitor");
   const { checkTailscaleDevicesAndAlert } = await import("@/lib/tailscale-device-monitor");
 
@@ -226,7 +227,8 @@ export async function registerNodeInstrumentation() {
   }, 30_000);
 
   setTimeout(() => {
-    void runCompetitorMonitor("startup", "today-next", 120);
+    const startupMode = resolveCompetitorStartupMode();
+    void runCompetitorMonitor(`startup catch-up (${startupMode})`, startupMode, 120);
   }, 60_000);
 
   setTimeout(() => {

@@ -297,7 +297,6 @@ export async function getCompetitorSnapshots(year: number, month: number) {
     days,
     cancellations: groupedEvents.filter((event) => (
       event.eventType === "CANCELLED"
-      && event.feeRate !== 0
       && event.dateKey >= startKey
       && event.dateKey <= endKey
     )).map((event) => ({

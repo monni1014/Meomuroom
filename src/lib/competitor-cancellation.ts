@@ -47,9 +47,11 @@ export function cancellationDetectedDateLabel(occurredAt: string | Date) {
 }
 
 export function shouldDisplayZeroFeeCancellationAsNew(
-  competitorId: string,
-  durationHours: number,
+  _competitorId: string,
+  _durationHours: number,
   feeRate: number | null,
 ) {
-  return competitorId.startsWith("triground-") && durationHours === 1 && feeRate === 0;
+  // 취소수수료와 매출 집계 여부는 별개다. 수수료가 0원이어도
+  // 기존 예약이 사라졌다는 운영 변화는 반드시 신규 취소로 보여준다.
+  return feeRate === 0;
 }

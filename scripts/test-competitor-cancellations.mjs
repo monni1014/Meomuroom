@@ -33,8 +33,9 @@ assert.equal(
 );
 assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-a", 1, 0), true);
 assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-b", 1, 0), true);
-assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-b", 2, 0), false);
-assert.equal(shouldDisplayZeroFeeCancellationAsNew("synergy", 1, 0), false);
+assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-b", 2, 0), true);
+assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-a", 3, 0), true);
+assert.equal(shouldDisplayZeroFeeCancellationAsNew("synergy", 1, 0), true);
 assert.equal(shouldDisplayZeroFeeCancellationAsNew("triground-b", 1, 50), false);
 
 console.log("Competitor cancellation tests passed.");
