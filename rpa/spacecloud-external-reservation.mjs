@@ -11,7 +11,12 @@ import {
   markSelfHealingControlFailed,
   markSelfHealingControlVerified,
 } from "./lib/self-healing-controls.mjs";
-import { spaceCloudBrowserOptions } from "./lib/spacecloud-session.mjs";
+import {
+  acquireSpaceCloudSessionUseLock,
+  checkpointSpaceCloudSession,
+  ensureSpaceCloudAccessToken,
+  spaceCloudBrowserOptions,
+} from "./lib/spacecloud-session.mjs";
 import { createStepTimer } from "./lib/step-timer.mjs";
 
 const TEXT = {
@@ -183,9 +188,21 @@ function resetSpaceCloudMutationError(page) {
   page.__spaceCloudLastApiError = null;
 }
 
-function throwIfSpaceCloudMutationFailed(page, actionLabel) {
-  const apiError = page.__spaceCloudLastApiError;
+async function throwIfSpaceCloudMutationFailed(page, actionLabel) {
+  let apiError = page.__spaceCloudLastApiError;
   if (!apiError) return;
+
+  // SpaceCloud's own client renews an expired access token after the first
+  // 401, then retries the exact request. Give that official retry time to
+  // finish and ignore the first 401 only when the retry really succeeds.
+  if (apiError.status === 401 || apiError.status === 403) {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(200);
+      apiError = page.__spaceCloudLastApiError;
+      if (!apiError) return;
+    }
+  }
 
   if (
     actionLabel === "external reservation save"
@@ -1870,7 +1887,7 @@ async function claimManualExternalReservation(page, {
   resetSpaceCloudMutationError(page);
   await clickModalTextButton(page, TEXT.confirm, 20_000);
   await humanDelay(page, "after SpaceCloud manual block identity save", 700, 1600);
-  throwIfSpaceCloudMutationFailed(page, "manual block identity save");
+  await throwIfSpaceCloudMutationFailed(page, "manual block identity save");
 
   await verifyExternalReservationAdded(page, {
     room,
@@ -1957,7 +1974,7 @@ async function resizeExternalReservation(page, {
   resetSpaceCloudMutationError(page);
   await clickModalTextButton(page, TEXT.confirm, 20_000);
   await humanDelay(page, "after SpaceCloud grouped reservation resize", 700, 1600);
-  throwIfSpaceCloudMutationFailed(page, "external reservation resize");
+  await throwIfSpaceCloudMutationFailed(page, "external reservation resize");
 
   await verifyExternalReservationAdded(page, {
     room,
@@ -2075,7 +2092,7 @@ async function addExternalReservation(page, {
   resetSpaceCloudMutationError(page);
   await clickModalTextButton(page, TEXT.confirm, 20_000);
   await humanDelay(page, "after SpaceCloud external save response", 500, 1000);
-  throwIfSpaceCloudMutationFailed(page, "external reservation save");
+  await throwIfSpaceCloudMutationFailed(page, "external reservation save");
   try {
     await page.waitForFunction(
       () => !(document.body?.innerText || "").includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c \ucd94\uac00"),
@@ -2503,7 +2520,7 @@ async function deleteExternalReservation(page, {
   }
 
   await humanDelay(page, "after SpaceCloud external delete", 900, 2200);
-  throwIfSpaceCloudMutationFailed(page, "external reservation delete");
+  await throwIfSpaceCloudMutationFailed(page, "external reservation delete");
   await saveScreenshot(page, "spacecloud-external-after-delete");
   timingStep("external-reservation-deleted");
 
@@ -2621,15 +2638,23 @@ async function main() {
   console.log(`[SpaceCloud network] Use ${browserOptions.useProxy ? "proxy" : "direct"} session path.`);
   let browser;
   let page;
+  let context;
+  let releaseSessionLock = async () => {};
+  let sessionReady = false;
 
   try {
+    releaseSessionLock = await acquireSpaceCloudSessionUseLock(
+      "SpaceCloud external reservation session",
+    );
     browser = await launchRpaBrowser(browserOptions);
-    const context = await newRpaContext(browser, {
+    context = await newRpaContext(browser, {
       storageState: spaceCloudStorageStatePath,
       blockHeavyResources: true,
       rpaRole: "spacecloud",
     });
     page = await context.newPage();
+    await ensureSpaceCloudAccessToken(context);
+    sessionReady = true;
     timer.mark("browser-ready", { headless, reuse: browserOptions.reuse });
     if (inspectSaveRequest) {
       await page.route(
@@ -2699,12 +2724,23 @@ async function main() {
       const request = response.request();
       if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) {
         console.log(`[SpaceCloud response] ${response.status()} ${response.url().slice(0, 300)}`);
+        const currentError = page.__spaceCloudLastApiError;
+        if (
+          response.status() >= 200
+          && response.status() < 300
+          && currentError?.method === request.method()
+          && currentError?.url === response.url()
+        ) {
+          page.__spaceCloudLastApiError = null;
+          console.log(`[SpaceCloud session] Official retry succeeded after ${currentError.status}; cleared the transient authorization error.`);
+        }
         if (response.status() >= 400) {
           const body = await response.text().catch(() => "");
           page.__spaceCloudLastErrorBody = body;
           if (/^https:\/\/api\.spacecloud\.kr\/partner\//i.test(response.url())) {
             page.__spaceCloudLastApiError = {
               status: response.status(),
+              method: request.method(),
               url: response.url(),
               body,
             };
@@ -2844,7 +2880,13 @@ async function main() {
     if (evidencePath) console.error(`RPA_EVIDENCE_PATH=${evidencePath}`);
     throw error;
   } finally {
+    if (context && sessionReady) {
+      await checkpointSpaceCloudSession(context, "external-reservation-rpa").catch((error) => {
+        console.error(`[SpaceCloud session] Could not save the renewed session: ${error instanceof Error ? error.message : error}`);
+      });
+    }
     await browser?.close();
+    await releaseSessionLock();
     await releaseLock();
   }
 }

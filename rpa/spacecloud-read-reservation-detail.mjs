@@ -4,7 +4,12 @@ import { parseArgs, requiredArg } from "./lib/cli.mjs";
 import { humanDelay, humanMouseMove } from "./lib/human.mjs";
 import { spaceCloudStorageStatePath } from "./lib/paths.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
-import { spaceCloudBrowserOptions } from "./lib/spacecloud-session.mjs";
+import {
+  acquireSpaceCloudSessionUseLock,
+  checkpointSpaceCloudSession,
+  ensureSpaceCloudAccessToken,
+  spaceCloudBrowserOptions,
+} from "./lib/spacecloud-session.mjs";
 
 function normalizeText(text) {
   return text.replace(/\r/g, "").replace(/[ \t]+/g, " ").trim();
@@ -166,16 +171,24 @@ async function main() {
   const headless = resolveRpaHeadless();
   const browserOptions = spaceCloudBrowserOptions(headless);
   console.log(`[SpaceCloud network] Use ${browserOptions.useProxy ? "proxy" : "direct"} session path.`);
-  const browser = await launchRpaBrowser(browserOptions);
+  let browser;
+  let context;
   let page;
+  let sessionReady = false;
+  const releaseSessionLock = await acquireSpaceCloudSessionUseLock(
+    "SpaceCloud reservation detail session",
+  );
 
   try {
-    const context = await newRpaContext(browser, {
+    browser = await launchRpaBrowser(browserOptions);
+    context = await newRpaContext(browser, {
       storageState: spaceCloudStorageStatePath,
       blockHeavyResources: true,
       rpaRole: "spacecloud",
     });
     page = await context.newPage();
+    await ensureSpaceCloudAccessToken(context);
+    sessionReady = true;
 
     console.log(`Open SpaceCloud detail: ${url}`);
     await page.goto(url, { timeout: 60_000, waitUntil: "domcontentloaded" });
@@ -237,7 +250,13 @@ async function main() {
     if (evidencePath) console.error(`RPA_EVIDENCE_PATH=${evidencePath}`);
     throw error;
   } finally {
-    await browser.close();
+    if (context && sessionReady) {
+      await checkpointSpaceCloudSession(context, "reservation-detail-rpa").catch((error) => {
+        console.error(`[SpaceCloud session] Could not save the renewed session: ${error instanceof Error ? error.message : error}`);
+      });
+    }
+    await browser?.close();
+    await releaseSessionLock();
   }
 }
 
