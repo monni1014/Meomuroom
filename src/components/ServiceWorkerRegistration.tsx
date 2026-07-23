@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-const SERVICE_WORKER_URL = "/sw.js?v=20260723-4";
+const SERVICE_WORKER_URL = "/sw.js?v=20260723-5";
 
 export function ServiceWorkerRegistration() {
   useEffect(() => {
