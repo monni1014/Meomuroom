@@ -21,7 +21,7 @@ self.addEventListener("push", (event) => {
     icon: "/icon-192.png",
     badge: self.NOTIFICATION_LOGO_BADGE,
     silent: false,
-    vibrate: [300, 150, 300],
+    vibrate: [800, 250, 800],
     tag: payload.tag || "memoroom-message-status",
     renotify: true,
     data: { url: payload.url || "/messages" },
