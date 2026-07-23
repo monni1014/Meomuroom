@@ -54,6 +54,11 @@ const outsideBounds = rankControlCandidates([
 });
 assert.equal(outsideBounds.winner, null);
 
+const belowViewport = rankControlCandidates([
+  candidate({ y: 1_300, yRatio: 1, text: "저장" }),
+], definition);
+assert.equal(belowViewport.winner?.exactPrimary, true);
+
 const excluded = rankControlCandidates([candidate({ text: "저장 취소" })], definition);
 assert.equal(excluded.winner, null);
 

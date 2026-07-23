@@ -282,9 +282,7 @@ async function collectCandidates(page, marker) {
         && style.display !== "none"
         && Number(style.opacity || 1) > 0.05
         && rect.width > 0
-        && rect.height > 0
-        && rect.bottom >= 0
-        && rect.top <= window.innerHeight;
+        && rect.height > 0;
     }
 
     const selectors = "button,a,[role='button'],input[type='button'],input[type='submit'],[onclick],[data-testid],div,span";
