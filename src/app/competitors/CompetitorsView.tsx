@@ -227,6 +227,7 @@ function dayBookingMetrics(
   const isTriground = competitorId === "triground-a" || competitorId === "triground-b";
   let billableHours = 0;
   let revenue = 0;
+  let cancellationRevenue = 0;
   for (const segment of segments) {
     const duration = segment.endHour - segment.startHour + 1;
     if (segment.firstDetectedAt) {
@@ -252,11 +253,13 @@ function dayBookingMetrics(
     const feeRate = cancellation.feeRate;
     billableHours += cancellationEquivalentHours(duration, feeRate);
     if (isTriground && duration > 1) {
-      revenue += trigroundCancellationRevenue(duration, feeRate);
+      const feeRevenue = trigroundCancellationRevenue(duration, feeRate);
+      cancellationRevenue += feeRevenue;
+      revenue += feeRevenue;
     }
   }
 
-  return { billableHours, revenue, labels, firstDetectedLabels };
+  return { billableHours, revenue, cancellationRevenue, labels, firstDetectedLabels };
 }
 
 function headerClass(competitorId: string) {
@@ -306,7 +309,13 @@ function cancellationCellLabel(cancellation: CancellationSnapshot, hour: number)
   const isEnd = hour === cancellation.endHour - 1;
   if (isStart && isEnd) return `취소 ${detectedDate}`;
   if (isStart) return `취소 ${detectedDate}`;
-  if (isEnd) return feeRate;
+  if (isEnd) {
+    const duration = cancellation.endHour - cancellation.startHour;
+    const feeRevenue = cancellation.competitorId.startsWith("triground-")
+      ? trigroundCancellationRevenue(duration, cancellation.feeRate)
+      : 0;
+    return feeRevenue > 0 ? `${feeRate}·${feeRevenue.toLocaleString()}` : feeRate;
+  }
   return "";
 }
 
@@ -1048,8 +1057,9 @@ export default function CompetitorsView({
             return {
               billableHours: total.billableHours + metrics.billableHours,
               revenue: total.revenue + metrics.revenue,
+              cancellationRevenue: total.cancellationRevenue + metrics.cancellationRevenue,
             };
-          }, { billableHours: 0, revenue: 0 });
+          }, { billableHours: 0, revenue: 0, cancellationRevenue: 0 });
           const isTriground = competitor.id === "triground-a" || competitor.id === "triground-b";
           return (
             <section key={competitor.id} className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -1222,7 +1232,11 @@ export default function CompetitorsView({
                     <td className="sticky left-0 z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle">월 총합</td>
                     <td className={cn("sticky z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle", MONTHLY_GRID_TOTAL_LEFT_CLASS)}>{monthMetrics.billableHours}</td>
                     <td colSpan={2} className="border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle tabular-nums">{isTriground ? `${monthMetrics.revenue.toLocaleString()}원` : ""}</td>
-                    <td colSpan={HOURS.length - 2} className="border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle">{isTriground ? "유료 예약 시간 합계" : "예약 확인 시간 합계"}</td>
+                    <td colSpan={HOURS.length - 2} className="border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle">
+                      {isTriground
+                        ? `예약 매출 ${(monthMetrics.revenue - monthMetrics.cancellationRevenue).toLocaleString()}원 + 취소수수료 ${monthMetrics.cancellationRevenue.toLocaleString()}원`
+                        : "예약 확인 시간 합계"}
+                    </td>
                     <td className={cn("sticky right-0 z-20 border border-slate-400 bg-slate-100 px-1 py-0.5 text-center align-middle", MONTHLY_GRID_END_DIVIDER_CLASS)}>자동 기록</td>
                   </tr></tfoot>
                 </table>
