@@ -919,9 +919,10 @@ async function assertSlotPanelState(page, startHour, endHour, mode) {
 }
 
 async function clickSlotPanelSave(page) {
-  const control = await locateSelfHealingControl(page, NAVER_SLOT_SAVE_CONTROL);
+  let control = await locateSelfHealingControl(page, NAVER_SLOT_SAVE_CONTROL);
   await control.locator.scrollIntoViewIfNeeded();
   await quickSlotDelay(page, "before save button", 220, 520);
+  control = await locateSelfHealingControl(page, NAVER_SLOT_SAVE_CONTROL);
   await humanClickElement(page, control.locator, "slot panel save");
   await quickSlotDelay(page, "after save button", 700, 1500);
 

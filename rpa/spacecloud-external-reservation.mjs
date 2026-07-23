@@ -916,8 +916,8 @@ async function getExternalReservationModalBounds(page) {
 }
 
 async function clickAddReservation(page, { healthCheck = false } = {}) {
-  let control = await locateSelfHealingControl(page, SPACECLOUD_ADD_RESERVATION_CONTROL, { healthCheck });
   await humanDelay(page, "before SpaceCloud add reservation click", 500, 1200);
+  let control = await locateSelfHealingControl(page, SPACECLOUD_ADD_RESERVATION_CONTROL, { healthCheck });
   await humanClickElement(page, control.locator, "SpaceCloud add reservation");
 
   if (!(await waitForAddReservationModal(page, 5_000))) {
@@ -1344,11 +1344,11 @@ async function clickModalTextButton(page, text, timeout = 20_000) {
   if (text === TEXT.confirm) {
     const bounds = await getExternalReservationModalBounds(page);
     if (!bounds) throw new Error("[RPA_UI_CHANGE] Could not verify the SpaceCloud external reservation modal bounds.");
+    await humanDelay(page, `before modal ${text} click`, 350, 900);
     const control = await locateSelfHealingControl(page, {
       ...SPACECLOUD_MODAL_CONFIRM_CONTROL,
       bounds,
     });
-    await humanDelay(page, `before modal ${text} click`, 350, 900);
     await humanClickElement(page, control.locator, `modal ${text}`);
     await humanDelay(page, `after modal ${text} click`, 500, 1200);
     return;
