@@ -95,6 +95,29 @@ when the route is unavailable does it leave a recovery request. A separate SYSTE
 restarts only the Tailscale service, with a 10-minute recovery cooldown. It does
 not restart the laptop, server, app, or RPA worker.
 
+### Pending mobile connectivity checks
+
+The following items were explicitly deferred on 2026-07-23 and require real
+device verification before they can be marked complete:
+
+- Distinguish Tailscale devices as iPhone, Galaxy, laptop, and desktop. The
+  wife's iPhone should use its own invited Tailscale user/device identity.
+- Add a server-side offline monitor that sends a Solapi fallback SMS containing
+  the affected device name after repeated offline observations. The polling
+  interval and offline grace period still need to be chosen so normal phone
+  sleep or network handoffs do not trigger false alarms.
+- Keep this server-side device warning separate from the Windows `NoState`
+  watchdog above, which only repairs the local Windows Tailscale service.
+- Galaxy Web Push arrives, but vibration was not felt even with the phone in
+  vibration mode and Memoroom notifications enabled. The service worker already
+  uses `silent: false` and `vibrate: [300, 150, 300]`; next checks are the old
+  service-worker/browser notification channel, Samsung category vibration, and
+  battery-optimization exemptions.
+- iPhone Web Push vibration is controlled by iOS notification and system haptic
+  settings; a web app cannot require a custom vibration pattern.
+- The current high-resolution monochrome Memoroom notification badge is the
+  approved final icon. Do not resize it again while investigating vibration.
+
 ## Database backup
 
 `memoroom-db-backup.timer` creates an online SQLite backup four times per day
