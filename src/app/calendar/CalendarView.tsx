@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
@@ -142,6 +142,7 @@ export default function CalendarPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [roomFilter, setRoomFilter] = useState<RoomFilter>(initialRoomFilter);
+  const [expandedReservationId, setExpandedReservationId] = useState<string | null>(null);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
   const [editId, setEditId] = useState<string | null>(null);
@@ -231,9 +232,9 @@ export default function CalendarPage() {
     ? reservations 
     : reservations.filter((res) => res.roomName === roomFilter);
 
-  const selectedReservations = filteredReservations.filter((res) =>
-    isSameDay(new Date(res.startTime), selectedDate)
-  );
+  const selectedReservations = filteredReservations
+    .filter((res) => isSameDay(new Date(res.startTime), selectedDate))
+    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
   const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -466,6 +467,33 @@ export default function CalendarPage() {
     }
   };
 
+  const getRoomCalendarStyle = (room: string, isCancelled: boolean) => {
+    if (isCancelled) return "bg-slate-100 text-slate-400 line-through";
+    switch (room) {
+      case "머무룸1":
+        return "bg-sky-100 text-sky-800";
+      case "머무룸2":
+        return "bg-purple-100 text-purple-800";
+      case "머무룸3":
+        return "bg-orange-100 text-orange-800";
+      default:
+        return "bg-slate-100 text-slate-700";
+    }
+  };
+
+  const getRoomAccentStyle = (room: string) => {
+    switch (room) {
+      case "머무룸1":
+        return "border-l-sky-400";
+      case "머무룸2":
+        return "border-l-purple-400";
+      case "머무룸3":
+        return "border-l-orange-400";
+      default:
+        return "border-l-slate-300";
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 space-y-6 pb-24 max-w-7xl mx-auto w-full">
       <header className="pt-8 pb-4 flex justify-between items-center gap-3 flex-wrap">
@@ -513,7 +541,7 @@ export default function CalendarPage() {
       )}
 
       {/* Room Filter Tabs */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {ROOM_FILTERS.map((room) => (
           <button
             key={room}
@@ -522,7 +550,7 @@ export default function CalendarPage() {
               replaceCalendarState(selectedDate, room);
             }}
             className={cn(
-              "px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border",
+              "shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border",
               roomFilter === room
                 ? "bg-indigo-600 text-white border-indigo-600 shadow-md"
                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
@@ -538,13 +566,26 @@ export default function CalendarPage() {
       {/* Calendar Grid Section */}
       <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col">
         {/* Calendar Header Nav */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-4 sm:mb-6">
           <button onClick={prevMonth} className="p-1 rounded-full hover:bg-slate-50 active:scale-95 transition-all">
             <ChevronLeft className="w-6 h-6 text-slate-600" />
           </button>
-          <h2 className="text-lg font-semibold text-slate-800">
-            {format(currentDate, "yyyy년 MM월")}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-bold text-slate-800 sm:text-lg">
+              {format(currentDate, "yyyy년 M월")}
+            </h2>
+            <button
+              onClick={() => {
+                const today = new Date();
+                setCurrentDate(today);
+                setSelectedDate(today);
+                replaceCalendarState(today, roomFilter);
+              }}
+              className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200"
+            >
+              오늘
+            </button>
+          </div>
           <button onClick={nextMonth} className="p-1 rounded-full hover:bg-slate-50 active:scale-95 transition-all">
             <ChevronRight className="w-6 h-6 text-slate-600" />
           </button>
@@ -577,9 +618,9 @@ export default function CalendarPage() {
             const isSameMonthOfActive = isSameMonth(day, currentDate);
 
             // Filter reservations for this day
-            const dayReservations = filteredReservations.filter((res) =>
-              isSameDay(new Date(res.startTime), day)
-            );
+            const dayReservations = filteredReservations
+              .filter((res) => isSameDay(new Date(res.startTime), day))
+              .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
             
             const hasUnpaid = dayReservations.some((res) => !res.isPaid && res.status !== "CANCELLED");
             const hasUnpaidExtra = dayReservations.some((res) => res.usageLog && (res.usageLog.extraPrice ?? 0) > 0 && !res.usageLog.isExtraPaid && res.status !== "CANCELLED");
@@ -592,16 +633,16 @@ export default function CalendarPage() {
                   replaceCalendarState(day, roomFilter);
                 }}
                 className={cn(
-                  "flex flex-col items-center justify-between p-1.5 min-h-[55px] rounded-xl relative transition-all active:scale-95",
+                  "flex min-h-[72px] flex-col items-stretch rounded-lg p-0.5 relative transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
                   isSelected
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-100"
+                    ? "bg-indigo-50 text-indigo-800 ring-2 ring-inset ring-indigo-500 sm:bg-indigo-600 sm:text-white sm:shadow-md sm:shadow-indigo-100"
                     : isToday
                     ? "bg-indigo-50 text-indigo-700"
                     : "hover:bg-slate-50 text-slate-700",
                   !isSameMonthOfActive && "opacity-30"
                 )}
               >
-                <div className="relative inline-flex items-center">
+                <div className="relative inline-flex items-center justify-center">
                   <span className={cn("text-sm font-semibold", (day.getDay() === 0 || day.getDay() === 6) && !isSelected && "text-rose-500")}>
                     {format(day, "d")}
                   </span>
@@ -613,8 +654,36 @@ export default function CalendarPage() {
                   )}
                 </div>
                 
-                {/* Dots container for day's reservations */}
-                <div className="flex gap-0.5 justify-center h-2 mt-1">
+                {/* 모바일은 타임트리처럼 일정 내용을, 넓은 화면은 기존 점 표시를 사용 */}
+                <div data-testid="mobile-month-events" className="mt-1 flex min-w-0 flex-col gap-0.5 sm:hidden">
+                  {dayReservations.slice(0, 2).map((res) => {
+                    const startParts = getKstDateParts(new Date(res.startTime));
+                    const clock = `${String(startParts.hour).padStart(2, "0")}:${String(startParts.minute).padStart(2, "0")}`;
+                    const compactClock = startParts.minute === 0
+                      ? String(startParts.hour)
+                      : `${startParts.hour}:${String(startParts.minute).padStart(2, "0")}`;
+                    const isCancelled = res.status === "CANCELLED";
+                    return (
+                      <span
+                        key={res.id}
+                        className={cn(
+                          "block min-w-0 truncate rounded px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight",
+                          getRoomCalendarStyle(res.roomName, isCancelled)
+                        )}
+                        title={`${clock} ${res.roomName} ${res.customerName ?? "이름 미확인"}`}
+                      >
+                        {compactClock} {res.customerName ?? "미확인"}
+                      </span>
+                    );
+                  })}
+                  {dayReservations.length > 2 && (
+                    <span className="px-1 text-left text-[9px] font-bold leading-none text-slate-400">
+                      +{dayReservations.length - 2}건
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-1 hidden h-2 justify-center gap-0.5 sm:flex">
                   {dayReservations.map((res) => {
                     const dotClass =
                       res.status === "CANCELLED" ? "bg-slate-300" :
@@ -661,10 +730,15 @@ export default function CalendarPage() {
               const formatTime = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
               const displayEndTime = extendedEndClock(start, end);
               const isCancelled = res.status === "CANCELLED";
+              const isExpanded = expandedReservationId === res.id;
+              const headCount = res.usageLog?.headCount || 1;
 
               return (
                 <div
                   key={res.id}
+                  data-testid="mobile-agenda-card"
+                  aria-expanded={isExpanded}
+                  onClick={() => setExpandedReservationId(isExpanded ? null : res.id)}
                   onDoubleClick={() => {
                     replaceCalendarState(selectedDate, roomFilter);
                     const params = new URLSearchParams({
@@ -676,11 +750,38 @@ export default function CalendarPage() {
                   }}
                   title="더블클릭하면 이용현황에서 수정"
                   className={cn(
-                    "relative flex flex-col gap-3 rounded-xl border p-4 cursor-pointer select-none sm:flex-row sm:items-start sm:justify-between sm:gap-2",
+                    "relative flex flex-col gap-3 rounded-xl border border-l-4 p-3 cursor-pointer select-none sm:p-4 md:flex-row md:items-start md:justify-between md:gap-2",
+                    getRoomAccentStyle(res.roomName),
                     isCancelled ? "bg-slate-100 border-slate-200" : "bg-slate-50 border-slate-100 hover:border-indigo-200"
                   )}
                 >
-                  <div className="min-w-0 flex-1 space-y-3">
+                  <div className="flex min-w-0 items-center gap-3 md:hidden">
+                    <div className="w-[58px] shrink-0 text-center">
+                      <strong className={cn("block text-sm", isCancelled ? "text-slate-400 line-through" : "text-slate-900")}>{formatTime(start)}</strong>
+                      <span className="text-[10px] font-medium text-slate-400">~ {displayEndTime}</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold", getRoomCalendarStyle(res.roomName, isCancelled))}>
+                          {res.roomName}
+                        </span>
+                        <strong className={cn("truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
+                          {res.customerName ?? "이름 미확인"}
+                        </strong>
+                      </div>
+                      <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
+                        <span>{getSourceDisplay(res.source)}</span>
+                        <span>·</span>
+                        <span>{headCount}명</span>
+                        {res.price > 0 && <><span>·</span><span>{res.price.toLocaleString()}원</span></>}
+                        {isCancelled && <span className="font-bold text-slate-500">· 취소</span>}
+                        {!isCancelled && !res.isPaid && <span className="font-bold text-rose-600">· 미수</span>}
+                      </div>
+                    </div>
+                    <ChevronDown className={cn("h-4 w-4 shrink-0 text-slate-400 transition-transform", isExpanded && "rotate-180")} />
+                  </div>
+
+                  <div className={cn("min-w-0 flex-1 space-y-3", !isExpanded && "hidden md:block")}>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {isCancelled && (
                         res.isNoShow ? (
@@ -764,7 +865,10 @@ export default function CalendarPage() {
                     </div>
                   </div>
 
-                  <div className="flex w-full flex-col items-end gap-2 border-t border-slate-200 pt-3 sm:w-auto sm:border-t-0 sm:pt-5">
+                  <div className={cn(
+                    "w-full flex-col items-end gap-2 border-t border-slate-200 pt-3 md:w-auto md:border-t-0 md:pt-5",
+                    isExpanded ? "flex" : "hidden md:flex"
+                  )}>
                     {isCancelled && (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleRestore(res.id); }}
@@ -776,7 +880,7 @@ export default function CalendarPage() {
                     )}
                     {!isCancelled && !res.isPaid && (
                       <button
-                        onClick={() => handleMarkPaid(res.id)}
+                        onClick={(e) => { e.stopPropagation(); handleMarkPaid(res.id); }}
                         className="px-2.5 py-1.5 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition active:scale-95 whitespace-nowrap"
                         title="결제완료로 변경"
                       >
