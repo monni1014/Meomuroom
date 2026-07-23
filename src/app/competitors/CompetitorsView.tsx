@@ -27,6 +27,8 @@ import type { CompetitorSnapshotPayload } from "@/lib/competitor-snapshots";
 import {
   cancellationDetectedDateLabel,
   cancellationEquivalentHours,
+  trigroundBookingRevenue,
+  trigroundCancellationRevenue,
 } from "@/lib/competitor-cancellation";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 
@@ -236,7 +238,7 @@ function dayBookingMetrics(
       continue;
     }
     if (duration === 1) continue;
-    const price = duration * 12_000;
+    const price = trigroundBookingRevenue(duration);
     billableHours += duration;
     revenue += price;
     labels[segment.endHour] = price.toLocaleString();
@@ -250,7 +252,7 @@ function dayBookingMetrics(
     const feeRate = cancellation.feeRate;
     billableHours += cancellationEquivalentHours(duration, feeRate);
     if (isTriground && duration > 1) {
-      revenue += Math.round(duration * 12_000 * (feeRate || 0) / 100);
+      revenue += trigroundCancellationRevenue(duration, feeRate);
     }
   }
 

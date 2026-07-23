@@ -1,4 +1,5 @@
 const KST_TIME_ZONE = "Asia/Seoul";
+const TRIGROUND_PAID_BOOKING_PRICE = 24_000;
 
 function kstDateKey(date: Date) {
   return date.toLocaleDateString("en-CA", { timeZone: KST_TIME_ZONE });
@@ -38,6 +39,20 @@ export function cancellationEquivalentHours(durationHours: number, feeRate: numb
   const safeDuration = Number.isFinite(durationHours) ? Math.max(0, durationHours) : 0;
   const safeRate = Number.isFinite(feeRate) ? Math.min(100, Math.max(0, feeRate || 0)) : 0;
   return Math.round(safeDuration * safeRate) / 100;
+}
+
+export function trigroundBookingRevenue(durationHours: number) {
+  const safeDuration = Number.isFinite(durationHours) ? Math.max(0, durationHours) : 0;
+  return safeDuration > 1 ? TRIGROUND_PAID_BOOKING_PRICE : 0;
+}
+
+export function trigroundCancellationRevenue(
+  durationHours: number,
+  feeRate: number | null,
+) {
+  if (trigroundBookingRevenue(durationHours) === 0) return 0;
+  const safeRate = Number.isFinite(feeRate) ? Math.min(100, Math.max(0, feeRate || 0)) : 0;
+  return Math.round(TRIGROUND_PAID_BOOKING_PRICE * safeRate / 100);
 }
 
 export function cancellationDetectedDateLabel(occurredAt: string | Date) {

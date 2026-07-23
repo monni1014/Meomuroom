@@ -4,6 +4,8 @@ import {
   cancellationEquivalentHours,
   competitorCancellationFeeRate,
   shouldDisplayZeroFeeCancellationAsNew,
+  trigroundBookingRevenue,
+  trigroundCancellationRevenue,
 } from "../src/lib/competitor-cancellation.ts";
 
 const dayBefore = new Date("2026-07-21T09:00:00.000Z"); // 2026-07-21 18:00 KST
@@ -26,6 +28,14 @@ assert.equal(
 assert.equal(cancellationEquivalentHours(2, 50), 1);
 assert.equal(cancellationEquivalentHours(3, 30), 0.9);
 assert.equal(cancellationEquivalentHours(1, 0), 0);
+assert.equal(trigroundBookingRevenue(1), 0);
+assert.equal(trigroundBookingRevenue(2), 24_000);
+assert.equal(trigroundBookingRevenue(3), 24_000);
+assert.equal(trigroundCancellationRevenue(1, 100), 0);
+assert.equal(trigroundCancellationRevenue(2, 100), 24_000);
+assert.equal(trigroundCancellationRevenue(3, 100), 24_000);
+assert.equal(trigroundCancellationRevenue(3, 50), 12_000);
+assert.equal(trigroundCancellationRevenue(3, 0), 0);
 assert.equal(
   cancellationDetectedDateLabel("2026-07-22T15:30:00.000Z"),
   "7/23",
