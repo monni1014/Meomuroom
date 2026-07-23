@@ -9,6 +9,7 @@ import {
 import { syncUpcomingReservationContacts } from "@/lib/google-people";
 import { isValidKoreanMobilePhone } from "@/lib/phone-number";
 import { RPA_PENDING_MARKER } from "@/lib/rpa-reservation-state";
+import { buildReservationNotificationFailureAlert } from "@/lib/reservation-notification-failure-alert";
 
 const ALERT_TYPE = "NOTIFICATION_DELIVERY";
 const GOOGLE_PEOPLE_SYNC_ALERT_KEY = "google-people-sync";
@@ -46,23 +47,6 @@ async function readNotificationAttempt(reservationId: string) {
 
 function phoneLast4(phone: string | null) {
   return phone?.replace(/\D/g, "").slice(-4) || null;
-}
-
-function formatKstDateTime(startTime: Date, endTime: Date) {
-  const date = new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "short",
-  }).format(startTime);
-  const time = new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return `${date} ${time.format(startTime)}-${time.format(endTime)}`;
 }
 
 function notificationReadyMemoWhere() {
@@ -337,11 +321,18 @@ export async function sendDueReservationReminders() {
         recoveredCount += 1;
 
         if (recovered.status === "FAILED") {
+          const failureAlert = buildReservationNotificationFailureAlert({
+            roomName: reservation.roomName,
+            customerName: reservation.customerName,
+            startTime: reservation.startTime,
+            endTime: reservation.endTime,
+            error: recovered.error || "솔라피 발송 실패",
+          });
           await createAdminAlert({
             type: ALERT_TYPE,
             severity: "CRITICAL",
-            title: "예약 안내 문자 발송 실패",
-            message: `${reservation.customerName || "이름 없음"} / ${reservation.roomName} / ${formatKstDateTime(reservation.startTime, reservation.endTime)} / 전화 끝자리 ${phoneLast4(reservation.phone) || "없음"} / ${recovered.error || "솔라피 발송 실패"}`,
+            title: failureAlert.title,
+            message: failureAlert.message,
             dedupeKey: notificationAlertKey(reservation.id),
           });
           failedCount += 1;
@@ -430,11 +421,18 @@ export async function sendDueReservationReminders() {
       notificationChannel: result.channel,
       notificationError: errorMessage,
     });
+    const failureAlert = buildReservationNotificationFailureAlert({
+      roomName: reservation.roomName,
+      customerName: reservation.customerName,
+      startTime: reservation.startTime,
+      endTime: reservation.endTime,
+      error: errorMessage,
+    });
     await createAdminAlert({
       type: ALERT_TYPE,
       severity: "CRITICAL",
-      title: "예약 안내 문자 발송 실패",
-      message: `${reservation.customerName || "이름 없음"} / ${reservation.roomName} / ${formatKstDateTime(reservation.startTime, reservation.endTime)} / 전화 끝자리 ${phoneLast4(reservation.phone) || "없음"} / ${errorMessage}`,
+      title: failureAlert.title,
+      message: failureAlert.message,
       dedupeKey: notificationAlertKey(reservation.id),
     });
     failedCount += 1;

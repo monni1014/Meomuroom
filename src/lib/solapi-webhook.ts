@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
 import { mapSolapiDeliveryStatus, type SolapiDeliveryStatus } from "@/lib/solapi-delivery-status";
 import { reservationTestMessageDedupeKey } from "@/lib/customer-messages";
+import { buildReservationNotificationFailureAlert } from "@/lib/reservation-notification-failure-alert";
 
 type SolapiReport = {
   messageId?: string;
@@ -19,22 +20,6 @@ type SolapiReport = {
 
 function notificationAlertKey(reservationId: string) {
   return `notification-delivery:${reservationId}`;
-}
-
-function formatKstReservation(startTime: Date, endTime: Date) {
-  const date = new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    month: "numeric",
-    day: "numeric",
-    weekday: "short",
-  }).format(startTime);
-  const time = new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return `${date} ${time.format(startTime)}-${time.format(endTime)}`;
 }
 
 async function findMessage(
@@ -122,18 +107,24 @@ export async function processSolapiReport(report: SolapiReport) {
     return { processed: true, status, reservationId: message.reservationId };
   }
 
-  const summary = `${reservation.roomName} · ${reservation.customerName || "이름 없음"} · ${formatKstReservation(reservation.startTime, reservation.endTime)}`;
   if (status === "DELIVERED") {
     after(async () => {
       await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
     });
   } else if (status === "FAILED") {
+    const failureAlert = buildReservationNotificationFailureAlert({
+      roomName: reservation.roomName,
+      customerName: reservation.customerName,
+      startTime: reservation.startTime,
+      endTime: reservation.endTime,
+      error: errorMessage,
+    });
     after(async () => {
       await createAdminAlert({
         type: "NOTIFICATION_DELIVERY",
         severity: "CRITICAL",
-        title: "예약 안내 문자 발송 실패",
-        message: `${summary} · ${errorMessage}`,
+        title: failureAlert.title,
+        message: failureAlert.message,
         dedupeKey: notificationAlertKey(reservation.id),
       });
     });
