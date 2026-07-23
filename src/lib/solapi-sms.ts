@@ -3,6 +3,7 @@ import { getMessageTemplateForRoom } from "@/lib/message-templates";
 import { getSelectedSolapiSenderNumber } from "@/lib/solapi-sender-setting";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { reservationMessageSubject } from "@/lib/reservation-message-subject";
+import { findSolapiTextEncodingIssue } from "@/lib/solapi-text-safety";
 import {
   findReservationReminderInSolapiHistory,
   type ReservationReminderLookupResult,
@@ -172,6 +173,19 @@ export async function sendReservationReminder(
   const dryRun = options.forceDryRun === true
     || (!options.forceRealSend && !isRealSendEnabledFor(to));
 
+  const encodingIssue = findSolapiTextEncodingIssue(reminder.text);
+  if (encodingIssue) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to,
+      from: "",
+      text: reminder.text,
+      error: `Solapi 발송 차단: ${encodingIssue}`,
+    };
+  }
+
   try {
     const from = await getSenderPhone();
     if (dryRun) {
@@ -258,6 +272,19 @@ export async function sendOperationalAlertSms(input: {
       from: "",
       text,
       error: "Operational alert text is empty.",
+    };
+  }
+
+  const encodingIssue = findSolapiTextEncodingIssue(text);
+  if (encodingIssue) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to,
+      from: "",
+      text,
+      error: `Solapi 발송 차단: ${encodingIssue}`,
     };
   }
 
