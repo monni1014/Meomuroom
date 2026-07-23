@@ -440,6 +440,9 @@ export function getRpaQueueStatus() {
 
   return {
     queued: state.queue.length,
+    active: state.activeIds.size,
+    retryPending: state.retryTimers.size,
+    manualCheckPending: state.manualCheckIds.size,
     activeOrCoolingDown:
       state.activeIds.size
       + state.failedUntil.size

@@ -23,9 +23,10 @@ Environment=SPACECLOUD_RPA_USE_XVFB=true
 Environment=SPACECLOUD_RPA_REUSE_BROWSER=false
 ExecStartPre=/usr/bin/rm -f /srv/memoroom/app/rpa/.runtime/browser-host.json /srv/memoroom/app/rpa/.runtime/browser-host-starting.lock
 ExecStart=/usr/bin/npm start
+ExecStop=/usr/bin/node /srv/memoroom/app/ops/scripts/memoroom-wait-for-rpa-idle.mjs
 Restart=always
 RestartSec=5
-TimeoutStopSec=45
+TimeoutStopSec=14min
 KillMode=control-group
 SendSIGKILL=true
 UMask=0077

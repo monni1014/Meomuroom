@@ -11,6 +11,7 @@
 - Headless Naver jobs reuse one server-side Chromium host to reduce startup time and memory churn. SpaceCloud write jobs and public competitor scans use isolated transient browsers and close them after each job.
 - There is no separate `memoroom-rpa.service` or `memoroom-rpa.timer`. They are unmasked and intentionally not installed because `memoroom-app.service` already owns the single RPA worker; adding a second worker would duplicate bookings.
 - `memoroom-app.service` uses cgroup lifecycle tracking. A controlled stop terminates the Next.js process, the shared browser host, and every Chromium child before the unit is considered stopped. Stale browser endpoint/start-lock files are cleared before each start.
+- A planned stop/restart first waits until reservation RPA, retry queues, customer SMS submission, and competitor scanning are idle. If the app is unresponsive, the wait is bypassed so the health recovery restart is not blocked. Persisted mail jobs and time-based competitor catch-up recover work after an unexpected crash or forced timeout.
 - The app service restarts after both failures and unexpected clean exits. An explicit `systemctl stop memoroom-app.service` still remains stopped, as expected for systemd.
 
 ## Manual-block reconciliation

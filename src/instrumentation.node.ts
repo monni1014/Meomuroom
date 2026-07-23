@@ -17,6 +17,7 @@ export async function registerNodeInstrumentation() {
   const { enqueueNaverStatusReconcile } = await import("@/lib/rpa-job-queue");
   const { checkProxySellerStatusAndAlert } = await import("@/lib/proxy-seller");
   const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
+  const { sendDueReservationEndReminders } = await import("@/lib/reservation-end-reminders");
   const { runReservationContactPreflight } = await import("@/lib/reservation-contact-preflight");
   const { syncUpcomingReservationContacts } = await import("@/lib/google-people");
   const { runCompetitorScan } = await import("@/lib/competitor-monitor");
@@ -28,6 +29,7 @@ export async function registerNodeInstrumentation() {
   let proxyStatusRunning = false;
   let naverStatusReconcileRunning = false;
   let notificationRunning = false;
+  let endReminderRunning = false;
   let contactPreflightRunning = false;
   let googlePeopleSyncRunning = false;
   let competitorScanRunning = false;
@@ -108,6 +110,23 @@ export async function registerNodeInstrumentation() {
       console.error(`[Cron] Reservation notification check failed (${label}):`, error);
     } finally {
       notificationRunning = false;
+    }
+  }
+
+  async function runReservationEndReminders(label: string) {
+    if (endReminderRunning) return;
+    endReminderRunning = true;
+    try {
+      const result = await sendDueReservationEndReminders();
+      if (result.groupCount > 0) {
+        console.log(
+          `[Cron] Reservation end reminders (${label}): checked ${result.checkedCount}, groups ${result.groupCount}, sent ${result.sentCount}, failed ${result.failedCount}, skipped ${result.skippedCount}`,
+        );
+      }
+    } catch (error) {
+      console.error(`[Cron] Reservation end reminder failed (${label}):`, error);
+    } finally {
+      endReminderRunning = false;
     }
   }
 
@@ -215,6 +234,10 @@ export async function registerNodeInstrumentation() {
   }, 10_000);
 
   setTimeout(() => {
+    void runReservationEndReminders("startup recovery");
+  }, 5_000);
+
+  setTimeout(() => {
     void runReservationNotifications("startup");
   }, 15_000);
 
@@ -245,6 +268,10 @@ export async function registerNodeInstrumentation() {
 
   schedule("*/30 * * * * *", async () => {
     await runReservationNotifications("cron");
+  });
+
+  schedule("10,40 * * * * *", async () => {
+    await runReservationEndReminders("cron");
   });
 
   schedule("*/5 * * * *", async () => {
@@ -303,6 +330,7 @@ export async function registerNodeInstrumentation() {
 
   console.log("[Cron] Email auto sync started (15 second interval)");
   console.log("[Cron] Reservation notification monitor started (30 second interval, immediate after email changes)");
+  console.log("[Cron] Reservation end reminder monitor started (10 minutes before end, 30 second interval, startup recovery)");
   console.log("[Cron] Reservation contact preflight started (5 minute interval)");
   console.log("[Cron] Google contacts sync started (5 minute interval after account connection)");
   console.log("[Cron] ISP proxy status monitor started (5 minute interval)");
