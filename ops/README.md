@@ -101,7 +101,9 @@ The following items were explicitly deferred on 2026-07-23 and require real
 device verification before they can be marked complete:
 
 - Distinguish Tailscale devices as iPhone, Galaxy, laptop, and desktop. The
-  wife's iPhone should use its own invited Tailscale user/device identity.
+  wife's iPhone must be changed from temporary/shared access to its own invited,
+  regular Tailscale user and device identity. Verify that the Memoroom private
+  URL still opens after the transition.
 - Add a server-side offline monitor that sends a Solapi fallback SMS containing
   the affected device name after repeated offline observations. The polling
   interval and offline grace period still need to be chosen so normal phone
@@ -117,6 +119,25 @@ device verification before they can be marked complete:
   settings; a web app cannot require a custom vibration pattern.
 - The current high-resolution monochrome Memoroom notification badge is the
   approved final icon. Do not resize it again while investigating vibration.
+
+### Pending Google Calendar integration
+
+- Use the wife's Google account, which is the account used on her iPhone.
+- Request the Google Calendar OAuth scope separately; the existing Google
+  People contact scope does not grant calendar access.
+- Keep the Memoroom SQLite reservation as the source of truth and mirror only
+  confirmed reservations into a dedicated Memoroom calendar.
+- Create, update, and delete/cancel the corresponding calendar event whenever
+  the Memoroom reservation changes. Use a stable reservation-derived event ID
+  so retries cannot create duplicates.
+- Suggested visible event title: `머무룸2 · 구은영`; use the actual reservation
+  start/end as event times. Keep the phone number and private notes out of the
+  lock-screen title and store them only in event details if needed.
+- After syncing, add the calendar's upcoming-event widget to the Galaxy and
+  iPhone lock screens. Memoroom app push can additionally send an owner reminder
+  before the reservation; the lead time is not final yet.
+- Verify create, time/room/name edit, cancellation, duplicate retry, and cross-
+  device display before enabling automatic sync for all live reservations.
 
 ## Database backup
 
