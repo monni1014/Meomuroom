@@ -6,6 +6,11 @@ import { humanClick, humanClickElement, humanDelay } from "./lib/human.mjs";
 import { naverStorageStatePath } from "./lib/paths.mjs";
 import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
+import {
+  locateSelfHealingControl,
+  markSelfHealingControlFailed,
+  markSelfHealingControlVerified,
+} from "./lib/self-healing-controls.mjs";
 import { createStepTimer } from "./lib/step-timer.mjs";
 
 const BIZ_ITEMS_URL = "https://partner.booking.naver.com/bizes/1473933/biz-items";
@@ -20,6 +25,17 @@ const TEXT = {
   apply: "\uc801\uc6a9",
   next: "\ub0b4\uc77c",
   editRegex: "\\uc218\\uc815|\\ud3b8\\uc9d1|\\uc815\\ubcf4\\ubcc0\\uacbd|\\uc77c\\uc815\\uc124\\uc815",
+};
+
+const NAVER_SLOT_SAVE_CONTROL = {
+  key: "naver.slot-panel.save",
+  primaryLabels: ["저장"],
+  aliases: ["변경사항 저장", "적용", "완료"],
+  semanticTokens: ["저장"],
+  excludeLabels: ["취소"],
+  region: { minYRatio: 0.55, maxYRatio: 1 },
+  minScore: 85,
+  minMargin: 12,
 };
 
 const WEEKDAYS = [
@@ -62,7 +78,7 @@ function usage() {
     "  --product-url=... exact Naver product edit URL. Required for safety.",
     "  --apply       actually click toggles. Without this, it only navigates and validates.",
     "  --verify-only read and freshly recheck the requested state without clicking or saving.",
-    "  --health-check read-only UI contract check; exits before date/slot interaction.",
+    "  --health-check read-only UI contract check; opens tomorrow's slot panel but never changes or saves it.",
   ].join("\n");
 }
 
@@ -785,6 +801,19 @@ async function assertPanelHoursReadOnly(page, startHour, endHour, mode) {
   }
 }
 
+async function assertSlotPanelUiContract(page, startHour, endHour) {
+  for (let hour = startHour; hour < endHour; hour += 1) {
+    const actualState = await readHourToggleState(page, hour);
+    if (actualState !== "open" && actualState !== "close") {
+      throw new Error(
+        `[RPA_UI_CHANGE] Naver slot toggle state is unreadable at ${String(hour).padStart(2, "0")}:00.`,
+      );
+    }
+  }
+
+  return locateSelfHealingControl(page, NAVER_SLOT_SAVE_CONTROL, { healthCheck: true });
+}
+
 async function assertHourToggleState(page, hour, mode) {
   const label = `${String(hour).padStart(2, "0")}:00`;
   let actualState = null;
@@ -890,51 +919,10 @@ async function assertSlotPanelState(page, startHour, endHour, mode) {
 }
 
 async function clickSlotPanelSave(page) {
-  const saveText = "\uc800\uc7a5";
-  const cancelText = "\ucde8\uc18c";
-
-  const saveButton = await page.evaluateHandle(
-    ({ saveText, cancelText }) => {
-      function visible(element) {
-        const style = window.getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-      }
-
-      function parseRgb(color) {
-        const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-        if (!match) return null;
-        return {
-          r: Number(match[1]),
-          g: Number(match[2]),
-          b: Number(match[3]),
-        };
-      }
-
-      const buttons = [...document.querySelectorAll("button, [role='button']")]
-        .filter(visible)
-        .map((element) => {
-          const rect = element.getBoundingClientRect();
-          const text = (element.textContent || "").replace(/\s+/g, " ").trim();
-          const rgb = parseRgb(window.getComputedStyle(element).backgroundColor);
-          return { element, rect, text, rgb };
-        })
-        .filter(({ text, rect }) => text.includes(saveText) && !text.includes(cancelText) && rect.y > window.innerHeight * 0.55);
-
-      const greenSave = buttons.find(({ rgb }) => rgb && rgb.g > 130 && rgb.r < 80);
-      return greenSave?.element || buttons.sort((a, b) => b.rect.y - a.rect.y)[0]?.element || null;
-    },
-    { saveText, cancelText }
-  );
-
-  const buttonElement = saveButton.asElement();
-  if (!buttonElement) {
-    throw new Error("Could not find slot panel save button.");
-  }
-
-  await buttonElement.scrollIntoViewIfNeeded();
+  const control = await locateSelfHealingControl(page, NAVER_SLOT_SAVE_CONTROL);
+  await control.locator.scrollIntoViewIfNeeded();
   await quickSlotDelay(page, "before save button", 220, 520);
-  await humanClickElement(page, buttonElement, "slot panel save");
+  await humanClickElement(page, control.locator, "slot panel save");
   await quickSlotDelay(page, "after save button", 700, 1500);
 
   const closed = await page.waitForFunction(() => {
@@ -955,9 +943,11 @@ async function clickSlotPanelSave(page) {
   }, null, { timeout: 8_000 }).then(() => true).catch(() => false);
 
   if (!closed) {
+    markSelfHealingControlFailed(control);
     throw new Error("Slot save did not close the panel. Refusing to mark the slot operation as successful.");
   }
 
+  markSelfHealingControlVerified(control, { healthCheck: false });
   console.log("Slot panel saved.");
 }
 
@@ -1049,12 +1039,20 @@ async function main() {
     timer.mark("schedule-ready");
 
     if (healthCheck) {
+      const targetLabel = await navigateToDate(page, dateValue);
+      await openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour);
+      const saveControl = await assertSlotPanelUiContract(page, startHour, endHour);
+      markSelfHealingControlVerified(saveControl, { healthCheck: true });
+      const evidencePath = await saveScreenshot(page, "naver-ui-health-check");
+      await page.keyboard.press("Escape").catch(() => {});
+      await quickSlotDelay(page, "after health-check escape", 250, 600);
       console.log(JSON.stringify({
         ok: true,
         healthCheck: true,
         platform: "naver",
-        contract: "slot-schedule",
+        contract: "slot-panel-and-save-control",
         currentUrl: page.url(),
+        evidencePath,
       }));
       timer.mark("health-check-completed", { status: "ok" });
       return;

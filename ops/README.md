@@ -70,9 +70,18 @@ systemctl show -p RuntimeWatchdogUSec -p RebootWatchdogUSec
 ## RPA UI contract monitoring
 
 The app performs read-only Naver and SpaceCloud UI checks at 02:20, 08:20,
-14:20, and 20:20 Asia/Seoul. The checks stop before any date-slot or
-reservation mutation. If another RPA process owns the platform lock, the check
-is skipped instead of competing with the live reservation job.
+14:20, and 20:20 Asia/Seoul. Naver opens tomorrow's slot panel and inspects the
+toggle states and save control without clicking either. SpaceCloud opens and
+closes the external-reservation modal without clicking its final confirmation.
+If another RPA process owns the platform lock, the check is skipped instead of
+competing with the live reservation job.
+
+Critical controls use staged self-healing. A changed label or selector is first
+treated as a candidate. Only the same unique candidate that passes two separate
+read-only checks is promoted for live use. Ambiguous candidates never promote,
+and live mutations still require the existing fresh-page result verification.
+Promotion state is stored in the git-ignored
+`rpa/.runtime/self-healing-controls/` directory.
 
 Every live reservation RPA also reports failures through the same classifier:
 

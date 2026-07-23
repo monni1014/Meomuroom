@@ -6,6 +6,11 @@ import { humanClick, humanClickElement, humanDelay } from "./lib/human.mjs";
 import { spaceCloudStorageStatePath } from "./lib/paths.mjs";
 import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
+import {
+  locateSelfHealingControl,
+  markSelfHealingControlFailed,
+  markSelfHealingControlVerified,
+} from "./lib/self-healing-controls.mjs";
 import { spaceCloudBrowserOptions } from "./lib/spacecloud-session.mjs";
 import { createStepTimer } from "./lib/step-timer.mjs";
 
@@ -26,6 +31,26 @@ const TEXT = {
   room1: "\uba38\ubb34\ub8f8 \ud68c\uc758\uc2e4 \uc608\uc57d\ud558\uae30 1",
   room2: "\uba38\ubb34\ub8f8 \ud68c\uc758\uc2e4 \uc608\uc57d\ud558\uae30 2",
   room3: "\uba38\ubb34\ub8f8 \ud68c\uc758\uc2e4 \uc608\uc57d\ud558\uae30 3",
+};
+
+const SPACECLOUD_ADD_RESERVATION_CONTROL = {
+  key: "spacecloud.calendar.add-reservation",
+  primaryLabels: ["예약추가"],
+  aliases: ["예약 추가", "외부예약 추가", "외부 예약 추가", "예약 등록", "일정 추가"],
+  semanticTokens: ["예약", "추가"],
+  excludeLabels: ["예약 삭제", "예약 수정", "취소"],
+  minScore: 85,
+  minMargin: 12,
+};
+
+const SPACECLOUD_MODAL_CONFIRM_CONTROL = {
+  key: "spacecloud.external-modal.confirm",
+  primaryLabels: ["확인"],
+  aliases: ["저장", "등록", "적용", "완료"],
+  excludeLabels: ["취소", "삭제"],
+  region: { minYRatio: 0.5, maxYRatio: 1 },
+  minScore: 85,
+  minMargin: 12,
 };
 
 const WEEKDAYS = [
@@ -64,7 +89,7 @@ function usage() {
     "  --new-start=HH:00 --new-end=HH:00 required with --mode=resize",
     "  --inspect-calendar optional, print the exact selected product/date cell and exit without editing",
     "  --inspect-save-request optional, inspect and block the final save request before it reaches SpaceCloud",
-    "  --health-check optional, read-only UI contract check; exits before date/reservation interaction",
+    "  --health-check optional, read-only UI contract check; opens and closes the add modal without saving",
     "  --apply       actually add/delete the SpaceCloud external reservation.",
   ].join("\n");
 }
@@ -859,71 +884,55 @@ async function waitForAddReservationModal(page, timeout) {
   ).then(() => true).catch(() => false);
 }
 
-async function clickAddReservationElement(page) {
-  return page.evaluate((targetText) => {
+async function getExternalReservationModalBounds(page) {
+  return page.evaluate(() => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
-      return style.visibility !== "hidden"
-        && style.display !== "none"
-        && rect.width > 0
-        && rect.height > 0
-        && rect.bottom >= 0
-        && rect.top <= window.innerHeight;
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
     }
 
-    const candidates = [...document.querySelectorAll("button,a,[role='button'],span,div")]
+    const candidates = [...document.querySelectorAll("div,section,article,form")]
       .filter(visible)
       .map((element) => {
+        const rect = element.getBoundingClientRect();
         const text = (element.textContent || "").replace(/\s+/g, " ").trim();
-        const clickable = element.closest("button,a,[role='button']") || element;
-        const rect = clickable.getBoundingClientRect();
-        return {
-          element,
-          clickable,
-          text,
-          exact: text === targetText,
-          nativeControl: clickable.matches("button,a,[role='button']"),
-          area: rect.width * rect.height,
-        };
+        return { rect, text, area: rect.width * rect.height };
       })
-      .filter((candidate) => candidate.text.includes(targetText) && visible(candidate.clickable))
-      .sort((a, b) =>
-        Number(b.exact) - Number(a.exact)
-        || Number(b.nativeControl) - Number(a.nativeControl)
-        || a.area - b.area
-      );
+      .filter((item) =>
+        item.text.includes("\uc678\ubd80\uc608\uc57d/\ud734\ubb34\uc77c")
+        && item.text.includes("\uc608\uc57d\ub0a0\uc9dc")
+        && item.text.includes("\uc608\uc57d\uc2dc\uac04")
+        && item.rect.width >= 360
+        && item.rect.width <= 900
+        && item.rect.height >= 360
+        && item.rect.height <= window.innerHeight
+      )
+      .sort((left, right) => left.area - right.area);
 
-    const candidate = candidates[0];
-    if (!candidate) return null;
-
-    candidate.clickable.scrollIntoView({ block: "center", inline: "center" });
-    candidate.clickable.click();
-    const rect = candidate.clickable.getBoundingClientRect();
-    return {
-      tag: candidate.clickable.tagName,
-      role: candidate.clickable.getAttribute("role") || "",
-      className: typeof candidate.clickable.className === "string" ? candidate.clickable.className : "",
-      text: (candidate.clickable.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120),
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
-    };
-  }, TEXT.addReservation);
+    const rect = candidates[0]?.rect;
+    return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
+  });
 }
 
-async function clickAddReservation(page) {
-  await clickVisibleText(page, TEXT.addReservation, 20_000);
+async function clickAddReservation(page, { healthCheck = false } = {}) {
+  let control = await locateSelfHealingControl(page, SPACECLOUD_ADD_RESERVATION_CONTROL, { healthCheck });
+  await humanDelay(page, "before SpaceCloud add reservation click", 500, 1200);
+  await humanClickElement(page, control.locator, "SpaceCloud add reservation");
+
   if (!(await waitForAddReservationModal(page, 5_000))) {
-    console.log("SpaceCloud add modal did not open after the human click. Retry the actual button element once.");
-    const clicked = await clickAddReservationElement(page);
-    console.log(`SpaceCloud add reservation fallback target: ${JSON.stringify(clicked)}`);
-    if (!clicked || !(await waitForAddReservationModal(page, 10_000))) {
+    console.log("SpaceCloud add modal did not open after the first verified click. Resolve and retry the same safe control once.");
+    control = await locateSelfHealingControl(page, SPACECLOUD_ADD_RESERVATION_CONTROL, { healthCheck });
+    await humanClickElement(page, control.locator, "SpaceCloud add reservation retry");
+    if (!(await waitForAddReservationModal(page, 10_000))) {
+      markSelfHealingControlFailed(control);
       throw new Error("[RPA_UI_CHANGE] SpaceCloud add reservation modal did not open after two verified click attempts.");
     }
   }
+
+  if (!healthCheck) markSelfHealingControlVerified(control, { healthCheck: false });
   await humanDelay(page, "after SpaceCloud add modal open", 1200, 2800);
+  return control;
 }
 
 async function getModalDateInputValue(page) {
@@ -1331,6 +1340,19 @@ async function clickModalTextButton(page, text, timeout = 20_000) {
     text,
     { timeout },
   );
+
+  if (text === TEXT.confirm) {
+    const bounds = await getExternalReservationModalBounds(page);
+    if (!bounds) throw new Error("[RPA_UI_CHANGE] Could not verify the SpaceCloud external reservation modal bounds.");
+    const control = await locateSelfHealingControl(page, {
+      ...SPACECLOUD_MODAL_CONFIRM_CONTROL,
+      bounds,
+    });
+    await humanDelay(page, `before modal ${text} click`, 350, 900);
+    await humanClickElement(page, control.locator, `modal ${text}`);
+    await humanDelay(page, `after modal ${text} click`, 500, 1200);
+    return;
+  }
 
   const box = await page.evaluate((targetText) => {
     function visible(element) {
@@ -2674,12 +2696,28 @@ async function main() {
 
     if (healthCheck) {
       await assertCalendarView(page, "health check");
+      const addControl = await clickAddReservation(page, { healthCheck: true });
+      const modalBounds = await getExternalReservationModalBounds(page);
+      if (!modalBounds) {
+        throw new Error("[RPA_UI_CHANGE] SpaceCloud health check could not verify the add modal bounds.");
+      }
+      const confirmControl = await locateSelfHealingControl(page, {
+        ...SPACECLOUD_MODAL_CONFIRM_CONTROL,
+        bounds: modalBounds,
+      }, { healthCheck: true });
       const evidencePath = await saveScreenshot(page, "spacecloud-ui-health-check");
+      await page.keyboard.press("Escape").catch(() => {});
+      const modalClosed = await waitForAddReservationModal(page, 1_500).then((open) => !open);
+      if (!modalClosed) {
+        throw new Error("[RPA_UI_CHANGE] SpaceCloud health check could not close the add modal without saving.");
+      }
+      markSelfHealingControlVerified(addControl, { healthCheck: true });
+      markSelfHealingControlVerified(confirmControl, { healthCheck: true });
       console.log(JSON.stringify({
         ok: true,
         healthCheck: true,
         platform: "spacecloud",
-        contract: "reservation-calendar",
+        contract: "reservation-calendar-and-add-modal",
         currentUrl: page.url(),
         evidencePath,
       }));
