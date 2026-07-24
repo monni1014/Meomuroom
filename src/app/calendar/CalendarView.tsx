@@ -508,7 +508,6 @@ export default function CalendarPage() {
       <header className="pt-8 pb-4 flex justify-between items-center gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">통합 캘린더</h1>
-          <p className="text-sm text-slate-500 mt-1">네이버 및 스페이스클라우드 예약 실시간 조회</p>
         </div>
         <div className="flex gap-2">
           <button

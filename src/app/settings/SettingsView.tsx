@@ -764,7 +764,6 @@ export default function SettingsView({
       <header className="space-y-4 pt-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">설정</h1>
-          <p className="mt-1 text-sm text-slate-500">프로그램 운영에 필요한 메시지, RPA, 외부 연동 상태를 관리합니다.</p>
         </div>
 
         <div className="flex w-full gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100 p-1">

@@ -500,10 +500,6 @@ export default function UsagePage() {
     <div className="p-4 md:p-8 space-y-6 pb-24 max-w-5xl mx-auto w-full">
       <header className="pt-8 pb-4">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">이용현황 기록</h1>
-        <p className="text-sm text-slate-500 mt-1 mt-1.5 flex items-center gap-1">
-          <AlertCircle className="w-4 h-4 text-slate-400" />
-          CCTV 혹은 매장 방문 확인 시 실시간 기입용
-        </p>
       </header>
 
       {/* Main logging form */}

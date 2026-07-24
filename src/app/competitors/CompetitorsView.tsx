@@ -774,7 +774,6 @@ export default function CompetitorsView({
       <header className="relative flex flex-col gap-2 pt-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="pr-12 lg:pr-0">
           <h1 className="text-2xl font-bold text-slate-900">경쟁사 현황</h1>
-          <p className="mt-0.5 text-sm text-slate-500">공개 예약 상태를 자동으로 기록하고, 시너지 선점 여부를 함께 확인합니다.</p>
         </div>
         <button
           type="button"
