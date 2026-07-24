@@ -113,10 +113,6 @@ export default function MessagesView({
     delivered: initialEntries.filter((entry) => entry.status === "DELIVERED").length,
     attention: initialEntries.filter(needsAttention).length,
   }), [initialEntries]);
-  const targetCount = useMemo(
-    () => initialEntries.filter((entry) => entry.status !== "SKIPPED").length,
-    [initialEntries],
-  );
 
   const sortedEntries = useMemo(() => [...initialEntries]
     .sort((left, right) => {
@@ -154,9 +150,6 @@ export default function MessagesView({
           </div>
           <div>
             <h1 className="text-2xl font-black tracking-tight text-slate-900">오늘 문자 현황</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              {todayLabel} 발송 대상 {targetCount}건 · 고객 휴대폰의 수신 완료만 성공으로 집계합니다.
-            </p>
           </div>
         </header>
 
@@ -238,9 +231,6 @@ export default function MessagesView({
           </div>
         </section>
 
-        <p className="px-1 text-xs leading-5 text-slate-500">
-          ‘솔라피 접수’와 ‘통신사 처리 중’은 아직 성공이 아닙니다. 고객 휴대폰의 ‘수신 완료’ 결과만 최종 성공이며, 결과는 5초마다 자동 갱신됩니다.
-        </p>
       </div>
     </div>
   );
