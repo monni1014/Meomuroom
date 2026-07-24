@@ -77,10 +77,8 @@ function extractValueAfterLabels(text, labels) {
     const line = lines[i];
     for (const label of labels) {
       if (line === label && lines[i + 1]) return lines[i + 1].trim();
-      if (line.startsWith(label)) {
-        const value = line.slice(label.length).replace(/^[:：\s]+/, "").trim();
-        if (value) return value;
-      }
+      const inlineMatch = line.match(new RegExp(`^${escapeRegExp(label)}(?:[:：\\s]+)(.+)$`));
+      if (inlineMatch?.[1]) return inlineMatch[1].trim();
     }
   }
 
@@ -248,17 +246,15 @@ async function main() {
       await humanClickElement(page, bookingLink, "booking detail link");
       timer.mark("booking-detail-clicked");
       await page.waitForFunction((id) => {
-        const sideText = [...document.querySelectorAll('[class*="SideLayer__visible"], [class*="SideFrame__"], [class*="Detail__"]')]
-          .map((element) => element.textContent || "")
-          .join("\n");
-        const listText = [...document.querySelectorAll('[class*="BookingListView__list-contents"], [class*="BookingListView__booking-list-table"]')]
-          .map((element) => element.textContent || "")
-          .join("\n");
-        const text = `${sideText}\n${listText}`;
-        const compact = text.replace(/\s+/g, "");
-        return text.includes("예약 상세정보")
-          && compact.includes(id)
-          && /01[016789]-?\d{3,4}-?\d{4}/.test(compact);
+        return [...document.querySelectorAll(
+          '[class*="SideLayer__visible"], [class*="SideFrame__"], [class*="Detail__"], [role="dialog"]',
+        )].some((element) => {
+          const text = element.innerText || "";
+          const compact = text.replace(/\s+/g, "");
+          return text.includes("예약 상세정보")
+            && compact.includes(id)
+            && /01[016789]-?\d{3,4}-?\d{4}/.test(compact);
+        });
       }, bookingId, { timeout: DETAIL_READY_TIMEOUT_MS }).catch(async () => {
         await retryNaverDetailReadiness(page, bookingId, timer);
       });
@@ -267,13 +263,15 @@ async function main() {
       await page.goto(target, { timeout: 60_000, waitUntil: "domcontentloaded" });
       timer.mark("booking-detail-url-dom-ready");
       await page.waitForFunction(() => {
-        const text = [...document.querySelectorAll('[class*="SideLayer__visible"], [class*="SideFrame__"], [class*="Detail__"]')]
-          .map((element) => element.textContent || "")
-          .join("\n");
-        const compact = text.replace(/\s+/g, "");
-        return text.includes("예약 상세정보")
-          && compact.includes("예약자")
-          && /01[016789]-?\d{3,4}-?\d{4}/.test(compact);
+        return [...document.querySelectorAll(
+          '[class*="SideLayer__visible"], [class*="SideFrame__"], [class*="Detail__"], [role="dialog"]',
+        )].some((element) => {
+          const text = element.innerText || "";
+          const compact = text.replace(/\s+/g, "");
+          return text.includes("예약 상세정보")
+            && compact.includes("예약자")
+            && /01[016789]-?\d{3,4}-?\d{4}/.test(compact);
+        });
       }, null, { timeout: DETAIL_READY_TIMEOUT_MS }).catch(async () => {
         await retryNaverDetailReadiness(page, null, timer);
       });
@@ -282,16 +280,6 @@ async function main() {
 
     const bodyText = await page.locator("body").innerText({ timeout: 20_000 });
     const visibleDetailPanelText = await page.evaluate((id) => {
-      function visible(element) {
-        const style = window.getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        return style.visibility !== "hidden"
-          && style.display !== "none"
-          && Number(style.opacity || "1") > 0
-          && rect.width > 0
-          && rect.height > 0;
-      }
-
       const selectors = [
         '[class*="SideLayer__visible"]',
         '[class*="SideFrame__"]',
@@ -300,7 +288,6 @@ async function main() {
       ];
       const candidates = selectors
         .flatMap((selector) => [...document.querySelectorAll(selector)])
-        .filter(visible)
         .map((element) => ({
           text: element.innerText || "",
           compact: (element.innerText || element.textContent || "").replace(/\s+/g, ""),
@@ -334,8 +321,12 @@ async function main() {
         }
       : detailUseDateTime;
     const extractedCustomerName = extractValueAfterLabels(detailText, ["예약자", "예약자명", "이름"]);
-    const customerName = listDetail?.customerName
-      || (isValidNaverCustomerName(extractedCustomerName) ? extractedCustomerName : null)
+    // The booking list can show both the customer's original name and a
+    // separate Korean display/transliteration on adjacent lines. Prefer the
+    // explicitly labelled name in the opened detail panel so the reservation
+    // keeps the exact name the customer submitted.
+    const customerName = (isValidNaverCustomerName(extractedCustomerName) ? extractedCustomerName : null)
+      || listDetail?.customerName
       || listRow.customerName
       || compactInfo.customerName
       || null;

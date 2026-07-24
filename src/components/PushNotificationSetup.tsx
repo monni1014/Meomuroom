@@ -32,7 +32,6 @@ export default function PushNotificationSetup() {
   const [subscribed, setSubscribed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [vibrationMessage, setVibrationMessage] = useState("");
 
   useEffect(() => {
     let disposed = false;
@@ -92,20 +91,6 @@ export default function PushNotificationSetup() {
     }
   };
 
-  const testDeviceVibration = () => {
-    if (!("vibrate" in navigator)) {
-      setVibrationMessage("이 브라우저는 기기 직접 진동을 지원하지 않습니다.");
-      return;
-    }
-
-    const requested = navigator.vibrate([500, 200, 500]);
-    setVibrationMessage(
-      requested
-        ? "지금 두 번 진동해야 합니다. 진동 여부를 확인해주세요."
-        : "브라우저가 진동 요청을 거부했습니다.",
-    );
-  };
-
   if (!supported) {
     return null;
   }
@@ -152,15 +137,6 @@ export default function PushNotificationSetup() {
             {busy ? "연결 중…" : "알림 켜기"}
           </button>
         )}
-        {subscribed && (
-          <button
-            type="button"
-            onClick={testDeviceVibration}
-            className="rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-sm font-bold text-emerald-800 shadow-sm"
-          >
-            기기 진동 테스트
-          </button>
-        )}
       </div>
       {iphoneInstallHint && (
         <p className="mt-3 rounded-xl bg-white/80 p-3 text-xs font-semibold leading-5 text-indigo-800">
@@ -168,7 +144,6 @@ export default function PushNotificationSetup() {
         </p>
       )}
       {message && <p className="mt-3 text-xs font-semibold text-slate-700">{message}</p>}
-      {vibrationMessage && <p className="mt-3 text-xs font-semibold text-slate-700">{vibrationMessage}</p>}
     </div>
   );
 }
