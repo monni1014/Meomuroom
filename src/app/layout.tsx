@@ -25,7 +25,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#4f46e5",
+  themeColor: "#f8fafc",
+  colorScheme: "light",
 };
 
 const geistSans = Geist({
@@ -46,7 +47,7 @@ export default function RootLayout({
   return (
     <html
       lang="ko"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full bg-slate-50 antialiased`}
     >
       <body className="min-h-full flex bg-slate-50 text-slate-900">
         <ServiceWorkerRegistration />
