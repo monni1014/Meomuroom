@@ -261,7 +261,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
               className="h-7 w-7"
               priority
             />
-            <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+            <h1 className="text-[22px] font-bold tracking-tight text-slate-900 sm:text-2xl">
               머무룸 대시보드
             </h1>
           </div>
