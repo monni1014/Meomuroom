@@ -252,13 +252,13 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       <AutoRefresh />
       <header className="flex items-start justify-between gap-3 pb-4 pt-8 sm:items-center">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             <Image
               src="/icon-192.png"
               alt="머무룸 로고"
-              width={40}
-              height={40}
-              className="h-10 w-10 rounded-xl"
+              width={28}
+              height={28}
+              className="h-7 w-7"
               priority
             />
             <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
