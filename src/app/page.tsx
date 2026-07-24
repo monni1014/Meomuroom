@@ -247,7 +247,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
   }
 
   return (
-    <div className="p-4 md:p-8 space-y-6 pb-20 max-w-7xl mx-auto w-full">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 pb-20 md:p-8">
       <AutoRefresh />
       <header className="flex items-start justify-between gap-3 pb-4 pt-8 sm:items-center">
         <div className="min-w-0 flex-1">
@@ -269,7 +269,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       />
 
       {/* Summary Cards (Top) */}
-      <section className="space-y-6">
+      <section className="order-2 space-y-6 md:order-1">
         {/* Monthly Stats */}
         <div className="space-y-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -401,7 +401,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       </section>
 
       {/* Today's Reservations */}
-      <section className="space-y-3 pt-6">
+      <section className="order-1 space-y-3 md:order-2 md:pt-6">
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold text-slate-900">오늘 접수 예약 ({todayReservations.length}건)</h2>
           <span className="text-xs text-slate-400">오늘 접수된 예약</span>
@@ -413,7 +413,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       </section>
 
       {/* This Month's Reservations */}
-      <section className="space-y-3 pt-6">
+      <section className="order-3 space-y-3 pt-6">
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold text-slate-900">{selectedMonthLabel} 예약 일정</h2>
           <span className="text-xs text-slate-400">다가오는 일정 우선</span>
