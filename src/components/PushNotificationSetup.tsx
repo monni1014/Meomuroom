@@ -107,11 +107,7 @@ export default function PushNotificationSetup() {
   };
 
   if (!supported) {
-    return (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        이 브라우저는 앱 알림을 지원하지 않습니다. 아이폰은 Safari에서 머무룸을 ‘홈 화면에 추가’한 뒤 그 아이콘으로 열어주세요.
-      </div>
-    );
+    return null;
   }
 
   if (!config) {

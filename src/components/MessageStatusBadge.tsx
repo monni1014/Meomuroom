@@ -100,6 +100,8 @@ export default function MessageStatusBadge({
     );
   }
 
+  if (normalizedStatus === "SKIPPED") return null;
+
   if (["SENT", "SENDING", "RECOVERING", "SUBMITTED", "CARRIER_ACCEPTED"].includes(normalizedStatus)) {
     const label = normalizedStatus === "RECOVERING"
       ? "솔라피 발송 이력 확인 중"

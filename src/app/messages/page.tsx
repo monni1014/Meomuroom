@@ -2,6 +2,7 @@ import MessagesView from "./MessagesView";
 import { prisma } from "@/lib/prisma";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { getKstDayRange } from "@/lib/kst-time";
+import { getSolapiDailyUsage } from "@/lib/solapi-daily-usage";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export default async function MessagesPage() {
   const plannedReservationEnd = new Date(tomorrowStart.getTime() + twoHoursMs);
   const twoHoursLater = new Date(now.getTime() + twoHoursMs);
 
-  const reservations = await prisma.reservation.findMany({
+  const [reservations, dailyUsage] = await Promise.all([prisma.reservation.findMany({
     where: {
       status: "CONFIRMED",
       OR: [
@@ -56,7 +57,7 @@ export default async function MessagesPage() {
         },
       },
     },
-  });
+  }), getSolapiDailyUsage(today.start, tomorrowStart)]);
 
   const entries = reservations.map((reservation) => {
     const message = reservation.messages[0] || null;
@@ -88,5 +89,11 @@ export default async function MessagesPage() {
     };
   });
 
-  return <MessagesView initialEntries={entries} todayLabel={`${today.parts.month}월 ${today.parts.day}일`} />;
+  return (
+    <MessagesView
+      initialEntries={entries}
+      todayLabel={`${today.parts.month}월 ${today.parts.day}일`}
+      dailyUsage={dailyUsage}
+    />
+  );
 }

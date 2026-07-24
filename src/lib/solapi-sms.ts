@@ -316,7 +316,13 @@ export async function sendOperationalAlertSms(input: {
       return { success: true, dryRun: true, channel, to, from, text };
     }
 
-    const response = await getSolapiService().send({ to, from, text, type: "SMS" }, { showMessageList: true });
+    const response = await getSolapiService().send({
+      to,
+      from,
+      text,
+      type: "SMS",
+      customFields: { messageCategory: "operational" },
+    }, { showMessageList: true });
     const messageId = response?.messageList?.[0]?.messageId || response?.groupInfo?.groupId || null;
     return { success: true, dryRun: false, channel, to, from, text, messageId };
   } catch (error) {

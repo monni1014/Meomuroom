@@ -8,11 +8,13 @@ import {
   CheckCheck,
   Clock3,
   MessageSquareText,
+  Coins,
   Radio,
 } from "lucide-react";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 import { formatKoreanPhone } from "@/lib/phone-number";
 import PushNotificationSetup from "@/components/PushNotificationSetup";
+import type { SolapiDailyUsage } from "@/lib/solapi-daily-usage";
 
 type DeliveryEntry = {
   reservationId: string;
@@ -44,6 +46,7 @@ const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   MISSING_PHONE: { label: "전화번호 누락", className: "bg-rose-50 text-rose-700 ring-rose-200" },
   OVERDUE: { label: "발송시간 지남", className: "bg-amber-50 text-amber-800 ring-amber-200" },
   DRY_RUN: { label: "테스트 · 미발송", className: "bg-amber-50 text-amber-800 ring-amber-200" },
+  SKIPPED: { label: "발송 제외", className: "bg-slate-100 text-slate-600 ring-slate-200" },
   CANCELLED: { label: "예약 취소", className: "bg-slate-100 text-slate-600 ring-slate-200" },
   PENDING: { label: "발송 예정", className: "bg-slate-100 text-slate-600 ring-slate-200" },
 };
@@ -94,9 +97,11 @@ function sortWeight(entry: DeliveryEntry) {
 export default function MessagesView({
   initialEntries,
   todayLabel,
+  dailyUsage,
 }: {
   initialEntries: DeliveryEntry[];
   todayLabel: string;
+  dailyUsage: SolapiDailyUsage;
 }) {
   const router = useRouter();
   const refresh = useCallback(() => router.refresh(), [router]);
@@ -108,6 +113,10 @@ export default function MessagesView({
     delivered: initialEntries.filter((entry) => entry.status === "DELIVERED").length,
     attention: initialEntries.filter(needsAttention).length,
   }), [initialEntries]);
+  const targetCount = useMemo(
+    () => initialEntries.filter((entry) => entry.status !== "SKIPPED").length,
+    [initialEntries],
+  );
 
   const sortedEntries = useMemo(() => [...initialEntries]
     .sort((left, right) => {
@@ -128,7 +137,12 @@ export default function MessagesView({
     if (entry.status === "SUBMITTED") return value ? `솔라피 접수 ${formatKst(value)}` : "솔라피 접수";
     if (entry.status === "RECOVERING") return "솔라피 발송 이력 확인 중";
     if (entry.status === "SENDING") return "발송 작업 중";
+    if (entry.status === "SKIPPED") return "자동문자 발송 제외";
     return `발송 예정 ${formatKst(entry.scheduledAt)}`;
+  }
+
+  function formatCost(value: number) {
+    return `${Math.round(value).toLocaleString("ko-KR")}원`;
   }
 
   return (
@@ -141,14 +155,24 @@ export default function MessagesView({
           <div>
             <h1 className="text-2xl font-black tracking-tight text-slate-900">오늘 문자 현황</h1>
             <p className="mt-1 text-sm text-slate-500">
-              {todayLabel} 발송 대상 {initialEntries.length}건 · 고객 휴대폰의 수신 완료만 성공으로 집계합니다.
+              {todayLabel} 발송 대상 {targetCount}건 · 고객 휴대폰의 수신 완료만 성공으로 집계합니다.
             </p>
           </div>
         </header>
 
         <PushNotificationSetup />
 
-        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className="col-span-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-1">
+            <div className="inline-flex rounded-xl bg-amber-50 p-2 text-amber-600"><Coins className="h-5 w-5" /></div>
+            <p className="mt-3 text-xs font-bold text-slate-500">오늘 총 사용액</p>
+            <p className="mt-1 text-2xl font-black text-slate-900">
+              {dailyUsage.available ? formatCost(dailyUsage.totalCost) : "확인 실패"}
+            </p>
+            <p className="mt-2 text-[11px] font-semibold leading-5 text-slate-500">
+              안내 {dailyUsage.reservation.count}건 · 경고 {dailyUsage.operational.count}건 · 기타 {dailyUsage.other.count}건
+            </p>
+          </div>
           {[
             { label: "발송 예정", value: stats.scheduled, icon: CalendarClock, tone: "text-slate-500 bg-slate-100" },
             { label: "처리 중 · 미완료", value: stats.processing, icon: Radio, tone: "text-indigo-600 bg-indigo-50" },
@@ -165,7 +189,7 @@ export default function MessagesView({
 
         <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-4 sm:p-5">
-            <h2 className="font-black text-slate-900">{todayLabel} 발송 대상</h2>
+            <h2 className="font-black text-slate-900">{todayLabel} 발송 관리</h2>
             <p className="mt-1 text-xs text-slate-500">확인이 필요한 문자부터 위에 표시합니다.</p>
           </div>
 
