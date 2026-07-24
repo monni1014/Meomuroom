@@ -10,6 +10,10 @@ import { syncUpcomingReservationContacts } from "@/lib/google-people";
 import { isValidKoreanMobilePhone } from "@/lib/phone-number";
 import { RPA_PENDING_MARKER } from "@/lib/rpa-reservation-state";
 import { buildReservationNotificationFailureAlert } from "@/lib/reservation-notification-failure-alert";
+import {
+  isReservationAutoSendActive,
+  reservationNotificationRolloutStartsAt,
+} from "@/lib/reservation-notification-rollout";
 
 const ALERT_TYPE = "NOTIFICATION_DELIVERY";
 const GOOGLE_PEOPLE_SYNC_ALERT_KEY = "google-people-sync";
@@ -112,6 +116,23 @@ async function finalizeNotificationAttempt(
 export async function sendDueReservationReminders() {
   const pipelineStartedAt = Date.now();
   const now = new Date();
+  if (!isReservationAutoSendActive(now)) {
+    return {
+      success: true,
+      checkedCount: 0,
+      sentCount: 0,
+      dryRunCount: 0,
+      waitingContactCount: 0,
+      waitingContactSyncCount: 0,
+      contactSyncMs: 0,
+      pipelineMs: Date.now() - pipelineStartedAt,
+      failedCount: 0,
+      recoveredCount: 0,
+      recoveryWaitingCount: 0,
+      results: [],
+      deferredUntil: reservationNotificationRolloutStartsAt()?.toISOString() || null,
+    };
+  }
   const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
   await prisma.reservation.updateMany({
@@ -451,5 +472,6 @@ export async function sendDueReservationReminders() {
     recoveredCount,
     recoveryWaitingCount,
     results,
+    deferredUntil: null,
   };
 }

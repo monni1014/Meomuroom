@@ -50,6 +50,7 @@
     "test:message-subject": "node --experimental-strip-types scripts/test-reservation-message-subject.mjs",
     "test:sender-display": "node --experimental-strip-types scripts/test-solapi-sender-display.mjs",
     "test:solapi-text-safety": "node --experimental-strip-types scripts/test-solapi-text-safety.mjs",
+    "test:notification-rollout": "node --experimental-strip-types scripts/test-reservation-notification-rollout.mjs",
     "test:notification-edit-policy": "node --experimental-strip-types scripts/test-reservation-notification-edit-policy.mjs",
     "test:notification-recovery": "node --experimental-strip-types scripts/test-solapi-recovery-dedupe.mjs",
     "test:forced-notification-link": "node scripts/test-forced-notification-reservation-link.mjs"
