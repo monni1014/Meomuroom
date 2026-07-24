@@ -1069,15 +1069,7 @@ export default function SettingsView({
 
           <section className="space-y-3">
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-black text-slate-900">상황별 문자 템플릿</h2>
-                <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">
-                  자동발송 연결 전
-                </span>
-              </div>
-              <p className="mt-1 text-sm font-semibold text-slate-500">
-                현재는 짧은 SMS용이므로 제목 없이 본문만 작성합니다. 지금 저장해도 실제 문자는 자동으로 발송되지 않습니다.
-              </p>
+              <h2 className="text-lg font-black text-slate-900">상황별 문자 템플릿</h2>
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
