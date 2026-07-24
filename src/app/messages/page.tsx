@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { getKstDayRange } from "@/lib/kst-time";
 import { getSolapiDailyUsage } from "@/lib/solapi-daily-usage";
+import { buildReservationNotificationGroups } from "@/lib/reservation-notification-grouping";
 
 export const dynamic = "force-dynamic";
 
@@ -69,13 +70,28 @@ export default async function MessagesPage() {
     },
   }), getSolapiDailyUsage(today.start, tomorrowStart)]);
 
+  const notificationGroups = buildReservationNotificationGroups(reservations);
+  const groupLeaderByFollowerId = new Map<string, (typeof reservations)[number]>();
+  for (const members of notificationGroups.values()) {
+    const leader = members[0];
+    if (!leader) continue;
+    for (const follower of members.slice(1)) {
+      groupLeaderByFollowerId.set(follower.id, leader);
+    }
+  }
+
   const entries = reservations.map((reservation) => {
     const message = reservation.messages[0] || null;
+    const groupLeader = groupLeaderByFollowerId.get(reservation.id) || null;
     const scheduledAt = new Date(reservation.startTime.getTime() - 2 * 60 * 60 * 1000);
     const phone = normalizeKoreanPhone(reservation.phone);
     let status = message?.status || reservation.notificationStatus || "PENDING";
+    let error = reservation.notificationError;
     if (status === "SENT") status = "SUBMITTED";
-    if (!message && !isValidKoreanMobilePhone(phone)) status = "MISSING_PHONE";
+    if (!message && groupLeader) {
+      status = "SKIPPED";
+      error = "같은 날·같은 방·동일 고객은 첫 예약 시작 2시간 전에 안내문자를 한 번만 발송합니다.";
+    } else if (!message && !isValidKoreanMobilePhone(phone)) status = "MISSING_PHONE";
     else if (!message && ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"].includes(status)) {
       if (scheduledAt.getTime() < now.getTime()) status = "OVERDUE";
       else if (status === "PENDING") status = "SCHEDULED";
@@ -91,7 +107,7 @@ export default async function MessagesPage() {
       scheduledAt: scheduledAt.toISOString(),
       reservationStatus: reservation.status,
       status,
-      error: reservation.notificationError,
+      error,
       sentAt: message?.occurredAt.toISOString() || reservation.notifiedAt?.toISOString() || null,
       resultAt: message?.updatedAt.toISOString() || reservation.notifiedAt?.toISOString() || null,
       providerMessageId: message?.providerMessageId || null,
