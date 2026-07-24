@@ -640,7 +640,7 @@ export default function CalendarPage() {
                 className={cn(
                   "flex min-h-[72px] flex-col items-stretch rounded-lg p-0.5 relative transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
                   isSelected
-                    ? "bg-amber-50 text-amber-900 ring-2 ring-inset ring-amber-400 sm:bg-amber-500 sm:text-white sm:shadow-md sm:shadow-amber-100"
+                    ? "bg-indigo-50 text-indigo-800 ring-2 ring-inset ring-amber-400 sm:bg-indigo-600 sm:text-white sm:shadow-md sm:shadow-indigo-100"
                     : isToday
                     ? "bg-indigo-50 text-indigo-700"
                     : "hover:bg-slate-50 text-slate-700",
