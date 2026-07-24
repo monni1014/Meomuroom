@@ -10,6 +10,11 @@ import { syncUpcomingReservationContacts } from "@/lib/google-people";
 import { isValidKoreanMobilePhone } from "@/lib/phone-number";
 import { RPA_PENDING_MARKER } from "@/lib/rpa-reservation-state";
 import { buildReservationNotificationFailureAlert } from "@/lib/reservation-notification-failure-alert";
+import { getKstDateParts, getKstDayRange } from "@/lib/kst-time";
+import {
+  buildReservationNotificationGroups,
+  reservationNotificationGroupKey,
+} from "@/lib/reservation-notification-grouping";
 import {
   isReservationAutoSendActive,
   reservationNotificationRolloutStartsAt,
@@ -51,6 +56,11 @@ async function readNotificationAttempt(reservationId: string) {
 
 function phoneLast4(phone: string | null) {
   return phone?.replace(/\D/g, "").slice(-4) || null;
+}
+
+function formatKstStartTime(value: Date) {
+  const parts = getKstDateParts(value);
+  return `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
 }
 
 function notificationReadyMemoWhere() {
@@ -129,6 +139,7 @@ export async function sendDueReservationReminders() {
       failedCount: 0,
       recoveredCount: 0,
       recoveryWaitingCount: 0,
+      groupedSkipCount: 0,
       results: [],
       deferredUntil: reservationNotificationRolloutStartsAt()?.toISOString() || null,
     };
@@ -162,6 +173,22 @@ export async function sendDueReservationReminders() {
     orderBy: { startTime: "asc" },
   });
 
+  const upcomingDayRanges = upcomingReservations.map((reservation) => getKstDayRange(reservation.startTime));
+  const groupCandidates = upcomingDayRanges.length > 0
+    ? await prisma.reservation.findMany({
+        where: {
+          startTime: {
+            gte: new Date(Math.min(...upcomingDayRanges.map((range) => range.start.getTime()))),
+            lte: new Date(Math.max(...upcomingDayRanges.map((range) => range.end.getTime()))),
+          },
+          status: "CONFIRMED",
+          isNoShow: false,
+        },
+        orderBy: { startTime: "asc" },
+      })
+    : [];
+  const notificationGroups = buildReservationNotificationGroups(groupCandidates);
+
   const results = [];
   let sentCount = 0;
   let dryRunCount = 0;
@@ -171,9 +198,73 @@ export async function sendDueReservationReminders() {
   let recoveredCount = 0;
   let recoveryWaitingCount = 0;
   let contactSyncMs = 0;
+  let groupedSkipCount = 0;
+
+  const skipGroupedFollowers = async (leader: (typeof upcomingReservations)[number]) => {
+    const groupKey = reservationNotificationGroupKey(leader);
+    const groupMembers = groupKey ? notificationGroups.get(groupKey) || [] : [];
+    const followerIds = groupMembers.slice(1).map((member) => member.id);
+    if (followerIds.length === 0) return;
+
+    const skipReason = `같은 날·같은 방·동일 고객 안내문자는 첫 예약 ${formatKstStartTime(leader.startTime)} 기준으로 한 번만 발송합니다.`;
+    const skipped = await prisma.reservation.updateMany({
+      where: {
+        id: { in: followerIds },
+        notified: false,
+        notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "RECOVERING"] },
+        status: "CONFIRMED",
+        isNoShow: false,
+      },
+      data: {
+        notificationStatus: "SKIPPED",
+        notificationChannel: "SMS",
+        notificationError: skipReason,
+      },
+    });
+    groupedSkipCount += skipped.count;
+    await Promise.all(followerIds.map((id) => resolveAdminAlertByDedupeKey(notificationAlertKey(id))));
+  };
 
   const phoneReadyReservations = [];
   for (const reservation of upcomingReservations) {
+    const groupKey = reservationNotificationGroupKey(reservation);
+    const groupMembers = groupKey ? notificationGroups.get(groupKey) || [] : [];
+    const groupLeader = groupMembers[0] || null;
+    if (groupLeader && groupLeader.id !== reservation.id) {
+      const skipReason = `같은 날·같은 방·동일 고객 안내문자는 첫 예약 ${formatKstStartTime(groupLeader.startTime)} 기준으로 한 번만 발송합니다.`;
+      const skipped = await prisma.reservation.updateMany({
+        where: {
+          id: reservation.id,
+          notified: false,
+          notificationStatus: { in: ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "RECOVERING"] },
+          status: "CONFIRMED",
+          isNoShow: false,
+        },
+        data: {
+          notificationStatus: "SKIPPED",
+          notificationChannel: "SMS",
+          notificationError: skipReason,
+        },
+      });
+      if (skipped.count > 0) {
+        await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
+        groupedSkipCount += 1;
+        results.push({
+          reservationId: reservation.id,
+          customerName: reservation.customerName,
+          roomName: reservation.roomName,
+          startTime: reservation.startTime,
+          phoneLast4: phoneLast4(reservation.phone),
+          success: true,
+          dryRun: false,
+          channel: "SMS",
+          skipped: true,
+          error: skipReason,
+        });
+      }
+      continue;
+    }
+
     if (isValidKoreanMobilePhone(reservation.phone)) {
       phoneReadyReservations.push(reservation);
       continue;
@@ -359,6 +450,7 @@ export async function sendDueReservationReminders() {
           failedCount += 1;
         } else {
           await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
+          await skipGroupedFollowers(reservation);
           sentCount += 1;
         }
         continue;
@@ -421,6 +513,7 @@ export async function sendDueReservationReminders() {
         notificationError: null,
       });
       await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
+      await skipGroupedFollowers(reservation);
       sentCount += 1;
       continue;
     }
@@ -471,6 +564,7 @@ export async function sendDueReservationReminders() {
     failedCount,
     recoveredCount,
     recoveryWaitingCount,
+    groupedSkipCount,
     results,
     deferredUntil: null,
   };
