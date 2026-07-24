@@ -26,10 +26,12 @@ async function findMessage(
   report: SolapiReport,
   reservationId: string | null,
   notificationAttemptId: string | null,
+  messageDedupeKey: string | null,
 ) {
   const exactClauses: Array<Record<string, string>> = [];
   if (report.messageId) exactClauses.push({ providerMessageId: report.messageId });
   if (report.groupId) exactClauses.push({ providerMessageId: report.groupId });
+  if (messageDedupeKey) exactClauses.push({ dedupeKey: messageDedupeKey });
   if (reservationId && notificationAttemptId) {
     exactClauses.push({
       dedupeKey: reservationTestMessageDedupeKey(reservationId, notificationAttemptId),
@@ -68,7 +70,10 @@ export async function processSolapiReport(report: SolapiReport) {
   const notificationAttemptId = typeof report.customFields?.notificationAttemptId === "string"
     ? report.customFields.notificationAttemptId
     : null;
-  const message = await findMessage(report, reservationId, notificationAttemptId);
+  const messageDedupeKey = typeof report.customFields?.messageDedupeKey === "string"
+    ? report.customFields.messageDedupeKey
+    : null;
+  const message = await findMessage(report, reservationId, notificationAttemptId, messageDedupeKey);
   if (!message) return { processed: false, reason: "message-not-found" };
 
   const status: SolapiDeliveryStatus = mapSolapiDeliveryStatus(statusCode);
@@ -86,7 +91,9 @@ export async function processSolapiReport(report: SolapiReport) {
       },
     });
 
-    if (message.reservationId) {
+    const isStandardReservationReminder = message.dedupeKey.startsWith("reservation-reminder:")
+      || message.dedupeKey.startsWith("reservation-test:");
+    if (message.reservationId && isStandardReservationReminder) {
       await tx.reservation.update({
         where: { id: message.reservationId },
         data: {
@@ -107,9 +114,14 @@ export async function processSolapiReport(report: SolapiReport) {
     return { processed: true, status, reservationId: message.reservationId };
   }
 
+  const isDawnConfirmation = message.dedupeKey.startsWith("situation:dawn-booking:");
+  const alertKey = isDawnConfirmation
+    ? `dawn-booking-notification:${reservation.id}`
+    : notificationAlertKey(reservation.id);
+
   if (status === "DELIVERED") {
     after(async () => {
-      await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
+      await resolveAdminAlertByDedupeKey(alertKey);
     });
   } else if (status === "FAILED") {
     const failureAlert = buildReservationNotificationFailureAlert({
@@ -121,11 +133,11 @@ export async function processSolapiReport(report: SolapiReport) {
     });
     after(async () => {
       await createAdminAlert({
-        type: "NOTIFICATION_DELIVERY",
+        type: isDawnConfirmation ? "DAWN_BOOKING_NOTIFICATION_FAILED" : "NOTIFICATION_DELIVERY",
         severity: "CRITICAL",
-        title: failureAlert.title,
+        title: isDawnConfirmation ? "새벽 예약 확인 문자 수신 실패" : failureAlert.title,
         message: failureAlert.message,
-        dedupeKey: notificationAlertKey(reservation.id),
+        dedupeKey: alertKey,
       });
     });
   }

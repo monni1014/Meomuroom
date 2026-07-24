@@ -54,6 +54,7 @@
     "test:notification-rollout": "node --experimental-strip-types scripts/test-reservation-notification-rollout.mjs",
     "test:notification-edit-policy": "node --experimental-strip-types scripts/test-reservation-notification-edit-policy.mjs",
     "test:notification-recovery": "node --experimental-strip-types scripts/test-solapi-recovery-dedupe.mjs",
+    "test:dawn-booking-notifications": "node --experimental-strip-types scripts/test-dawn-booking-notifications.mjs",
     "test:forced-notification-link": "node scripts/test-forced-notification-reservation-link.mjs"
   },
   "dependencies": {

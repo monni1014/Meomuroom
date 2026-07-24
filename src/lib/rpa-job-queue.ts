@@ -61,10 +61,15 @@ function triggerPostRpaReservationCommunication(job: RpaEmailJob, reservationId?
   if (!reservationId || isCancellationJob(job)) return;
 
   void import("./reservation-notifications")
-    .then(({ sendDueReservationReminders }) => sendDueReservationReminders())
-    .then((result) => {
+    .then(async ({ sendDueReservationReminders }) => {
+      const { sendDueDawnBookingConfirmations } = await import("./dawn-booking-notifications");
+      const dawnResult = await sendDueDawnBookingConfirmations();
+      const result = await sendDueReservationReminders();
+      return { result, dawnResult };
+    })
+    .then(({ result, dawnResult }) => {
       console.log(
-        `[RPAQueue] Post-RPA contact sync/notification: reservation=${reservationId}, checked=${result.checkedCount}, sent=${result.sentCount}, waiting-contact=${result.waitingContactCount}, waiting-contact-sync=${result.waitingContactSyncCount}, google-sync=${result.contactSyncMs}ms, pipeline=${result.pipelineMs}ms`,
+        `[RPAQueue] Post-RPA contact sync/notification: reservation=${reservationId}, guide-checked=${result.checkedCount}, guide-sent=${result.sentCount}, dawn-checked=${dawnResult.checkedCount}, dawn-sent=${dawnResult.sentCount}, waiting-contact=${result.waitingContactCount + dawnResult.waitingContactCount}, waiting-contact-sync=${result.waitingContactSyncCount}, google-sync=${result.contactSyncMs}ms, pipeline=${result.pipelineMs + dawnResult.pipelineMs}ms`,
       );
     })
     .catch((error) => {

@@ -17,6 +17,7 @@ export async function registerNodeInstrumentation() {
   const { enqueueNaverStatusReconcile } = await import("@/lib/rpa-job-queue");
   const { checkProxySellerStatusAndAlert } = await import("@/lib/proxy-seller");
   const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
+  const { sendDueDawnBookingConfirmations } = await import("@/lib/dawn-booking-notifications");
   const { sendDueReservationEndReminders } = await import("@/lib/reservation-end-reminders");
   const { runReservationContactPreflight } = await import("@/lib/reservation-contact-preflight");
   const { syncUpcomingReservationContacts } = await import("@/lib/google-people");
@@ -100,10 +101,11 @@ export async function registerNodeInstrumentation() {
 
     notificationRunning = true;
     try {
+      const dawnResult = await sendDueDawnBookingConfirmations();
       const result = await sendDueReservationReminders();
-      if (result.checkedCount > 0) {
+      if (result.checkedCount > 0 || dawnResult.checkedCount > 0) {
         console.log(
-          `[Cron] Reservation notifications done (${label}): checked ${result.checkedCount}, sent ${result.sentCount}, recovered ${result.recoveredCount}, recovery-waiting ${result.recoveryWaitingCount}, dry-run ${result.dryRunCount}, waiting-contact ${result.waitingContactCount}, waiting-contact-sync ${result.waitingContactSyncCount}, failed ${result.failedCount}, google-sync ${result.contactSyncMs}ms, pipeline ${result.pipelineMs}ms`,
+          `[Cron] Reservation notifications done (${label}): guide checked ${result.checkedCount}, sent ${result.sentCount}, recovered ${result.recoveredCount}, recovery-waiting ${result.recoveryWaitingCount}, dry-run ${result.dryRunCount}, waiting-contact ${result.waitingContactCount}, waiting-contact-sync ${result.waitingContactSyncCount}, failed ${result.failedCount}, google-sync ${result.contactSyncMs}ms, pipeline ${result.pipelineMs}ms; dawn checked ${dawnResult.checkedCount}, sent ${dawnResult.sentCount}, recovered ${dawnResult.recoveredCount}, recovery-waiting ${dawnResult.recoveryWaitingCount}, dry-run ${dawnResult.dryRunCount}, waiting-contact ${dawnResult.waitingContactCount}, failed ${dawnResult.failedCount}, skipped ${dawnResult.skippedCount}, pipeline ${dawnResult.pipelineMs}ms`,
         );
       }
     } catch (error) {
@@ -329,7 +331,7 @@ export async function registerNodeInstrumentation() {
   });
 
   console.log("[Cron] Email auto sync started (15 second interval)");
-  console.log("[Cron] Reservation notification monitor started (30 second interval, immediate after email changes)");
+  console.log("[Cron] Reservation notification monitor started (30 second interval, immediate after email changes, dawn booking confirmation enabled by rollout setting)");
   console.log("[Cron] Reservation end reminder monitor started (10 minutes before end, 30 second interval, startup recovery)");
   console.log("[Cron] Reservation contact preflight started (5 minute interval)");
   console.log("[Cron] Google contacts sync started (5 minute interval after account connection)");

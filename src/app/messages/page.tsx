@@ -30,6 +30,10 @@ export default async function MessagesPage() {
             some: {
               direction: "OUTBOUND",
               occurredAt: { gte: today.start, lt: tomorrowStart },
+              OR: [
+                { dedupeKey: { startsWith: "reservation-reminder:" } },
+                { dedupeKey: { startsWith: "reservation-test:" } },
+              ],
             },
           },
         },
@@ -44,7 +48,13 @@ export default async function MessagesPage() {
     orderBy: { startTime: "asc" },
     include: {
       messages: {
-        where: { direction: "OUTBOUND" },
+        where: {
+          direction: "OUTBOUND",
+          OR: [
+            { dedupeKey: { startsWith: "reservation-reminder:" } },
+            { dedupeKey: { startsWith: "reservation-test:" } },
+          ],
+        },
         orderBy: { occurredAt: "desc" },
         take: 1,
         select: {

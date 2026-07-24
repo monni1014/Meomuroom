@@ -10,7 +10,7 @@ import {
   type SolapiHistoryMessage,
 } from "@/lib/solapi-delivery-status";
 
-type NotificationChannel = "SMS";
+type NotificationChannel = "SMS" | "LMS";
 
 export type SendResult = {
   success: boolean;
@@ -39,6 +39,7 @@ type SendOptions = {
 };
 
 const SOLAPI_SMS_MAX_BYTES = 90;
+const SOLAPI_LMS_MAX_BYTES = 2000;
 
 function env(name: string) {
   return process.env[name]?.trim() || "";
@@ -107,6 +108,109 @@ function getSolapiSmsByteLength(text: string) {
     (total, character) => total + (/^[\x00-\x7F]$/.test(character) ? 1 : 2),
     0,
   );
+}
+
+export async function sendReservationSituationMessage(input: {
+  reservationId: string;
+  notificationAttemptId: string;
+  messageDedupeKey: string;
+  situationType: string;
+  phone: string | null;
+  subject?: string | null;
+  text: string;
+}, options: SendOptions = {}): Promise<SendResult> {
+  const to = normalizeKoreanPhone(input.phone);
+  const text = input.text.trim();
+  const subject = input.subject?.trim() || "";
+  const messageBytes = getSolapiSmsByteLength(text);
+  const channel: NotificationChannel = subject || messageBytes > SOLAPI_SMS_MAX_BYTES ? "LMS" : "SMS";
+
+  if (!isValidKoreanMobilePhone(to)) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to: "",
+      from: "",
+      text,
+      error: to ? "Recipient mobile phone number is invalid." : "Recipient phone number is missing.",
+    };
+  }
+
+  if (!text) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to,
+      from: "",
+      text,
+      error: "상황별 문자 본문이 비어 있습니다.",
+    };
+  }
+
+  if (messageBytes > SOLAPI_LMS_MAX_BYTES) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to,
+      from: "",
+      text,
+      error: `상황별 문자 본문이 LMS ${SOLAPI_LMS_MAX_BYTES}byte 제한을 초과했습니다 (${messageBytes}bytes).`,
+    };
+  }
+
+  const encodingIssue = findSolapiTextEncodingIssue(text);
+  if (encodingIssue) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to,
+      from: "",
+      text,
+      error: `Solapi 발송 차단: ${encodingIssue}`,
+    };
+  }
+
+  const dryRun = options.forceDryRun === true
+    || (!options.forceRealSend && !isRealSendEnabledFor(to));
+
+  try {
+    const from = await getSenderPhone();
+    if (dryRun) {
+      console.log(`[Solapi situation dry-run] ${channel} from=${from} to=${to} type=${input.situationType}\n${text}`);
+      return { success: true, dryRun: true, channel, to, from, text };
+    }
+
+    const response = await getSolapiService().send({
+      to,
+      from,
+      text,
+      type: channel,
+      ...(subject ? { subject } : {}),
+      customFields: {
+        reservationId: input.reservationId,
+        notificationAttemptId: input.notificationAttemptId,
+        messageDedupeKey: input.messageDedupeKey,
+        messageCategory: "reservation",
+        situationType: input.situationType,
+      },
+    }, { showMessageList: true });
+    const messageId = response?.messageList?.[0]?.messageId || response?.groupInfo?.groupId || null;
+    return { success: true, dryRun: false, channel, to, from, text, messageId };
+  } catch (error) {
+    return {
+      success: false,
+      dryRun: false,
+      channel,
+      to,
+      from: "",
+      text,
+      error: getSolapiErrorMessage(error),
+    };
+  }
 }
 
 export async function lookupReservationReminderDelivery(input: {
