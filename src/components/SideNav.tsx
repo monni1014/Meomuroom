@@ -42,7 +42,7 @@ export function SideNav() {
             className="h-10 w-10 rounded-xl object-cover"
             priority
           />
-          <span className="font-bold text-xl text-slate-900 tracking-tight">머무룸 DX</span>
+          <span className="font-bold text-xl text-slate-900 tracking-tight">머무룸 AX</span>
         </div>
       </div>
 

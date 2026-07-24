@@ -1,4 +1,5 @@
 import { Calendar, Users, TrendingUp, Clock } from "lucide-react";
+import Image from "next/image";
 import { prisma } from "@/lib/prisma";
 import EmailSyncButton from "./EmailSyncButton";
 import AutoRefresh from "./AutoRefresh";
@@ -251,10 +252,19 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       <AutoRefresh />
       <header className="flex items-start justify-between gap-3 pb-4 pt-8 sm:items-center">
         <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-            머무룸 대시보드
-          </h1>
-          <p className="mt-1 text-xs leading-relaxed text-slate-500 sm:text-sm">실시간 예약 및 연동 이용현황을 분석합니다.</p>
+          <div className="flex items-center gap-2.5">
+            <Image
+              src="/icon-192.png"
+              alt="머무룸 로고"
+              width={40}
+              height={40}
+              className="h-10 w-10 rounded-xl"
+              priority
+            />
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+              머무룸 대시보드
+            </h1>
+          </div>
         </div>
         <EmailSyncButton />
       </header>
@@ -275,7 +285,6 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">{selectedMonthLabel} 현황</h2>
-              <span className="text-xs text-slate-400">선택한 월 예약 통계</span>
             </div>
             <div className="bg-slate-100 rounded-lg px-2 py-1 w-fit">
               <MonthFilter currentMonth={selectedMonthKey} months={monthOptions} />

@@ -5,9 +5,9 @@ import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistratio
 import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
-  title: "머무룸 DX",
+  title: "머무룸 AX",
   description: "머무룸 예약 및 운영 관리",
-  applicationName: "머무룸 DX",
+  applicationName: "머무룸 AX",
   icons: {
     icon: [
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
