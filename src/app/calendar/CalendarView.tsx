@@ -808,10 +808,10 @@ export default function CalendarPage() {
                         </span>
                       )}
                       <RpaStatusBadge memo={res.memo} createdAt={res.createdAt} updatedAt={res.updatedAt} />
-                      <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", getRoomBadgeStyle(res.roomName))}>
+                      <span className={cn("hidden px-1.5 py-0.5 rounded text-[10px] font-semibold md:inline-flex", getRoomBadgeStyle(res.roomName))}>
                         {res.roomName}
                       </span>
-                      <strong className={cn("text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
+                      <strong className={cn("hidden text-sm md:inline", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
                         {res.customerName}
                       </strong>
                       {!isCancelled && res.paymentMethod && (
