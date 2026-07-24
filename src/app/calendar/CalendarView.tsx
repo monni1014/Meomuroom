@@ -481,17 +481,17 @@ export default function CalendarPage() {
     }
   };
 
-  const getRoomAccentStyle = (room: string) => {
-    switch (room) {
-      case "머무룸1":
-        return "border-l-sky-400";
-      case "머무룸2":
-        return "border-l-purple-400";
-      case "머무룸3":
-        return "border-l-orange-400";
-      default:
-        return "border-l-slate-300";
-    }
+  const getSourceAccentStyle = (source: string, isCancelled: boolean) => {
+    if (isCancelled) return "border-l-slate-300";
+    if (source === "naver") return "border-l-green-500";
+    if (source === "spacecloud") return "border-l-indigo-500";
+    return "border-l-amber-500";
+  };
+
+  const getSourceTextStyle = (source: string) => {
+    if (source === "naver") return "text-green-700";
+    if (source === "spacecloud") return "text-indigo-700";
+    return "text-amber-700";
   };
 
   return (
@@ -759,7 +759,7 @@ export default function CalendarPage() {
                   title="더블클릭하면 이용현황에서 수정"
                   className={cn(
                     "relative flex flex-col gap-3 rounded-xl border border-l-4 p-3 cursor-pointer select-none sm:p-4 md:flex-row md:items-start md:justify-between md:gap-2",
-                    getRoomAccentStyle(res.roomName),
+                    getSourceAccentStyle(res.source, isCancelled),
                     isCancelled ? "bg-slate-100 border-slate-200" : "bg-slate-50 border-slate-100 hover:border-indigo-200"
                   )}
                 >
@@ -778,7 +778,7 @@ export default function CalendarPage() {
                         </strong>
                       </div>
                       <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
-                        <span>{getSourceDisplay(res.source)}</span>
+                        <span className={cn("font-semibold", getSourceTextStyle(res.source))}>{getSourceDisplay(res.source)}</span>
                         <span>·</span>
                         <span>{headCount}명</span>
                         {res.price > 0 && <><span>·</span><span>{res.price.toLocaleString()}원</span></>}
