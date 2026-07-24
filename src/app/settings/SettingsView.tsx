@@ -360,6 +360,11 @@ export default function SettingsView({
   const [isLoadingProxy, setIsLoadingProxy] = useState(false);
   const [isLoadingServer, setIsLoadingServer] = useState(false);
   const [serverStatusError, setServerStatusError] = useState<string | null>(null);
+  const [isRecoveringServer, setIsRecoveringServer] = useState(false);
+  const [serverRecoveryMessage, setServerRecoveryMessage] = useState<{
+    tone: "info" | "success" | "error";
+    text: string;
+  } | null>(null);
   const [savingRoom, setSavingRoom] = useState<string | null>(null);
   const [savingSituation, setSavingSituation] = useState<string | null>(null);
   const [isSavingProxyPayment, setIsSavingProxyPayment] = useState(false);
@@ -443,14 +448,88 @@ export default function SettingsView({
   }, []);
 
   useEffect(() => {
-    if (activeTab !== "server") return;
+    if (activeTab !== "server" || isRecoveringServer) return;
     const initialTimer = window.setTimeout(() => void loadServerStatus(), 0);
     const timer = window.setInterval(() => void loadServerStatus(), 30_000);
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
     };
-  }, [activeTab, loadServerStatus]);
+  }, [activeTab, isRecoveringServer, loadServerStatus]);
+
+  const runSafeServerRecovery = async () => {
+    const confirmed = window.confirm(
+      "진행 중인 예약·취소·문자 작업이 없을 때 머무룸 앱만 안전하게 재시작합니다. 계속할까요?",
+    );
+    if (!confirmed) return;
+
+    setIsRecoveringServer(true);
+    setServerRecoveryMessage({ tone: "info", text: "안전 복구 가능 여부를 확인하고 있습니다." });
+
+    try {
+      const response = await fetch("/api/settings/server-recovery", {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Memoroom-Recovery": "safe-app-restart-v1",
+        },
+        body: JSON.stringify({ confirmation: "SAFE_APP_RESTART" }),
+      });
+      const data = await response.json() as {
+        success?: boolean;
+        requestId?: string;
+        message?: string;
+        error?: string;
+      };
+      if (!response.ok || !data.success || !data.requestId) {
+        throw new Error(data.error || "안전 복구를 시작하지 못했습니다.");
+      }
+
+      setServerRecoveryMessage({ tone: "info", text: data.message || "머무룸 앱을 안전하게 재시작하고 있습니다." });
+      const deadline = Date.now() + 90_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+        try {
+          const statusResponse = await fetch(
+            `/api/settings/server-recovery?requestId=${encodeURIComponent(data.requestId)}`,
+            {
+              cache: "no-store",
+              headers: { "X-Memoroom-Recovery": "safe-app-restart-v1" },
+            },
+          );
+          if (!statusResponse.ok) continue;
+          const status = await statusResponse.json() as {
+            status?: "PENDING" | "RUNNING" | "COMPLETED" | "CANCELLED" | "FAILED";
+            message?: string;
+          };
+          if (status.status === "COMPLETED") {
+            setServerRecoveryMessage({ tone: "success", text: status.message || "안전 복구를 완료했습니다." });
+            await loadServerStatus();
+            return;
+          }
+          if (status.status === "CANCELLED" || status.status === "FAILED") {
+            setServerRecoveryMessage({ tone: "error", text: status.message || "안전 복구를 완료하지 못했습니다." });
+            return;
+          }
+        } catch {
+          // The app is briefly unreachable while systemd restarts it. Keep polling.
+        }
+      }
+
+      setServerRecoveryMessage({
+        tone: "error",
+        text: "복구 결과를 자동으로 확인하지 못했습니다. 잠시 후 ‘지금 점검’을 눌러주세요.",
+      });
+    } catch (error) {
+      setServerRecoveryMessage({
+        tone: "error",
+        text: error instanceof Error ? error.message : "안전 복구를 시작하지 못했습니다.",
+      });
+    } finally {
+      setIsRecoveringServer(false);
+    }
+  };
 
   const syncGooglePeople = async () => {
     setIsSyncingGooglePeople(true);
@@ -1531,8 +1610,39 @@ export default function SettingsView({
                 </div>
               </section>
 
-              <section className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold leading-6 text-sky-900">
-                이 화면은 상태만 읽습니다. 서버 재부팅이나 서비스 재시작은 자동으로 실행하지 않습니다.
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-full bg-sky-50 p-2.5 text-sky-600">
+                      <ServerCog className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-black text-slate-900">안전 복구</h2>
+                      <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                        앱이 느리거나 멈췄을 때 사용합니다. 예약 작업 중이면 실행되지 않습니다.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void runSafeServerRecovery()}
+                    disabled={isRecoveringServer}
+                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <RefreshCw className={cn("h-4 w-4", isRecoveringServer && "animate-spin")} />
+                    {isRecoveringServer ? "복구 중" : "안전 복구"}
+                  </button>
+                </div>
+                {serverRecoveryMessage && (
+                  <div className={cn(
+                    "mt-4 rounded-lg border px-3 py-2 text-sm font-bold",
+                    serverRecoveryMessage.tone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-800",
+                    serverRecoveryMessage.tone === "error" && "border-rose-200 bg-rose-50 text-rose-800",
+                    serverRecoveryMessage.tone === "info" && "border-sky-200 bg-sky-50 text-sky-800",
+                  )}>
+                    {serverRecoveryMessage.text}
+                  </div>
+                )}
               </section>
             </>
           ) : null}

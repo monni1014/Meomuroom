@@ -1,0 +1,18 @@
+[Unit]
+Description=Run an operator-requested Memoroom safe recovery
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=TZ=Asia/Seoul
+ExecStart=/usr/local/sbin/memoroom-manual-recovery
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/memoroom/shared
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

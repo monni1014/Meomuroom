@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for an operator-requested Memoroom safe recovery
+
+[Path]
+PathExists=/srv/memoroom/shared/manual-recovery.request
+Unit=memoroom-manual-recovery.service
+
+[Install]
+WantedBy=multi-user.target

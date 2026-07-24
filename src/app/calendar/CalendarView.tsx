@@ -435,7 +435,7 @@ export default function CalendarPage() {
       case "naver":
         return "네이버";
       case "spacecloud":
-        return "스페이스클라우드";
+        return "스클";
       case "direct":
         return "직접";
       default:

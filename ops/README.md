@@ -30,6 +30,25 @@ node scripts/reconcile-spacecloud-manual-blocks.mjs --plan --full
 
 There is no scheduled server reboot.
 
+## Operator safe recovery
+
+Settings > Cloud computer exposes a `Safe recovery` button for an operator-initiated app restart.
+The web process cannot run privileged commands. It writes one UUID request to
+`/srv/memoroom/shared/manual-recovery.request`, and
+`memoroom-manual-recovery.path` starts the root-owned recovery service.
+The service checks the RPA-idle endpoint again, restarts only
+`memoroom-app.service`, verifies the app and SQLite health endpoint, and writes
+the result to `/srv/memoroom/shared/manual-recovery-result.json`.
+Naver and SpaceCloud browser services and the Linux server remain running.
+
+Useful checks:
+
+```sh
+systemctl status memoroom-manual-recovery.path
+systemctl status memoroom-manual-recovery.service
+journalctl -u memoroom-manual-recovery.service -n 50 --no-pager
+```
+
 ## Freeze recovery
 
 `memoroom-healthcheck.timer` calls the local `/api/health` endpoint every minute.
