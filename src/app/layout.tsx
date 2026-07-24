@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   },
   appleWebApp: {
     capable: true,
-    title: "머무룸",
+    title: "머무룸 AX",
     statusBarStyle: "default",
   },
 };

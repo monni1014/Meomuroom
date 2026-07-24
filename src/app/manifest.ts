@@ -2,8 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: "/",
     name: "머무룸 AX",
-    short_name: "머무룸",
+    short_name: "머무룸 AX",
     description: "머무룸 예약 및 운영 관리",
     start_url: "/",
     display: "standalone",
