@@ -208,7 +208,7 @@ export default function CalendarPage() {
     if (window.matchMedia("(max-width: 639px)").matches) {
       window.requestAnimationFrame(() => {
         selectedDaySectionRef.current?.scrollIntoView({
-          behavior: "smooth",
+          behavior: "auto",
           block: "start",
         });
       });
