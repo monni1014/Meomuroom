@@ -738,8 +738,12 @@ export default function CalendarPage() {
                   key={res.id}
                   data-testid="mobile-agenda-card"
                   aria-expanded={isExpanded}
-                  onClick={() => setExpandedReservationId(isExpanded ? null : res.id)}
-                  onDoubleClick={() => {
+                  onClick={(event) => {
+                    if (isExpanded && (event.target as HTMLElement).closest('[data-agenda-detail="true"]')) return;
+                    setExpandedReservationId(isExpanded ? null : res.id);
+                  }}
+                  onDoubleClick={(event) => {
+                    if ((event.target as HTMLElement).closest("button, a, input, select, textarea, [role='button']")) return;
                     replaceCalendarState(selectedDate, roomFilter);
                     const params = new URLSearchParams({
                       selected: res.id,
@@ -781,7 +785,10 @@ export default function CalendarPage() {
                     <ChevronDown className={cn("h-4 w-4 shrink-0 text-slate-400 transition-transform", isExpanded && "rotate-180")} />
                   </div>
 
-                  <div className={cn("min-w-0 flex-1 space-y-3", !isExpanded && "hidden md:block")}>
+                  <div
+                    data-agenda-detail="true"
+                    className={cn("min-w-0 flex-1 space-y-3", !isExpanded && "hidden md:block")}
+                  >
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {isCancelled && (
                         res.isNoShow ? (
@@ -868,7 +875,7 @@ export default function CalendarPage() {
                   <div className={cn(
                     "w-full flex-col items-end gap-2 border-t border-slate-200 pt-3 md:w-auto md:border-t-0 md:pt-5",
                     isExpanded ? "flex" : "hidden md:flex"
-                  )}>
+                  )} data-agenda-detail="true">
                     {isCancelled && (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleRestore(res.id); }}
