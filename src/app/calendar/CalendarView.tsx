@@ -639,11 +639,12 @@ export default function CalendarPage() {
                 onClick={() => selectCalendarDay(day)}
                 className={cn(
                   "flex min-h-[72px] flex-col items-stretch rounded-lg p-0.5 relative transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
-                  isSelected
-                    ? "bg-indigo-50 text-indigo-800 ring-2 ring-inset ring-amber-400 sm:bg-indigo-600 sm:text-white sm:shadow-md sm:shadow-indigo-100"
-                    : isToday
-                    ? "bg-indigo-50 text-indigo-700"
+                  isToday
+                    ? "bg-orange-100 text-indigo-700"
+                    : isSelected
+                    ? "bg-indigo-50 text-indigo-800 sm:bg-indigo-600 sm:text-white"
                     : "hover:bg-slate-50 text-slate-700",
+                  isSelected && "ring-2 ring-inset ring-indigo-500 sm:shadow-md sm:shadow-indigo-100",
                   !isSameMonthOfActive && "opacity-30"
                 )}
               >
