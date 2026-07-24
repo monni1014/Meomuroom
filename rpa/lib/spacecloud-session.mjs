@@ -80,6 +80,53 @@ function findSpaceCloudRefreshCookie(state) {
   )) || null;
 }
 
+export function mergeSpaceCloudStorageState(primaryState, fallbackState) {
+  const primary = primaryState && typeof primaryState === "object" ? primaryState : {};
+  const fallback = fallbackState && typeof fallbackState === "object" ? fallbackState : {};
+  const primaryCookies = Array.isArray(primary.cookies) ? primary.cookies : [];
+  const fallbackCookies = Array.isArray(fallback.cookies) ? fallback.cookies : [];
+  const cookies = [...primaryCookies];
+
+  for (const fallbackCookie of fallbackCookies) {
+    const duplicate = cookies.some((cookie) => (
+      cookie.name === fallbackCookie.name
+      && cookie.domain === fallbackCookie.domain
+      && cookie.path === fallbackCookie.path
+    ));
+    if (!duplicate) cookies.push(fallbackCookie);
+  }
+
+  const primaryOrigins = Array.isArray(primary.origins) ? primary.origins : [];
+  const fallbackOrigins = Array.isArray(fallback.origins) ? fallback.origins : [];
+  const origins = primaryOrigins.map((origin) => ({
+    ...origin,
+    localStorage: Array.isArray(origin.localStorage) ? [...origin.localStorage] : [],
+  }));
+
+  for (const fallbackOrigin of fallbackOrigins) {
+    const currentOrigin = origins.find((origin) => origin.origin === fallbackOrigin.origin);
+    if (!currentOrigin) {
+      origins.push(fallbackOrigin);
+      continue;
+    }
+
+    const currentEntries = currentOrigin.localStorage || [];
+    for (const fallbackEntry of fallbackOrigin.localStorage || []) {
+      if (!currentEntries.some((entry) => entry.name === fallbackEntry.name)) {
+        currentEntries.push(fallbackEntry);
+      }
+    }
+    currentOrigin.localStorage = currentEntries;
+  }
+
+  return {
+    ...fallback,
+    ...primary,
+    cookies,
+    origins,
+  };
+}
+
 export function inspectSpaceCloudStorageState(state, nowMs = Date.now()) {
   const userInfoEntry = findSpaceCloudUserInfoEntry(state);
   const userInfo = userInfoEntry ? parseJson(userInfoEntry.value) : null;
@@ -230,7 +277,14 @@ export async function ensureSpaceCloudAccessToken(context, {
   nowMs = Date.now(),
   refreshBeforeMs = refreshBeforeMsFromEnv(),
 } = {}) {
-  const state = await context.storageState({ indexedDB: true });
+  const liveState = await context.storageState({ indexedDB: true });
+  const persistedState = existsSync(spaceCloudStorageStatePath)
+    ? parseJson(readFileSync(spaceCloudStorageStatePath, "utf8"))
+    : null;
+  // A newly started persistent context has not visited the partner origin yet,
+  // so Playwright can omit its localStorage from storageState(). Merge the
+  // durable login state before refreshing instead of treating that as logout.
+  const state = mergeSpaceCloudStorageState(liveState, persistedState);
   const session = inspectSpaceCloudStorageState(state, nowMs);
   if (
     !session.hasRefreshToken
@@ -278,7 +332,24 @@ export async function ensureSpaceCloudAccessToken(context, {
     }
   }, { origin: SPACECLOUD_PARTNER_ORIGIN, token: accessToken });
 
-  const refreshedContextState = await context.storageState({ indexedDB: true });
+  await Promise.all(context.pages().map((page) => page.evaluate(({ origin, token }) => {
+    if (location.origin !== origin) return;
+    try {
+      const userInfo = JSON.parse(localStorage.getItem("spacecloud__userInfo") || "null");
+      if (!userInfo || typeof userInfo !== "object") return;
+      localStorage.setItem("spacecloud__userInfo", JSON.stringify({
+        ...userInfo,
+        accessToken: token,
+      }));
+    } catch {
+      // The merged durable storage state below remains the source of truth.
+    }
+  }, { origin: SPACECLOUD_PARTNER_ORIGIN, token: accessToken }).catch(() => {})));
+
+  const refreshedContextState = mergeSpaceCloudStorageState(
+    await context.storageState({ indexedDB: true }),
+    state,
+  );
   const refreshedState = applySpaceCloudAccessTokenToStorageState(
     refreshedContextState,
     accessToken,
@@ -321,9 +392,9 @@ export function spaceCloudBrowserOptions(headless) {
   return {
     headless,
     useProxy,
-    // SpaceCloud write requests can reject a stale persistent browser profile
-    // even while read requests still succeed. Prefer a fresh isolated context;
-    // shared reuse remains an explicit opt-in for controlled diagnostics.
+    sharedBrowserRole: "spacecloud",
+    // Naver and SpaceCloud use separate persistent browser hosts and profiles.
+    // Reuse remains configurable so operators can isolate a session if needed.
     reuse: headless && useProxy && reuseSharedBrowser,
   };
 }

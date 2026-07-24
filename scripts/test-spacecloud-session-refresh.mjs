@@ -4,6 +4,7 @@ import {
   applySpaceCloudAccessTokenToStorageState,
   decodeJwtExpiresAt,
   inspectSpaceCloudStorageState,
+  mergeSpaceCloudStorageState,
   shouldRefreshSpaceCloudAccessToken,
 } from "../rpa/lib/spacecloud-session.mjs";
 
@@ -69,6 +70,19 @@ const renewedEntry = renewedState.origins[0].localStorage.find(
 );
 assert.equal(JSON.parse(renewedEntry.value).accessToken, renewedToken);
 assert.notEqual(renewedState, state);
+
+const mergedState = mergeSpaceCloudStorageState({
+  cookies: [{
+    name: "live_cookie",
+    value: "live",
+    domain: ".spacecloud.kr",
+    path: "/",
+  }],
+  origins: [],
+}, state);
+assert.equal(mergedState.cookies.some((cookie) => cookie.name === "live_cookie"), true);
+assert.equal(mergedState.cookies.some((cookie) => cookie.name === "refresh_token"), true);
+assert.equal(inspectSpaceCloudStorageState(mergedState, nowMs).hasAccessToken, true);
 
 const externalSource = await readFile(
   new URL("../rpa/spacecloud-external-reservation.mjs", import.meta.url),

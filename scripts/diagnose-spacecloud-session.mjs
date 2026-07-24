@@ -33,6 +33,7 @@ async function main() {
     headless: true,
     useProxy: shouldUseSpaceCloudProxy(),
     reuse: reuseShared,
+    sharedBrowserRole: "spacecloud",
   });
 
   try {

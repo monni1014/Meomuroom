@@ -1,7 +1,7 @@
 [Unit]
 Description=Memoroom Next.js application and reservation workers
-After=network-online.target
-Wants=network-online.target
+After=network-online.target memoroom-rpa-browser@naver.service memoroom-rpa-browser@spacecloud.service
+Wants=network-online.target memoroom-rpa-browser@naver.service memoroom-rpa-browser@spacecloud.service
 
 [Service]
 Type=simple
@@ -19,8 +19,9 @@ Environment=PLAYWRIGHT_BROWSERS_PATH=/srv/memoroom/.cache/ms-playwright
 Environment=DISABLE_BACKGROUND_JOBS=0
 Environment=RPA_EXECUTION_ENABLED=true
 Environment=RPA_HEADLESS=true
+Environment=RPA_SHARED_BROWSER_SYSTEMD_MANAGED=true
 Environment=SPACECLOUD_RPA_USE_XVFB=true
-Environment=SPACECLOUD_RPA_REUSE_BROWSER=false
+Environment=SPACECLOUD_RPA_REUSE_BROWSER=true
 ExecStartPre=/usr/bin/rm -f /srv/memoroom/app/rpa/.runtime/browser-host.json /srv/memoroom/app/rpa/.runtime/browser-host-starting.lock
 ExecStart=/usr/bin/npm start
 ExecStop=/usr/bin/node /srv/memoroom/app/ops/scripts/memoroom-wait-for-rpa-idle.mjs

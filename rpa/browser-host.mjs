@@ -13,6 +13,8 @@ import { parseArgs } from "./lib/cli.mjs";
 import { assertRpaExecutionAllowed, getProxyConfig } from "./lib/env.mjs";
 import {
   installRpaResourceBlocking,
+  normalizeSharedBrowserRole,
+  sharedBrowserRuntimePaths,
   shouldUseRpaProxy,
 } from "./lib/browser.mjs";
 import { shouldCloseRpaPage } from "./lib/popup-cleanup.mjs";
@@ -21,11 +23,16 @@ import {
   spaceCloudStorageStatePath,
 } from "./lib/paths.mjs";
 
-const runtimeDir = resolve("rpa/.runtime");
-const statePath = resolve(runtimeDir, "browser-host.json");
-const profileDir = resolve(runtimeDir, "chromium-profile");
 const args = parseArgs(process.argv);
+const role = normalizeSharedBrowserRole(args.role);
+const {
+  runtimeDir,
+  statePath,
+  profileDir,
+} = sharedBrowserRuntimePaths(role);
 const headless = args.headless !== "false";
+const useProxy = args["use-proxy"] !== "false";
+const forceProxy = args["force-proxy"] === "true";
 const popupCleanupIntervalMs = Math.max(
   15_000,
   Number(process.env.RPA_POPUP_CLEANUP_INTERVAL_MS) || 60_000,
@@ -119,7 +126,7 @@ async function waitForCdp(endpoint, timeoutMs = 20_000) {
 
 const cdpPort = await freePort();
 const cdpEndpoint = `http://127.0.0.1:${cdpPort}`;
-const proxyEnabled = await shouldUseRpaProxy({ useProxy: true, forceProxy: false });
+const proxyEnabled = await shouldUseRpaProxy({ useProxy, forceProxy });
 const proxy = proxyEnabled ? getProxyConfig() : null;
 
 const chromiumArgs = [
@@ -158,16 +165,16 @@ if (!browser) throw new Error("Chromium persistent browser was not available.");
 
 await context.setExtraHTTPHeaders({ "Save-Data": "on" });
 await installRpaResourceBlocking(context);
-await applyStorageState(context, naverStorageStatePath);
-await applyStorageState(context, spaceCloudStorageStatePath);
+const storageStatePath = role === "naver"
+  ? naverStorageStatePath
+  : spaceCloudStorageStatePath;
+await applyStorageState(context, storageStatePath);
 
 const initialPages = context.pages();
-const naverPage = initialPages[0] || await context.newPage();
-await assignPageRole(naverPage, "naver");
-const spaceCloudPage = await context.newPage();
-await assignPageRole(spaceCloudPage, "spacecloud");
+const fixedPage = initialPages[0] || await context.newPage();
+await assignPageRole(fixedPage, role);
 
-const fixedPages = new Set([naverPage, spaceCloudPage]);
+const fixedPages = new Set([fixedPage]);
 const pageMetadata = new Map();
 
 function trackPage(page) {
@@ -229,33 +236,27 @@ const popupCleanupTimer = setInterval(() => {
 }, popupCleanupIntervalMs);
 popupCleanupTimer.unref();
 
-let authVersions = {
-  naver: storageVersion(naverStorageStatePath),
-  spacecloud: storageVersion(spaceCloudStorageStatePath),
-};
+let authVersion = storageVersion(storageStatePath);
 
 const authTimer = setInterval(async () => {
-  const nextVersions = {
-    naver: storageVersion(naverStorageStatePath),
-    spacecloud: storageVersion(spaceCloudStorageStatePath),
-  };
-  if (nextVersions.naver !== authVersions.naver) {
-    await applyStorageState(context, naverStorageStatePath).catch(console.error);
+  const nextVersion = storageVersion(storageStatePath);
+  if (nextVersion !== authVersion) {
+    await applyStorageState(context, storageStatePath).catch(console.error);
   }
-  if (nextVersions.spacecloud !== authVersions.spacecloud) {
-    await applyStorageState(context, spaceCloudStorageStatePath).catch(console.error);
-  }
-  authVersions = nextVersions;
+  authVersion = nextVersion;
 }, 2_000);
 authTimer.unref();
 
 writeFileSync(statePath, JSON.stringify({
+  role,
   cdpEndpoint,
   pid: process.pid,
   headless,
   networkMode: proxyEnabled ? "proxy" : "direct",
   startedAt: new Date().toISOString(),
 }, null, 2));
+
+console.log(`[RPA browser] ${role} Chromium host ready (${proxyEnabled ? "proxy" : "direct"}).`);
 
 let shuttingDown = false;
 async function shutdown() {

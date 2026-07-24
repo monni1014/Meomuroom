@@ -227,7 +227,11 @@ async function main() {
   let page;
 
   try {
-    browser = await launchRpaBrowser({ headless, reuse: headless });
+    browser = await launchRpaBrowser({
+      headless,
+      reuse: headless,
+      sharedBrowserRole: "naver",
+    });
     const context = await newRpaContext(browser, {
       storageState: naverStorageStatePath,
       rpaRole: "naver",

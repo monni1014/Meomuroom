@@ -1,0 +1,35 @@
+[Unit]
+Description=Memoroom isolated %i RPA Chromium host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=memoroom
+Group=memoroom
+WorkingDirectory=/srv/memoroom/app
+Environment=NODE_ENV=production
+Environment=TZ=Asia/Seoul
+Environment=HOME=/srv/memoroom
+Environment=XDG_CONFIG_HOME=/srv/memoroom/.config
+Environment=XDG_CACHE_HOME=/srv/memoroom/.cache
+Environment=PLAYWRIGHT_BROWSERS_PATH=/srv/memoroom/.cache/ms-playwright
+Environment=RPA_EXECUTION_ENABLED=true
+Environment=RPA_HEADLESS=true
+ExecStartPre=/usr/bin/rm -f /srv/memoroom/app/rpa/.runtime/browser-host-%i.json /srv/memoroom/app/rpa/.runtime/browser-host-%i-starting.lock
+ExecStart=/usr/bin/node /srv/memoroom/app/rpa/browser-host.mjs --headless=true --role=%i --use-proxy=true --force-proxy=false
+ExecStopPost=/usr/bin/rm -f /srv/memoroom/app/rpa/.runtime/browser-host-%i.json /srv/memoroom/app/rpa/.runtime/browser-host-%i-starting.lock
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+KillMode=control-group
+SendSIGKILL=true
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/memoroom/app /srv/memoroom/shared
+
+[Install]
+WantedBy=multi-user.target

@@ -1022,7 +1022,11 @@ async function main() {
   try {
     timer.mark("lock-acquired");
     const headless = resolveRpaHeadless();
-    browser = await launchRpaBrowser({ headless, reuse: headless });
+    browser = await launchRpaBrowser({
+      headless,
+      reuse: headless,
+      sharedBrowserRole: "naver",
+    });
     const context = await newRpaContext(browser, {
       storageState: naverStorageStatePath,
       rpaRole: "naver",

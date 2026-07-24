@@ -13,8 +13,28 @@ const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
 const BLOCKED_FILE_EXTENSIONS = /\.(?:avif|gif|ico|jpe?g|mp3|mp4|ogg|png|svg|ttf|webm|webp|woff2?)($|[?#])/i;
 const BLOCKED_URL_PATTERNS =
   /analytics|googletagmanager|doubleclick|adservice|criteo|hotjar|clarity|amplitude|mixpanel|facebook\.com\/tr|sentry/i;
-const SHARED_BROWSER_STATE_PATH = resolve("rpa/.runtime/browser-host.json");
-const SHARED_BROWSER_START_LOCK_PATH = resolve("rpa/.runtime/browser-host-starting.lock");
+const SHARED_BROWSER_ROLES = new Set(["naver", "spacecloud"]);
+
+export function normalizeSharedBrowserRole(value) {
+  const role = String(value || "").trim().toLowerCase();
+  if (!SHARED_BROWSER_ROLES.has(role)) {
+    throw new Error(`Shared RPA Chromium requires an isolated role: ${[...SHARED_BROWSER_ROLES].join(", ")}.`);
+  }
+  return role;
+}
+
+export function sharedBrowserRuntimePaths(value) {
+  const role = normalizeSharedBrowserRole(value);
+  const runtimeDir = resolve("rpa/.runtime");
+  return {
+    role,
+    runtimeDir,
+    statePath: resolve(runtimeDir, `browser-host-${role}.json`),
+    startLockPath: resolve(runtimeDir, `browser-host-${role}-starting.lock`),
+    profileDir: resolve(runtimeDir, `chromium-profile-${role}`),
+    logPath: resolve(runtimeDir, `browser-host-${role}.log`),
+  };
+}
 
 function readBooleanEnv(name, fallback) {
   const value = process.env[name]?.trim().toLowerCase();
@@ -120,8 +140,9 @@ export async function installRpaResourceBlocking(context) {
   });
 }
 
-function decorateSharedBrowser(browser, { useProxy, forceProxy }) {
+function decorateSharedBrowser(browser, { useProxy, forceProxy, sharedBrowserRole }) {
   browser.__memoroomShared = true;
+  browser.__memoroomSharedRole = sharedBrowserRole;
   browser.__memoroomUseProxy = useProxy;
   browser.__memoroomForceProxy = forceProxy;
   browser.close = async () => {
@@ -143,68 +164,89 @@ function decorateSharedBrowser(browser, { useProxy, forceProxy }) {
   return browser;
 }
 
-function readSharedBrowserState() {
+function readSharedBrowserState(sharedBrowserRole) {
+  const { statePath } = sharedBrowserRuntimePaths(sharedBrowserRole);
   try {
-    return JSON.parse(readFileSync(SHARED_BROWSER_STATE_PATH, "utf8"));
+    return JSON.parse(readFileSync(statePath, "utf8"));
   } catch {
     return null;
   }
 }
 
-async function connectSharedBrowser({ useProxy, forceProxy }) {
-  const state = readSharedBrowserState();
-  if (!state?.cdpEndpoint) return null;
+async function connectSharedBrowser({ useProxy, forceProxy, sharedBrowserRole }) {
+  const state = readSharedBrowserState(sharedBrowserRole);
+  if (!state?.cdpEndpoint || state.role !== sharedBrowserRole) return null;
 
   try {
     const browser = await chromium.connectOverCDP(state.cdpEndpoint, { timeout: 2_500 });
-    return decorateSharedBrowser(browser, { useProxy, forceProxy });
+    return decorateSharedBrowser(browser, { useProxy, forceProxy, sharedBrowserRole });
   } catch {
     return null;
   }
 }
 
-async function ensureSharedBrowser({ headless, useProxy, forceProxy }) {
-  const connected = await connectSharedBrowser({ useProxy, forceProxy });
+async function ensureSharedBrowser({ headless, useProxy, forceProxy, sharedBrowserRole }) {
+  const role = normalizeSharedBrowserRole(sharedBrowserRole);
+  const paths = sharedBrowserRuntimePaths(role);
+  const connected = await connectSharedBrowser({ useProxy, forceProxy, sharedBrowserRole: role });
   if (connected) return connected;
 
   const { mkdirSync, openSync, closeSync, rmSync } = await import("node:fs");
-  mkdirSync(resolve("rpa/.runtime"), { recursive: true });
+  mkdirSync(paths.runtimeDir, { recursive: true });
+  const systemdManaged = readBooleanEnv("RPA_SHARED_BROWSER_SYSTEMD_MANAGED", false);
 
   let ownsStartLock = false;
-  try {
-    const handle = openSync(SHARED_BROWSER_START_LOCK_PATH, "wx");
-    closeSync(handle);
-    ownsStartLock = true;
-  } catch {
-    // Another RPA client is already starting the host.
+  if (!systemdManaged) {
+    try {
+      const handle = openSync(paths.startLockPath, "wx");
+      closeSync(handle);
+      ownsStartLock = true;
+    } catch {
+      // Another RPA client is already starting the host.
+    }
   }
 
   if (ownsStartLock) {
-    const child = spawn(process.execPath, [
-      resolve("rpa/browser-host.mjs"),
-      `--headless=${headless ? "true" : "false"}`,
-    ], {
-      cwd: process.cwd(),
-      detached: true,
-      stdio: "ignore",
-      env: process.env,
-      windowsHide: headless,
-    });
-    child.unref();
+    const logHandle = openSync(paths.logPath, "a");
+    try {
+      const child = spawn(process.execPath, [
+        resolve("rpa/browser-host.mjs"),
+        `--headless=${headless ? "true" : "false"}`,
+        `--role=${role}`,
+        `--use-proxy=${useProxy ? "true" : "false"}`,
+        `--force-proxy=${forceProxy ? "true" : "false"}`,
+      ], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: ["ignore", logHandle, logHandle],
+        env: process.env,
+        windowsHide: headless,
+      });
+      child.unref();
+    } finally {
+      closeSync(logHandle);
+    }
   }
 
   const deadline = Date.now() + 20_000;
   try {
     while (Date.now() < deadline) {
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
-      const browser = await connectSharedBrowser({ useProxy, forceProxy });
+      const browser = await connectSharedBrowser({
+        useProxy,
+        forceProxy,
+        sharedBrowserRole: role,
+      });
       if (browser) return browser;
     }
   } finally {
-    if (ownsStartLock) rmSync(SHARED_BROWSER_START_LOCK_PATH, { force: true });
+    if (ownsStartLock) rmSync(paths.startLockPath, { force: true });
   }
 
-  throw new Error("Shared RPA Chromium did not start within 20 seconds.");
+  const recoveryHint = systemdManaged
+    ? `Check memoroom-rpa-browser@${role}.service.`
+    : `Check ${paths.logPath}.`;
+  throw new Error(`Shared RPA Chromium (${role}) did not start within 20 seconds. ${recoveryHint}`);
 }
 
 export async function launchRpaBrowser({
@@ -212,12 +254,19 @@ export async function launchRpaBrowser({
   useProxy = true,
   forceProxy = false,
   reuse = false,
+  sharedBrowserRole,
 } = {}) {
   assertRpaExecutionAllowed();
 
   if (reuse) {
-    console.log(`[RPA browser] Reuse shared Chromium (${headless ? "headless" : "headed"}).`);
-    return ensureSharedBrowser({ headless, useProxy, forceProxy });
+    const role = normalizeSharedBrowserRole(sharedBrowserRole);
+    console.log(`[RPA browser] Reuse isolated ${role} Chromium (${headless ? "headless" : "headed"}).`);
+    return ensureSharedBrowser({
+      headless,
+      useProxy,
+      forceProxy,
+      sharedBrowserRole: role,
+    });
   }
 
   const proxyEnabled = await shouldUseRpaProxy({ useProxy, forceProxy });
@@ -249,6 +298,11 @@ export async function newRpaContext(browser, options = {}) {
   const role = contextRoleFromOptions({ ...options, rpaRole });
 
   if (browser.__memoroomShared) {
+    if (browser.__memoroomSharedRole !== role) {
+      throw new Error(
+        `Shared RPA Chromium role mismatch: expected ${role}, connected ${browser.__memoroomSharedRole}.`,
+      );
+    }
     const sharedContext = browser.contexts()[0];
     if (!sharedContext) throw new Error("Shared RPA Chromium has no persistent context.");
     return decorateReusableContext(sharedContext, reusePage, role);
