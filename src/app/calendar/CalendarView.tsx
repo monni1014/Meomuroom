@@ -776,16 +776,6 @@ export default function CalendarPage() {
                         <strong className={cn("min-w-0 truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
                           {res.customerName ?? "이름 미확인"}
                         </strong>
-                        {(hasUnpaid || hasUnpaidExtra) && (
-                          <span className="flex shrink-0 items-center gap-0.5" aria-label="미결제 상태">
-                            {hasUnpaid && (
-                              <Star className="h-3 w-3 fill-amber-400 text-amber-500 drop-shadow-sm" aria-label="예약금 미수" />
-                            )}
-                            {hasUnpaidExtra && (
-                              <Star className="h-3 w-3 fill-red-500 text-red-500 drop-shadow-sm" aria-label="추가금 미결제" />
-                            )}
-                          </span>
-                        )}
                       </div>
                       <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
                         <span>{getSourceDisplay(res.source)}</span>
@@ -796,7 +786,19 @@ export default function CalendarPage() {
                         {!isCancelled && !res.isPaid && <span className="font-bold text-rose-600">· 미수</span>}
                       </div>
                     </div>
-                    <ChevronDown className={cn("h-4 w-4 shrink-0 text-slate-400 transition-transform", isExpanded && "rotate-180")} />
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {(hasUnpaid || hasUnpaidExtra) && (
+                        <span className="flex items-center gap-0.5" aria-label="미결제 상태">
+                          {hasUnpaid && (
+                            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500 drop-shadow-sm" aria-label="예약금 미수" />
+                          )}
+                          {hasUnpaidExtra && (
+                            <Star className="h-3.5 w-3.5 fill-red-500 text-red-500 drop-shadow-sm" aria-label="추가금 미결제" />
+                          )}
+                        </span>
+                      )}
+                      <ChevronDown className={cn("h-4 w-4 text-slate-400 transition-transform", isExpanded && "rotate-180")} />
+                    </div>
                   </div>
 
                   <div
