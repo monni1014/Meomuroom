@@ -732,6 +732,10 @@ export default function CalendarPage() {
               const isCancelled = res.status === "CANCELLED";
               const isExpanded = expandedReservationId === res.id;
               const headCount = res.usageLog?.headCount || 1;
+              const hasUnpaid = !isCancelled && !res.isPaid;
+              const hasUnpaidExtra = !isCancelled
+                && (res.usageLog?.extraPrice ?? 0) > 0
+                && !res.usageLog?.isExtraPaid;
 
               return (
                 <div
@@ -769,9 +773,19 @@ export default function CalendarPage() {
                         <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold", getRoomCalendarStyle(res.roomName, isCancelled))}>
                           {res.roomName}
                         </span>
-                        <strong className={cn("truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
+                        <strong className={cn("min-w-0 truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
                           {res.customerName ?? "이름 미확인"}
                         </strong>
+                        {(hasUnpaid || hasUnpaidExtra) && (
+                          <span className="flex shrink-0 items-center gap-0.5" aria-label="미결제 상태">
+                            {hasUnpaid && (
+                              <Star className="h-3 w-3 fill-amber-400 text-amber-500 drop-shadow-sm" aria-label="예약금 미수" />
+                            )}
+                            {hasUnpaidExtra && (
+                              <Star className="h-3 w-3 fill-red-500 text-red-500 drop-shadow-sm" aria-label="추가금 미결제" />
+                            )}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
                         <span>{getSourceDisplay(res.source)}</span>
@@ -821,6 +835,16 @@ export default function CalendarPage() {
                       <strong className={cn("hidden text-sm md:inline", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
                         {res.customerName}
                       </strong>
+                      {(hasUnpaid || hasUnpaidExtra) && (
+                        <span className="hidden items-center gap-0.5 md:inline-flex" aria-label="미결제 상태">
+                          {hasUnpaid && (
+                            <Star className="h-3 w-3 fill-amber-400 text-amber-500 drop-shadow-sm" aria-label="예약금 미수" />
+                          )}
+                          {hasUnpaidExtra && (
+                            <Star className="h-3 w-3 fill-red-500 text-red-500 drop-shadow-sm" aria-label="추가금 미결제" />
+                          )}
+                        </span>
+                      )}
                       {!isCancelled && res.paymentMethod && (
                         <span className={cn(
                           "px-1.5 py-0.5 rounded text-[10px] font-semibold border",
