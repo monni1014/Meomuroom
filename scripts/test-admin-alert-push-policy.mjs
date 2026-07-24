@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { shouldSendAdminAlertPush } from "../src/lib/admin-alert-push-policy.ts";
 
-for (const type of ["RPA_UI_CHANGE", "RPA_LOGIN_SESSION", "RPA_NETWORK", "RPA_FAILURE"]) {
+for (const type of ["RPA_UI_CHANGE", "RPA_LOGIN_SESSION", "RPA_LOGIN_EXPIRY_WARNING", "RPA_NETWORK", "RPA_FAILURE"]) {
   assert.equal(shouldSendAdminAlertPush(type, "WARNING"), true, `${type} must send an app push`);
 }
 

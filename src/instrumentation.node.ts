@@ -25,6 +25,7 @@ export async function registerNodeInstrumentation() {
   const { resolveCompetitorStartupMode } = await import("@/lib/competitor-scan-range");
   const { runRpaUiHealthChecks } = await import("@/lib/rpa-ui-monitor");
   const { checkTailscaleDevicesAndAlert } = await import("@/lib/tailscale-device-monitor");
+  const { checkRpaSessionExpiryWarnings } = await import("@/lib/rpa-session-expiry-monitor");
 
   let running = false;
   let proxyStatusRunning = false;
@@ -36,6 +37,7 @@ export async function registerNodeInstrumentation() {
   let competitorScanRunning = false;
   let rpaUiHealthRunning = false;
   let tailscaleDeviceMonitorRunning = false;
+  let rpaSessionExpiryRunning = false;
 
   async function runEmailSync(label: string) {
     if (running) {
@@ -227,6 +229,26 @@ export async function registerNodeInstrumentation() {
     }
   }
 
+  async function runRpaSessionExpiryMonitor(label: string) {
+    if (rpaSessionExpiryRunning) {
+      console.log(`[Cron] Previous RPA session expiry check is still running. Skipping ${label}.`);
+      return;
+    }
+
+    rpaSessionExpiryRunning = true;
+    try {
+      const result = await checkRpaSessionExpiryWarnings();
+      const summary = result.results
+        .map((item) => `${item.platform}=${item.status}${"remainingDays" in item ? `(${item.remainingDays}d)` : ""}`)
+        .join(", ");
+      console.log(`[Cron] RPA session expiry check done (${label}): ${summary || "-"}`);
+    } catch (error) {
+      console.error(`[Cron] RPA session expiry check failed (${label}):`, error);
+    } finally {
+      rpaSessionExpiryRunning = false;
+    }
+  }
+
   setTimeout(() => {
     void runEmailSync("startup");
   }, 0);
@@ -260,6 +282,10 @@ export async function registerNodeInstrumentation() {
     void runTailscaleDeviceMonitor("startup");
   }, 40_000);
 
+  setTimeout(() => {
+    void runRpaSessionExpiryMonitor("startup catch-up");
+  }, 35_000);
+
   schedule("*/15 * * * * *", async () => {
     await runEmailSync("cron");
   });
@@ -286,6 +312,12 @@ export async function registerNodeInstrumentation() {
 
   schedule("*/5 * * * *", async () => {
     await runTailscaleDeviceMonitor("cron");
+  });
+
+  schedule("0 9 * * *", async () => {
+    await runRpaSessionExpiryMonitor("09:00 daily warning check");
+  }, {
+    timezone: "Asia/Seoul",
   });
 
   schedule("0 10,22 * * *", async () => {
@@ -345,5 +377,6 @@ export async function registerNodeInstrumentation() {
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
   console.log("[Cron] RPA UI health monitor started (02:20/08:20/14:20/20:20 read-only checks)");
   console.log("[Cron] Tailscale device monitor started (5 minute interval, alert after 15 continuous offline minutes)");
+  console.log("[Cron] Naver/SpaceCloud login expiry monitor started (09:00 daily, warnings at 3/2/1 days before expiry)");
   console.log("[Cron] Competitor monitor started (07:00 today+tomorrow, 12:00/15:00/18:00 today+7 days, 23:00 tomorrow through month-end or next-month day 15 in the final 7 days, monthly baseline at 07:00 on day 1)");
 }
