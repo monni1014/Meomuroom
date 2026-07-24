@@ -300,6 +300,56 @@ function ServerMetricCard({
   );
 }
 
+function RamProcessDetails({
+  processes,
+  className,
+}: {
+  processes: ServerStatusSnapshot["memory"]["processes"];
+  className?: string;
+}) {
+  return (
+    <section className={cn("rounded-xl border border-violet-200 bg-white p-5 shadow-sm", className)}>
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <MemoryStick className="h-5 w-5 text-violet-600" />
+            <h2 className="text-base font-black text-slate-900">RAM 작업관리자</h2>
+          </div>
+          <p className="mt-1 text-xs font-semibold text-slate-500">
+            현재 실행 중인 작업을 종류별로 묶어 표시합니다.
+          </p>
+        </div>
+        <p className="text-xs font-bold text-slate-400">30초마다 자동 갱신</p>
+      </div>
+
+      {processes.length === 0 ? (
+        <p className="mt-4 rounded-lg bg-slate-50 px-3 py-4 text-center text-sm font-bold text-slate-400">
+          실행 중인 작업 정보를 확인하지 못했습니다.
+        </p>
+      ) : (
+        <div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200">
+          {processes.map((process) => (
+            <div key={process.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_100px_100px]">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black text-slate-900">{process.label}</p>
+                <p className="mt-0.5 text-[11px] font-semibold text-slate-400">
+                  {process.processCount.toLocaleString("ko-KR")}개 프로세스
+                </p>
+              </div>
+              <p className="text-right text-sm font-black text-slate-900">{formatBytes(process.rssBytes)}</p>
+              <p className="hidden text-right text-xs font-bold text-slate-500 sm:block">{process.usedPercent}%</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">
+        RPA 브라우저는 예약 처리 중에만 나타나며, 작업이 끝나면 목록에서 사라집니다.
+      </p>
+    </section>
+  );
+}
+
 function TabButton({
   active,
   icon: Icon,
@@ -1463,6 +1513,12 @@ export default function SettingsView({
                   iconButtonLabel={showRamDetails ? "RAM 상세 닫기" : "RAM 상세 보기"}
                   iconExpanded={showRamDetails}
                 />
+                {showRamDetails && (
+                  <RamProcessDetails
+                    processes={serverStatus.memory.processes}
+                    className="sm:hidden"
+                  />
+                )}
                 <ServerMetricCard
                   icon={Activity}
                   title="머무룸 앱 RAM"
@@ -1510,45 +1566,10 @@ export default function SettingsView({
               </section>
 
               {showRamDetails && (
-                <section className="rounded-xl border border-violet-200 bg-white p-5 shadow-sm">
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <MemoryStick className="h-5 w-5 text-violet-600" />
-                        <h2 className="text-base font-black text-slate-900">RAM 작업관리자</h2>
-                      </div>
-                      <p className="mt-1 text-xs font-semibold text-slate-500">
-                        현재 실행 중인 작업을 종류별로 묶어 표시합니다.
-                      </p>
-                    </div>
-                    <p className="text-xs font-bold text-slate-400">30초마다 자동 갱신</p>
-                  </div>
-
-                  {serverStatus.memory.processes.length === 0 ? (
-                    <p className="mt-4 rounded-lg bg-slate-50 px-3 py-4 text-center text-sm font-bold text-slate-400">
-                      실행 중인 작업 정보를 확인하지 못했습니다.
-                    </p>
-                  ) : (
-                    <div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200">
-                      {serverStatus.memory.processes.map((process) => (
-                        <div key={process.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_100px_100px]">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-black text-slate-900">{process.label}</p>
-                            <p className="mt-0.5 text-[11px] font-semibold text-slate-400">
-                              {process.processCount.toLocaleString("ko-KR")}개 프로세스
-                            </p>
-                          </div>
-                          <p className="text-right text-sm font-black text-slate-900">{formatBytes(process.rssBytes)}</p>
-                          <p className="hidden text-right text-xs font-bold text-slate-500 sm:block">{process.usedPercent}%</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <p className="mt-3 text-xs font-semibold leading-5 text-slate-400">
-                    RPA 브라우저는 예약 처리 중에만 나타나며, 작업이 끝나면 목록에서 사라집니다.
-                  </p>
-                </section>
+                <RamProcessDetails
+                  processes={serverStatus.memory.processes}
+                  className="hidden sm:block"
+                />
               )}
 
               <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
