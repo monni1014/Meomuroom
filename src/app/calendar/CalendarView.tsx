@@ -446,11 +446,11 @@ export default function CalendarPage() {
   const getSourceBadgeStyle = (source: string) => {
     switch (source) {
       case "naver":
-        return "bg-green-50 text-green-700 border border-green-100";
+        return "text-slate-500";
       case "spacecloud":
-        return "bg-indigo-50 text-indigo-700 border border-indigo-100";
+        return "text-slate-500";
       default:
-        return "bg-amber-50 text-amber-700 border border-amber-100";
+        return "text-slate-500";
     }
   };
 
@@ -753,7 +753,7 @@ export default function CalendarPage() {
                   title="더블클릭하면 이용현황에서 수정"
                   className={cn(
                     "relative flex flex-col gap-3 rounded-xl border border-l-4 p-3 cursor-pointer select-none sm:p-4 md:flex-row md:items-start md:justify-between md:gap-2",
-                    isCancelled ? "bg-slate-100 border-slate-200" : "bg-slate-50 border-slate-100 hover:border-indigo-200",
+                    isCancelled ? "bg-slate-100 border-slate-200" : "bg-slate-50 border-slate-100",
                     getSourceAccentStyle(res.source, isCancelled)
                   )}
                 >
@@ -772,9 +772,19 @@ export default function CalendarPage() {
                         </strong>
                       </div>
                       <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
-                        <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", getSourceBadgeStyle(res.source))}>
+                        <span className={cn("shrink-0 text-[11px] font-medium", getSourceBadgeStyle(res.source))}>
                           {getSourceDisplay(res.source)}
                         </span>
+                        {!isCancelled && res.paymentMethod && (
+                          <span className={cn(
+                            "rounded border px-1.5 py-0.5 text-[10px] font-semibold",
+                            res.isPaid
+                              ? "border-slate-200 bg-slate-100 text-slate-600"
+                              : "border-rose-300 bg-rose-50 text-rose-600"
+                          )}>
+                            {res.paymentMethod}
+                          </span>
+                        )}
                         <span>·</span>
                         <span>{headCount}명</span>
                         {res.price > 0 && <><span>·</span><span>{res.price.toLocaleString()}원</span></>}
@@ -813,7 +823,7 @@ export default function CalendarPage() {
                           </span>
                         )
                       )}
-                      <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", getSourceBadgeStyle(res.source))}>
+                      <span className={cn("hidden text-[11px] font-medium md:inline-flex", getSourceBadgeStyle(res.source))}>
                         {getSourceDisplay(res.source)}
                       </span>
                       {!res.emailId && res.paymentMethod !== '온라인' && (
@@ -845,7 +855,7 @@ export default function CalendarPage() {
                       )}
                       {!isCancelled && res.paymentMethod && (
                         <span className={cn(
-                          "px-1.5 py-0.5 rounded text-[10px] font-semibold border",
+                          "hidden px-1.5 py-0.5 rounded text-[10px] font-semibold border md:inline-flex",
                           res.isPaid 
                             ? "bg-slate-100 text-slate-600 border-slate-200" 
                             : "bg-rose-50 text-rose-600 border-rose-300 shadow-sm shadow-rose-100"
