@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
@@ -143,6 +143,7 @@ export default function CalendarPage() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [roomFilter, setRoomFilter] = useState<RoomFilter>(initialRoomFilter);
   const [expandedReservationId, setExpandedReservationId] = useState<string | null>(null);
+  const selectedDaySectionRef = useRef<HTMLElement>(null);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
   const [editId, setEditId] = useState<string | null>(null);
@@ -198,6 +199,20 @@ export default function CalendarPage() {
     params.set("date", format(date, "yyyy-MM-dd"));
     params.set("room", room);
     window.history.replaceState(null, "", `/calendar?${params.toString()}`);
+  };
+
+  const selectCalendarDay = (day: Date) => {
+    setSelectedDate(day);
+    replaceCalendarState(day, roomFilter);
+
+    if (window.matchMedia("(max-width: 639px)").matches) {
+      window.requestAnimationFrame(() => {
+        selectedDaySectionRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+    }
   };
 
   const handleSyncEmails = async () => {
@@ -622,10 +637,7 @@ export default function CalendarPage() {
             return (
               <button
                 key={day.toISOString()}
-                onClick={() => {
-                  setSelectedDate(day);
-                  replaceCalendarState(day, roomFilter);
-                }}
+                onClick={() => selectCalendarDay(day)}
                 className={cn(
                   "flex min-h-[72px] flex-col items-stretch rounded-lg p-0.5 relative transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
                   isSelected
@@ -702,7 +714,7 @@ export default function CalendarPage() {
       </section>
 
       {/* Selected Day Reservations List */}
-      <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-4">
+      <section ref={selectedDaySectionRef} className="scroll-mt-4 bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-4">
         <div className="flex justify-between items-center pb-2 border-b border-slate-50">
           <h3 className="text-sm font-bold text-slate-800">
             {format(selectedDate, "M월 d일")} 일정 ({selectedReservations.length}건)
