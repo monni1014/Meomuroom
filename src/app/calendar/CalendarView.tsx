@@ -468,16 +468,16 @@ export default function CalendarPage() {
   };
 
   const getRoomCalendarStyle = (room: string, isCancelled: boolean) => {
-    if (isCancelled) return "bg-slate-100 text-slate-400 line-through";
+    const cancelledStyle = isCancelled ? " line-through" : "";
     switch (room) {
       case "머무룸1":
-        return "bg-sky-100 text-sky-800";
+        return `bg-sky-100 text-sky-800${cancelledStyle}`;
       case "머무룸2":
-        return "bg-purple-100 text-purple-800";
+        return `bg-purple-100 text-purple-800${cancelledStyle}`;
       case "머무룸3":
-        return "bg-orange-100 text-orange-800";
+        return `bg-orange-100 text-orange-800${cancelledStyle}`;
       default:
-        return "bg-slate-100 text-slate-700";
+        return `bg-slate-100 text-slate-700${cancelledStyle}`;
     }
   };
 
