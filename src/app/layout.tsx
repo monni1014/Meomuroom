@@ -1,7 +1,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { SideNav } from "@/components/SideNav";
-import { AppBackButton } from "@/components/AppBackButton";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import type { Metadata, Viewport } from "next";
 
@@ -53,7 +52,6 @@ export default function RootLayout({
         <ServiceWorkerRegistration />
         <SideNav />
         <main data-app-main className="flex-1 w-full md:ml-64 h-screen overflow-y-auto pb-20 md:pb-0">
-          <AppBackButton />
           {children}
         </main>
       </body>
