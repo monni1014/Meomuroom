@@ -1,5 +1,19 @@
 export const RESERVATION_END_REMINDER_LEAD_MS = 10 * 60 * 1000;
 
+export function resolveReservationEndReminderGroup<
+  T extends { id: string; endTime: Date },
+>(members: T[]) {
+  const orderedMembers = [...members].sort((left, right) => (
+    left.endTime.getTime() - right.endTime.getTime()
+    || left.id.localeCompare(right.id)
+  ));
+
+  return {
+    members: orderedMembers,
+    reminder: orderedMembers.at(-1) || null,
+  };
+}
+
 type ReminderContentInput = {
   roomName: string;
   customerName: string | null;

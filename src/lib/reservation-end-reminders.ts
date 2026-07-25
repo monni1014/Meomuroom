@@ -3,8 +3,14 @@ import { sendPushNotification } from "@/lib/push-notifications";
 import {
   buildReservationEndReminderContent,
   RESERVATION_END_REMINDER_LEAD_MS,
+  resolveReservationEndReminderGroup,
   resolveReservationEndReminderHeadCount,
 } from "@/lib/reservation-end-reminder-policy";
+import { getKstDayRange } from "@/lib/kst-time";
+import {
+  buildReservationNotificationGroups,
+  reservationNotificationGroupKey,
+} from "@/lib/reservation-notification-grouping";
 
 const RETRY_STALE_MS = 20 * 1000;
 const RECORD_PREFIX = "reservation.endReminder.";
@@ -72,24 +78,47 @@ export async function sendDueReservationEndReminders(now = new Date()) {
     },
   });
 
-  // Split payments for the same stay must create only one owner reminder.
-  const groups = new Map<string, typeof reservations>();
+  const dayRanges = reservations.map((reservation) => getKstDayRange(reservation.startTime));
+  const groupCandidates = dayRanges.length > 0
+    ? await prisma.reservation.findMany({
+        where: {
+          startTime: {
+            gte: new Date(Math.min(...dayRanges.map((range) => range.start.getTime()))),
+            lte: new Date(Math.max(...dayRanges.map((range) => range.end.getTime()))),
+          },
+          status: "CONFIRMED",
+          isNoShow: false,
+        },
+        orderBy: [{ startTime: "asc" }, { id: "asc" }],
+        include: {
+          usageLog: {
+            select: { reservedHeadCount: true, headCount: true },
+          },
+        },
+      })
+    : [];
+  const notificationGroups = buildReservationNotificationGroups(groupCandidates);
+  const groups = new Map<string, typeof groupCandidates>();
+  let skippedCount = 0;
+
   for (const reservation of reservations) {
-    const groupKey = [
-      reservation.roomName,
-      reservation.customerName?.trim() || "",
-      reservation.endTime.getTime(),
-    ].join("|");
-    const group = groups.get(groupKey) || [];
-    group.push(reservation);
-    groups.set(groupKey, group);
+    const notificationGroupKey = reservationNotificationGroupKey(reservation);
+    const group = notificationGroupKey
+      ? notificationGroups.get(notificationGroupKey) || [reservation]
+      : [reservation];
+    const resolvedGroup = resolveReservationEndReminderGroup(group);
+    if (resolvedGroup.reminder?.id !== reservation.id) {
+      skippedCount += 1;
+      continue;
+    }
+    groups.set(notificationGroupKey || `reservation:${reservation.id}`, resolvedGroup.members);
   }
 
   let sentCount = 0;
   let failedCount = 0;
-  let skippedCount = 0;
   for (const group of groups.values()) {
-    const reservation = group[0];
+    const reservation = resolveReservationEndReminderGroup(group).reminder;
+    if (!reservation) continue;
     const key = reminderKey(reservation.id, reservation.endTime);
     if (!await claimReminder(key, now)) {
       skippedCount += 1;
