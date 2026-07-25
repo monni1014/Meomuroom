@@ -33,6 +33,7 @@ interface Reservation {
   customerName: string | null;
   customerType: CustomerType;
   phone: string | null;
+  phoneLocked: boolean;
   startTime: string;
   endTime: string;
   createdAt: string;
@@ -907,6 +908,11 @@ export default function CalendarPage() {
                         <p className="flex min-w-0 items-center gap-1">
                           <Phone className="h-3.5 w-3.5 shrink-0" />
                           <span className={cn(isCancelled ? "line-through text-slate-400" : "")}>{res.phone}</span>
+                          {res.phoneLocked && (
+                            <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 ring-1 ring-amber-200">
+                              수동번호 고정
+                            </span>
+                          )}
                         </p>
                       )}
                       {!isCancelled && res.discount > 0 && (

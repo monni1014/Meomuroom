@@ -5,6 +5,7 @@ import type { ParsedReservation } from "./email-parser";
 import { clearRpaPendingForReservation, RPA_PENDING_MARKER } from "./rpa-reservation-state";
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts";
 import { resolveCancellationOperationalTimes } from "./reservation-operational-time";
+import { resolveRpaReservationPhone } from "./reservation-phone-lock";
 
 const execFileAsync = promisify(execFile);
 
@@ -482,7 +483,7 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
         source: "naver",
         roomName: item.roomName,
         customerName: item.customerName,
-        phone: item.phone,
+        phone: resolveRpaReservationPhone(existing, item.phone),
         startTime: preserveOperationalTime ? existing.startTime : item.startTime,
         endTime: preserveOperationalTime ? existing.endTime : item.endTime,
         price: item.price,
@@ -610,7 +611,7 @@ async function cancelNaverReservation(
         source: "naver",
         roomName: item.roomName,
         customerName: isMaskedOrFallbackName(item.customerName) ? existing.customerName : item.customerName,
-        phone: item.phone || existing.phone,
+        phone: resolveRpaReservationPhone(existing, item.phone),
         startTime: operationalTimes.startTime,
         endTime: operationalTimes.endTime,
         price: cancellationPrice,

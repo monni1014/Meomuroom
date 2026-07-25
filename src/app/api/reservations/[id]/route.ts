@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeCustomerType } from "@/lib/customer-types";
 import { reservationNotificationEditPolicy } from "@/lib/reservation-notification-edit-policy";
+import { isValidKoreanMobilePhone } from "@/lib/phone-number";
 
 const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
 
@@ -18,6 +19,10 @@ export async function PATCH(
     const { id } = await context.params;
     const body = await request.json();
     const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow, resendNotification } = body;
+
+    if (typeof phone === "string" && phone.trim() && !isValidKoreanMobilePhone(phone)) {
+      return NextResponse.json({ error: "Invalid phone number" }, { status: 400 });
+    }
 
     if (roomName !== undefined && !VALID_ROOM_NAMES.has(roomName)) {
       return NextResponse.json({ error: "Invalid roomName" }, { status: 400 });
@@ -96,6 +101,10 @@ export async function PATCH(
     const shouldResetNotification =
       notificationEditPolicy.shouldResetAutomatically ||
       (notificationEditPolicy.requiresConfirmation && resendNotification === true);
+
+    if (notificationEditPolicy.changedFields.includes("phone")) {
+      updateData.phoneLocked = typeof phone === "string" && phone.trim().length > 0;
+    }
 
     if (shouldResetNotification && nextStatus === "CONFIRMED" && nextStartTime.getTime() > Date.now()) {
       updateData.notified = false;

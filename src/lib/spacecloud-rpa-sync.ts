@@ -4,6 +4,7 @@ import { prisma } from "./prisma";
 import type { ParsedReservation } from "./email-parser";
 import { clearRpaPendingForReservation } from "./rpa-reservation-state";
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts";
+import { resolveRpaReservationPhone } from "./reservation-phone-lock";
 
 const execFileAsync = promisify(execFile);
 const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
@@ -375,7 +376,7 @@ export async function processSpaceCloudEmailWithRpa({
         source: "spacecloud",
         roomName: item.roomName,
         customerName: item.customerName,
-        phone: item.phone || existing.phone,
+        phone: resolveRpaReservationPhone(existing, item.phone),
         startTime: item.startTime,
         endTime: item.endTime,
         price: item.status === "CANCELLED" ? item.refundFee : item.price,

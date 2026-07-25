@@ -13,6 +13,7 @@ model Reservation {
   customerName        String?
   customerType        String    @default("UNSPECIFIED") // "UNSPECIFIED" | "PERSONAL" | "CORPORATE"
   phone               String?
+  phoneLocked         Boolean   @default(false) // 캘린더에서 수동 수정한 전화번호는 RPA 재동기화로 덮어쓰지 않음
   startTime           DateTime
   endTime             DateTime
   createdAt           DateTime  @default(now())

@@ -1,0 +1,2 @@
+ALTER TABLE "Reservation"
+ADD COLUMN "phoneLocked" BOOLEAN NOT NULL DEFAULT false;
