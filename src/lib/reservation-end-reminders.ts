@@ -3,6 +3,7 @@ import { sendPushNotification } from "@/lib/push-notifications";
 import {
   buildReservationEndReminderContent,
   RESERVATION_END_REMINDER_LEAD_MS,
+  resolveReservationEndReminderHeadCount,
 } from "@/lib/reservation-end-reminder-policy";
 
 const RETRY_STALE_MS = 20 * 1000;
@@ -97,11 +98,10 @@ export async function sendDueReservationEndReminders(now = new Date()) {
 
     const headCount = Math.max(
       0,
-      ...group.map((item) => (
-        item.usageLog?.reservedHeadCount
-        || item.usageLog?.headCount
-        || 0
-      )),
+      ...group.map((item) => resolveReservationEndReminderHeadCount({
+        headCount: item.usageLog?.headCount,
+        reservedHeadCount: item.usageLog?.reservedHeadCount,
+      })),
     );
     const content = buildReservationEndReminderContent({
       roomName: reservation.roomName,

@@ -6,6 +6,13 @@ type ReminderContentInput = {
   headCount: number;
 };
 
+export function resolveReservationEndReminderHeadCount(input: {
+  headCount?: number | null;
+  reservedHeadCount?: number | null;
+}) {
+  return input.headCount || input.reservedHeadCount || 0;
+}
+
 export function buildReservationEndReminderContent(input: ReminderContentInput) {
   return {
     title: "예약 종료 알림",

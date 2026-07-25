@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   buildReservationEndReminderContent,
   isReservationEndReminderDue,
+  resolveReservationEndReminderHeadCount,
 } from "../src/lib/reservation-end-reminder-policy.ts";
 
 const now = new Date("2026-07-24T05:00:00.000Z");
@@ -12,6 +13,9 @@ const content = buildReservationEndReminderContent({
 });
 assert.equal(content.title, "예약 종료 알림");
 assert.equal(content.body, "머무룸1\n김영광\n4명\n종료 10분 전");
+assert.equal(resolveReservationEndReminderHeadCount({ headCount: 9, reservedHeadCount: 8 }), 9);
+assert.equal(resolveReservationEndReminderHeadCount({ headCount: 0, reservedHeadCount: 8 }), 8);
+assert.equal(resolveReservationEndReminderHeadCount({ headCount: 0, reservedHeadCount: 0 }), 0);
 assert.equal(isReservationEndReminderDue({
   startTime: new Date("2026-07-24T04:00:00.000Z"),
   endTime: new Date("2026-07-24T05:10:00.000Z"),
