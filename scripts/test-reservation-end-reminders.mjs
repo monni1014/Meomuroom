@@ -50,5 +50,6 @@ const reminderSource = await readFile(
 assert.match(reminderSource, /buildReservationNotificationGroups\(groupCandidates\)/);
 assert.match(reminderSource, /reservationNotificationGroupKey\(reservation\)/);
 assert.match(reminderSource, /resolvedGroup\.reminder\?\.id !== reservation\.id/);
+assert.match(reminderSource, /groupAlreadySent\(group\.map\(\(member\) => member\.id\)\)/);
 
 console.log("Reservation end reminder tests passed.");

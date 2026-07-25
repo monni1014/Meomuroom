@@ -57,6 +57,19 @@ async function claimReminder(key: string, now: Date) {
   });
 }
 
+async function groupAlreadySent(reservationIds: string[]) {
+  if (reservationIds.length === 0) return false;
+  const records = await prisma.appSetting.findMany({
+    where: {
+      OR: reservationIds.map((reservationId) => ({
+        key: { startsWith: `${RECORD_PREFIX}${reservationId}.` },
+      })),
+    },
+    select: { value: true },
+  });
+  return records.some((setting) => parseRecord(setting.value)?.status === "SENT");
+}
+
 function kstDateKey(date: Date) {
   return date.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }
@@ -119,6 +132,10 @@ export async function sendDueReservationEndReminders(now = new Date()) {
   for (const group of groups.values()) {
     const reservation = resolveReservationEndReminderGroup(group).reminder;
     if (!reservation) continue;
+    if (await groupAlreadySent(group.map((member) => member.id))) {
+      skippedCount += 1;
+      continue;
+    }
     const key = reminderKey(reservation.id, reservation.endTime);
     if (!await claimReminder(key, now)) {
       skippedCount += 1;
