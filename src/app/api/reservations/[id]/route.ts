@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizeCustomerType } from "@/lib/customer-types";
 import { reservationNotificationEditPolicy } from "@/lib/reservation-notification-edit-policy";
 import { isValidKoreanMobilePhone } from "@/lib/phone-number";
+import { shouldLockManuallyEditedPhone } from "@/lib/reservation-phone-lock";
 
 const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
 
@@ -103,7 +104,9 @@ export async function PATCH(
       (notificationEditPolicy.requiresConfirmation && resendNotification === true);
 
     if (notificationEditPolicy.changedFields.includes("phone")) {
-      updateData.phoneLocked = typeof phone === "string" && phone.trim().length > 0;
+      const nextSource = source !== undefined ? source : existing.source;
+      updateData.phoneLocked = ["naver", "spacecloud"].includes(nextSource)
+        && shouldLockManuallyEditedPhone(existing, typeof phone === "string" ? phone : null);
     }
 
     if (shouldResetNotification && nextStatus === "CONFIRMED" && nextStartTime.getTime() > Date.now()) {
