@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star, SprayCan } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
@@ -713,7 +713,7 @@ export default function CalendarPage() {
             onClick={openCleaningCreateModal}
             className="flex items-center gap-1.5 px-3.5 py-2.5 bg-teal-600 text-white text-sm font-bold rounded-xl shadow-md hover:bg-teal-700 active:scale-95 transition-all whitespace-nowrap"
           >
-            <Sparkles className="w-4 h-4" />
+            <SprayCan className="w-4 h-4" />
             청소 일정 추가
           </button>
         </div>
@@ -871,7 +871,7 @@ export default function CalendarPage() {
                       return (
                         <span
                           key={`cleaning-${agendaItem.id}`}
-                          className="block min-w-0 truncate rounded bg-teal-100 px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight text-teal-800"
+                          className="block min-w-0 truncate rounded border border-dashed border-cyan-300 bg-cyan-50 px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight text-cyan-800"
                           title={`${clock} ${formatCleaningRooms(agendaItem.cleaning.roomNames)} 청소 · ${agendaItem.cleaning.cleanerName}`}
                         >
                           {compactClock} 청소
@@ -920,7 +920,7 @@ export default function CalendarPage() {
                   {dayCleaningSchedules.map((schedule) => (
                     <span
                       key={`cleaning-${schedule.id}`}
-                      className="h-1.5 w-1.5 rounded-full bg-teal-500"
+                      className="h-1.5 w-1.5 rounded-xs bg-cyan-500 ring-1 ring-cyan-700"
                       title={`${schedule.cleanerName} 청소`}
                     />
                   ))}
@@ -965,7 +965,7 @@ export default function CalendarPage() {
                   <div
                     key={`cleaning-${schedule.id}`}
                     data-testid="cleaning-agenda-card"
-                    className="relative flex flex-col gap-3 rounded-xl border border-l-4 border-slate-100 border-l-teal-500 bg-teal-50/60 p-3 sm:p-4 md:flex-row md:items-center md:justify-between"
+                    className="relative flex flex-col gap-3 rounded-xl border-2 border-dashed border-cyan-300 bg-cyan-50/80 p-3 sm:p-4 md:flex-row md:items-center md:justify-between"
                   >
                     <div className="flex min-w-0 items-start gap-3">
                       <div className="w-[58px] shrink-0 text-center">
@@ -974,8 +974,8 @@ export default function CalendarPage() {
                       </div>
                       <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="inline-flex items-center gap-1 rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-800">
-                            <Sparkles className="h-3 w-3" /> 청소
+                          <span className="inline-flex items-center gap-1 rounded bg-cyan-700 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                            <SprayCan className="h-3 w-3" /> 청소 일정
                           </span>
                           {(schedule.roomNames.length === CLEANING_ROOM_OPTIONS.length
                             ? ["전체 공간"]
@@ -1003,7 +1003,7 @@ export default function CalendarPage() {
                         )}
                       </div>
                     </div>
-                    <div className="flex shrink-0 justify-end gap-1 border-t border-teal-100 pt-2 md:border-t-0 md:pt-0">
+                    <div className="flex shrink-0 justify-end gap-1 border-t border-cyan-200 pt-2 md:border-t-0 md:pt-0">
                       <button
                         onClick={() => openCleaningEditModal(schedule)}
                         className="rounded-lg p-2 text-slate-400 transition hover:bg-white hover:text-teal-600 active:scale-95"
@@ -1626,7 +1626,7 @@ export default function CalendarPage() {
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-slate-100 bg-teal-50 p-4">
               <h2 className="flex items-center gap-2 font-bold text-slate-800">
-                <Sparkles className="h-5 w-5 text-teal-600" />
+                <SprayCan className="h-5 w-5 text-teal-600" />
                 {cleaningEditId ? "청소 일정 수정" : "새 청소 일정 추가"}
               </h2>
               <button
