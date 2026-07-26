@@ -10,8 +10,10 @@ import {
   type CompetitorScanMode,
 } from "@/lib/competitor-scan-range";
 import { shouldCreateBookingDiscoveryEvent } from "@/lib/competitor-booking-discovery";
+import { buildSynergyBookingPushes } from "@/lib/competitor-booking-push-policy";
 import { competitorCancellationFeeRate } from "@/lib/competitor-cancellation";
 import { prisma } from "@/lib/prisma";
+import { sendPushNotification } from "@/lib/push-notifications";
 
 const execFileAsync = promisify(execFile);
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
@@ -785,6 +787,30 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
   return { changedSlots, bookingEvents, cancellationEvents };
 }
 
+async function sendSynergyBookingDiscoveryPushes(scanId: string) {
+  const events = await prisma.competitorSlotEvent.findMany({
+    where: {
+      scanId,
+      competitorId: "synergy",
+      eventType: "BOOKED",
+    },
+    select: {
+      competitorId: true,
+      dateKey: true,
+      hour: true,
+      eventType: true,
+    },
+  });
+  const pushes = buildSynergyBookingPushes(events);
+
+  for (const push of pushes) {
+    const result = await sendPushNotification(push, { excludeAppleWebPush: true });
+    console.log(
+      `[Competitor] Synergy booking push sent: tag=${push.tag}, sent=${result.sent}, failed=${result.failed}, apple-excluded=true`,
+    );
+  }
+}
+
 async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
   const range = resolveCompetitorScanRange(options);
 
@@ -894,6 +920,12 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
         message: error || "경쟁사 공개 예약 화면에서 시간 정보를 읽지 못했습니다.",
         dedupeKey: "competitor-monitor-scan-error",
       });
+    }
+
+    try {
+      await sendSynergyBookingDiscoveryPushes(scan.id);
+    } catch (pushError) {
+      console.error("[Competitor] Could not send Synergy booking discovery push:", pushError);
     }
 
     return {
