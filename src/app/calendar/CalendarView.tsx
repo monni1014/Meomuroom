@@ -164,6 +164,13 @@ function formatCleaningRooms(roomNames: string[]) {
   return roomNames.length === CLEANING_ROOM_OPTIONS.length ? "전체 공간" : roomNames.join(" · ");
 }
 
+function getCleaningRoomNumberStyle(roomName: string) {
+  if (roomName === "머무룸1") return "text-sky-600";
+  if (roomName === "머무룸2") return "text-fuchsia-600";
+  if (roomName === "머무룸3") return "text-orange-600";
+  return "text-slate-600";
+}
+
 function getPaymentMethodDisplay(paymentMethod: string) {
   return paymentMethod === "현장카드" ? "카드" : paymentMethod;
 }
@@ -985,7 +992,14 @@ export default function CalendarPage() {
                               key={roomName}
                               className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600"
                             >
-                              {roomName}
+                              {roomName.startsWith("머무룸") ? (
+                                <>
+                                  머무룸
+                                  <span className={getCleaningRoomNumberStyle(roomName)}>
+                                    {roomName.replace("머무룸", "")}
+                                  </span>
+                                </>
+                              ) : roomName}
                             </span>
                           ))}
                           <strong className="min-w-0 truncate text-sm text-slate-900">{schedule.cleanerName}</strong>
