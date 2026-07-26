@@ -448,7 +448,6 @@ export default function MonthlyTableView() {
       <header className="pt-8 pb-2 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">월간 예약표</h1>
-          <p className="text-sm text-slate-500 mt-1">머무룸1·2·3 예약을 시간표 형식으로 확인합니다.</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
