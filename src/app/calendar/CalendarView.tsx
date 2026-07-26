@@ -167,7 +167,7 @@ function formatCleaningRooms(roomNames: string[]) {
 function getCleaningRoomTextStyle(roomName: string) {
   if (roomName === "머무룸1") return "text-sky-700";
   if (roomName === "머무룸2") return "text-purple-700";
-  if (roomName === "머무룸3") return "text-slate-600";
+  if (roomName === "머무룸3") return "text-orange-700";
   return "text-slate-600";
 }
 
@@ -671,7 +671,7 @@ export default function CalendarPage() {
       case "머무룸2":
         return `bg-purple-100 text-purple-800${cancelledStyle}`;
       case "머무룸3":
-        return `bg-orange-100 text-orange-800${cancelledStyle}`;
+        return `bg-orange-200 text-orange-900${cancelledStyle}`;
       default:
         return `bg-slate-100 text-slate-700${cancelledStyle}`;
     }
