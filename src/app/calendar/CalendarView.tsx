@@ -164,10 +164,10 @@ function formatCleaningRooms(roomNames: string[]) {
   return roomNames.length === CLEANING_ROOM_OPTIONS.length ? "전체 공간" : roomNames.join(" · ");
 }
 
-function getCleaningRoomNumberStyle(roomName: string) {
-  if (roomName === "머무룸1") return "text-sky-600";
-  if (roomName === "머무룸2") return "text-fuchsia-600";
-  if (roomName === "머무룸3") return "text-orange-600";
+function getCleaningRoomTextStyle(roomName: string) {
+  if (roomName === "머무룸1") return "text-sky-700";
+  if (roomName === "머무룸2") return "text-purple-700";
+  if (roomName === "머무룸3") return "text-orange-700";
   return "text-slate-600";
 }
 
@@ -718,7 +718,7 @@ export default function CalendarPage() {
           </button>
           <button
             onClick={openCleaningCreateModal}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-teal-600 text-white text-sm font-bold rounded-xl shadow-md hover:bg-teal-700 active:scale-95 transition-all whitespace-nowrap"
+            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-amber-400 text-amber-950 text-sm font-bold rounded-xl shadow-md hover:bg-amber-500 active:scale-95 transition-all whitespace-nowrap"
           >
             <SprayCan className="w-4 h-4" />
             청소 일정 추가
@@ -972,17 +972,19 @@ export default function CalendarPage() {
                   <div
                     key={`cleaning-${schedule.id}`}
                     data-testid="cleaning-agenda-card"
-                    className="relative flex flex-col gap-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/90 p-3 sm:p-4 md:flex-row md:items-center md:justify-between"
+                    className="relative flex items-center gap-2 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/90 p-3 md:gap-3 md:p-4"
                   >
-                    <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex min-w-0 flex-1 items-start gap-2 md:gap-3">
                       <div className="w-[58px] shrink-0 text-center">
                         <strong className="block text-sm text-slate-900">{startClock}</strong>
                         <span className="text-[10px] font-medium text-slate-400">~ {displayEndTime}</span>
                       </div>
-                      <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="min-w-0 flex-1 space-y-1 md:space-y-1.5">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="inline-flex items-center gap-1 rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-amber-950">
-                            <SprayCan className="h-3 w-3" /> 청소 일정
+                            <SprayCan className="h-3 w-3" />
+                            <span className="md:hidden">청소</span>
+                            <span className="hidden md:inline">청소 일정</span>
                           </span>
                           {(schedule.roomNames.length === CLEANING_ROOM_OPTIONS.length
                             ? ["전체 공간"]
@@ -990,22 +992,19 @@ export default function CalendarPage() {
                           ).map((roomName) => (
                             <span
                               key={roomName}
-                              className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600"
+                              className={cn(
+                                "rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold",
+                                getCleaningRoomTextStyle(roomName),
+                              )}
                             >
-                              {roomName.startsWith("머무룸") ? (
-                                <>
-                                  머무룸
-                                  <span className={getCleaningRoomNumberStyle(roomName)}>
-                                    {roomName.replace("머무룸", "")}
-                                  </span>
-                                </>
-                              ) : roomName}
+                              {roomName}
                             </span>
                           ))}
-                          <strong className="min-w-0 truncate text-sm text-slate-900">{schedule.cleanerName}</strong>
+                          <strong className="hidden min-w-0 truncate text-sm text-slate-900 md:block">{schedule.cleanerName}</strong>
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                          <span className="flex items-center gap-1">
+                          <strong className="min-w-0 truncate text-slate-900 md:hidden">{schedule.cleanerName}</strong>
+                          <span className="hidden items-center gap-1 md:flex">
                             <Clock className="h-3.5 w-3.5" /> {formatDuration(start, end)}
                           </span>
                           <span className="flex items-center gap-1">
@@ -1013,21 +1012,21 @@ export default function CalendarPage() {
                           </span>
                         </div>
                         {schedule.memo && (
-                          <p className="whitespace-pre-wrap text-xs text-slate-500">{schedule.memo}</p>
+                          <p className="truncate text-xs text-slate-500 md:whitespace-pre-wrap">{schedule.memo}</p>
                         )}
                       </div>
                     </div>
-                    <div className="flex shrink-0 justify-end gap-1 border-t border-amber-200 pt-2 md:border-t-0 md:pt-0">
+                    <div className="flex shrink-0 justify-end gap-0 md:gap-1">
                       <button
                         onClick={() => openCleaningEditModal(schedule)}
-                        className="rounded-lg p-2 text-slate-400 transition hover:bg-white hover:text-teal-600 active:scale-95"
+                        className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-teal-600 active:scale-95 md:p-2"
                         title="청소 일정 수정"
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => handleDeleteCleaning(schedule.id)}
-                        className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-500 active:scale-95"
+                        className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-500 active:scale-95 md:p-2"
                         title="청소 일정 삭제"
                       >
                         <Trash2 className="h-4 w-4" />
