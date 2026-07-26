@@ -654,12 +654,12 @@ export default function CalendarPage() {
                   !isSameMonthOfActive && "opacity-30"
                 )}
               >
-                <div className="relative inline-flex items-center justify-center">
-                  <span className={cn("text-sm font-semibold", (day.getDay() === 0 || day.getDay() === 6) && !isSelected && "text-rose-500")}>
+                <div className="relative inline-flex w-fit self-center items-center justify-center">
+                  <span data-testid="calendar-day-number" className={cn("text-sm font-semibold", (day.getDay() === 0 || day.getDay() === 6) && !isSelected && "text-rose-500")}>
                     {format(day, "d")}
                   </span>
                   {(hasUnpaid || hasUnpaidExtra) && (
-                    <div className="absolute -top-1 -right-3 flex gap-0.5" title="미결제/미수금 예약 있음">
+                    <div data-testid="calendar-day-unpaid-stars" className="absolute -top-1 left-full ml-0.5 flex gap-0.5" title="미결제/미수금 예약 있음">
                       {hasUnpaid && <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-400 drop-shadow-sm" />}
                       {hasUnpaidExtra && <Star className="w-2.5 h-2.5 text-red-500 fill-red-500 drop-shadow-sm animate-pulse" />}
                     </div>
