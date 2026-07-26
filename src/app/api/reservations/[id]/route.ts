@@ -4,6 +4,7 @@ import { normalizeCustomerType } from "@/lib/customer-types";
 import { reservationNotificationEditPolicy } from "@/lib/reservation-notification-edit-policy";
 import { isValidKoreanMobilePhone } from "@/lib/phone-number";
 import { shouldLockManuallyEditedPhone } from "@/lib/reservation-phone-lock";
+import { shouldLockManuallyEditedTime } from "@/lib/reservation-time-lock";
 
 const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
 
@@ -107,6 +108,21 @@ export async function PATCH(
       const nextSource = source !== undefined ? source : existing.source;
       updateData.phoneLocked = ["naver", "spacecloud"].includes(nextSource)
         && shouldLockManuallyEditedPhone(existing, typeof phone === "string" ? phone : null);
+    }
+
+    if (notificationEditPolicy.changedFields.some((field) => field === "startTime" || field === "endTime")) {
+      const nextSource = source !== undefined ? source : existing.source;
+      const isRpaSource = ["naver", "spacecloud"].includes(nextSource);
+      updateData.timeLocked = isRpaSource
+        && shouldLockManuallyEditedTime(existing, parsedStartTime, parsedEndTime);
+
+      // Legacy rows do not have the original site range yet. Preserve the
+      // range that was present immediately before the first manual edit so
+      // restoring that exact range automatically releases the lock.
+      if (isRpaSource && (!existing.syncedStartTime || !existing.syncedEndTime)) {
+        updateData.syncedStartTime = existing.startTime;
+        updateData.syncedEndTime = existing.endTime;
+      }
     }
 
     if (shouldResetNotification && nextStatus === "CONFIRMED" && nextStartTime.getTime() > Date.now()) {

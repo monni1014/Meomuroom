@@ -36,6 +36,7 @@ interface Reservation {
   phoneLocked: boolean;
   startTime: string;
   endTime: string;
+  timeLocked: boolean;
   createdAt: string;
   updatedAt: string;
   notified: boolean;
@@ -916,6 +917,11 @@ export default function CalendarPage() {
                       <p className="flex min-w-0 items-center gap-1">
                         <Clock className="h-3.5 w-3.5 shrink-0" />
                         <span>{formatTime(start)} - {displayEndTime} ({formatDuration(start, end)})</span>
+                        {res.timeLocked && (
+                          <span className="rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 ring-1 ring-orange-200">
+                            수동시간 고정
+                          </span>
+                        )}
                       </p>
                       <p className="flex min-w-0 items-start gap-1">
                         <User className="mt-0.5 h-3.5 w-3.5 shrink-0" />

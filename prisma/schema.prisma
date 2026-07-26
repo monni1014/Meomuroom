@@ -17,6 +17,9 @@ model Reservation {
   phoneLocked         Boolean   @default(false) // 캘린더에서 수동 수정한 전화번호는 RPA 재동기화로 덮어쓰지 않음
   startTime           DateTime
   endTime             DateTime
+  syncedStartTime     DateTime? // 네이버·스클에서 마지막으로 확인한 원본 시작시간
+  syncedEndTime       DateTime? // 네이버·스클에서 마지막으로 확인한 원본 종료시간
+  timeLocked          Boolean   @default(false) // 캘린더에서 수동 수정한 시간은 RPA 재동기화로 덮어쓰지 않음
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   notifiedAt          DateTime?

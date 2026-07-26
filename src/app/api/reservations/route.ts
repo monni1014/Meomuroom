@@ -74,6 +74,12 @@ export async function POST(request: NextRequest) {
         phone: phone || null,
         startTime: parsedStartTime,
         endTime: parsedEndTime,
+        syncedStartTime: ["naver", "spacecloud"].includes(source)
+          ? parsedStartTime
+          : null,
+        syncedEndTime: ["naver", "spacecloud"].includes(source)
+          ? parsedEndTime
+          : null,
         price: Number(price) || 0,
         discount: Number(discount) || 0,
         paymentMethod: paymentMethod || "온라인",

@@ -6,6 +6,7 @@ import { clearRpaPendingForReservation, RPA_PENDING_MARKER } from "./rpa-reserva
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts";
 import { resolveCancellationOperationalTimes } from "./reservation-operational-time";
 import { resolveRpaReservationPhoneState } from "./reservation-phone-lock";
+import { resolveRpaReservationTimeState } from "./reservation-time-lock";
 
 const execFileAsync = promisify(execFile);
 
@@ -39,7 +40,6 @@ const ROOM_PRODUCT_URL: Record<string, string> = {
 };
 
 const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
-const RPA_TIME_OVERRIDE_MARKER = "[RPA_TIME_OVERRIDE]";
 const SPACECLOUD_SYNC_GROUP_MARKER = "[SPACECLOUD_SYNC_GROUP]";
 
 type NaverDetailResult = {
@@ -475,7 +475,7 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
     })) || null;
 
   if (existing) {
-    const preserveOperationalTime = existing.memo?.includes(RPA_TIME_OVERRIDE_MARKER) === true;
+    const timeState = resolveRpaReservationTimeState(existing, item.startTime, item.endTime);
     const updated = await prisma.reservation.update({
       where: { id: existing.id },
       data: {
@@ -484,8 +484,7 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
         roomName: item.roomName,
         customerName: item.customerName,
         ...resolveRpaReservationPhoneState(existing, item.phone),
-        startTime: preserveOperationalTime ? existing.startTime : item.startTime,
-        endTime: preserveOperationalTime ? existing.endTime : item.endTime,
+        ...timeState,
         price: item.price,
         discount: item.discount,
         status: item.status,
@@ -512,6 +511,8 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
       syncedPhone: item.phone,
       startTime: item.startTime,
       endTime: item.endTime,
+      syncedStartTime: item.startTime,
+      syncedEndTime: item.endTime,
       createdAt: receivedAt || new Date(),
       price: item.price,
       discount: item.discount,
@@ -604,7 +605,10 @@ async function cancelNaverReservation(
     // may have expanded the Naver time to include preparation/cleanup time and
     // manually resized the matching Naver/SpaceCloud blocks. Never replace
     // that operational range with the shorter time returned by Naver here.
+    const timeState = resolveRpaReservationTimeState(existing, item.startTime, item.endTime);
     const operationalTimes = resolveCancellationOperationalTimes(existing, item);
+    const operationalTimeLocked = operationalTimes.startTime.getTime() !== item.startTime.getTime()
+      || operationalTimes.endTime.getTime() !== item.endTime.getTime();
     const updated = await prisma.reservation.update({
       where: { id: existing.id },
       data: {
@@ -615,6 +619,9 @@ async function cancelNaverReservation(
         ...resolveRpaReservationPhoneState(existing, item.phone),
         startTime: operationalTimes.startTime,
         endTime: operationalTimes.endTime,
+        syncedStartTime: timeState.syncedStartTime,
+        syncedEndTime: timeState.syncedEndTime,
+        timeLocked: timeState.timeLocked || operationalTimeLocked,
         price: cancellationPrice,
         status: "CANCELLED",
         paymentMethod: item.paymentMethod,
@@ -641,6 +648,8 @@ async function cancelNaverReservation(
       syncedPhone: item.phone,
       startTime: item.startTime,
       endTime: item.endTime,
+      syncedStartTime: item.startTime,
+      syncedEndTime: item.endTime,
       createdAt: receivedAt || new Date(),
       price: cancellationPrice,
       status: "CANCELLED",

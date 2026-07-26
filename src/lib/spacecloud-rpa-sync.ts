@@ -2,9 +2,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { prisma } from "./prisma";
 import type { ParsedReservation } from "./email-parser";
-import { clearRpaPendingForReservation } from "./rpa-reservation-state";
+import { clearRpaPendingForReservation, RPA_PENDING_MARKER } from "./rpa-reservation-state";
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts";
 import { resolveRpaReservationPhoneState } from "./reservation-phone-lock";
+import { resolveRpaReservationTimeState } from "./reservation-time-lock";
 
 const execFileAsync = promisify(execFile);
 const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
@@ -306,17 +307,45 @@ async function findExistingSpaceCloudReservation(parsed: ParsedReservation, book
   return prisma.reservation.findFirst({
     where: {
       source: "spacecloud",
-      roomName: parsed.roomName,
-      startTime: parsed.startTime,
-      endTime: parsed.endTime,
       OR: [
         ...emailIds.map((emailId) => ({ emailId })),
-        { customerName: parsed.customerName },
+        {
+          roomName: parsed.roomName,
+          startTime: parsed.startTime,
+          endTime: parsed.endTime,
+          customerName: parsed.customerName,
+        },
       ],
     },
     include: { usageLog: true },
     orderBy: { createdAt: "asc" },
   });
+}
+
+async function deleteDetachedPendingReservation(messageId: string, keptReservationId: string) {
+  const pending = await prisma.reservation.findUnique({
+    where: { emailId: messageId },
+    select: { id: true, source: true, memo: true },
+  });
+
+  if (
+    !pending
+    || pending.id === keptReservationId
+    || pending.source !== "spacecloud"
+    || !pending.memo?.includes(RPA_PENDING_MARKER)
+  ) return;
+
+  await prisma.$transaction([
+    prisma.usageLog.deleteMany({ where: { reservationId: pending.id } }),
+    prisma.reservation.deleteMany({
+      where: {
+        id: pending.id,
+        emailId: messageId,
+        memo: { contains: RPA_PENDING_MARKER },
+      },
+    }),
+  ]);
+  console.log(`[SpaceCloudRPA] Removed detached pending row: ${pending.id}`);
 }
 
 export async function processSpaceCloudEmailWithRpa({
@@ -369,6 +398,7 @@ export async function processSpaceCloudEmailWithRpa({
     : existing?.emailId || messageId;
 
   if (existing) {
+    const timeState = resolveRpaReservationTimeState(existing, item.startTime, item.endTime);
     const updated = await prisma.reservation.update({
       where: { id: existing.id },
       data: {
@@ -377,8 +407,7 @@ export async function processSpaceCloudEmailWithRpa({
         roomName: item.roomName,
         customerName: item.customerName,
         ...resolveRpaReservationPhoneState(existing, item.phone),
-        startTime: item.startTime,
-        endTime: item.endTime,
+        ...timeState,
         price: item.status === "CANCELLED" ? item.refundFee : item.price,
         status: item.status,
         paymentMethod: "온라인",
@@ -403,10 +432,16 @@ export async function processSpaceCloudEmailWithRpa({
     }
 
     const slotMode = item.status === "CANCELLED" ? "open" : "close";
-    const slot = await setNaverSlotForSpaceCloud(item, slotMode, updated.id);
+    const slot = await setNaverSlotForSpaceCloud({
+      ...item,
+      roomName: updated.roomName,
+      startTime: updated.startTime,
+      endTime: updated.endTime,
+    }, slotMode, updated.id);
     console.log(`[SpaceCloudRPA] Naver slot ${slotMode} result: ${slot.ok ? "ok" : slot.reason}`);
     if (slot.ok && !detailCheckReason) await clearRpaCheckRequired(updated.id);
     await clearRpaPendingForReservation(updated.id);
+    await deleteDetachedPendingReservation(messageId, updated.id);
 
     return { changed: true, skipped: false, created: false, reservationId: updated.id };
   }
@@ -421,6 +456,8 @@ export async function processSpaceCloudEmailWithRpa({
       syncedPhone: item.phone,
       startTime: item.startTime,
       endTime: item.endTime,
+      syncedStartTime: item.startTime,
+      syncedEndTime: item.endTime,
       createdAt: receivedAt || new Date(),
       price: item.status === "CANCELLED" ? item.refundFee : item.price,
       status: item.status,
@@ -454,6 +491,7 @@ export async function processSpaceCloudEmailWithRpa({
   console.log(`[SpaceCloudRPA] Naver slot ${slotMode} result: ${slot.ok ? "ok" : slot.reason}`);
   if (slot.ok && !detailCheckReason) await clearRpaCheckRequired(created.id);
   await clearRpaPendingForReservation(created.id);
+  await deleteDetachedPendingReservation(messageId, created.id);
 
   return { changed: true, skipped: false, created: true, reservationId: created.id };
 }
