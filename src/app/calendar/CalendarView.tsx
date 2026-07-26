@@ -60,6 +60,7 @@ interface Reservation {
 interface CleaningSchedule {
   id: string;
   roomName: string;
+  roomNames: string[];
   cleanerName: string;
   startTime: string;
   endTime: string;
@@ -74,6 +75,7 @@ type CalendarAgendaItem =
   | { kind: "cleaning"; id: string; startTime: string; cleaning: CleaningSchedule };
 
 const ROOM_FILTERS = ["all", "머무룸1", "머무룸2", "머무룸3"] as const;
+const CLEANING_ROOM_OPTIONS = ["머무룸1", "머무룸2", "머무룸3"] as const;
 type RoomFilter = (typeof ROOM_FILTERS)[number];
 
 function normalizeRoomFilter(value: string | null): RoomFilter {
@@ -158,6 +160,10 @@ function formatDuration(start: Date, end: Date) {
   return minutes === 0 ? `${hours}시간` : `${hours}시간 ${minutes}분`;
 }
 
+function formatCleaningRooms(roomNames: string[]) {
+  return roomNames.length === CLEANING_ROOM_OPTIONS.length ? "전체 공간" : roomNames.join(" · ");
+}
+
 function getPaymentMethodDisplay(paymentMethod: string) {
   return paymentMethod === "현장카드" ? "카드" : paymentMethod;
 }
@@ -208,7 +214,7 @@ export default function CalendarPage() {
   const [showMultiPicker, setShowMultiPicker] = useState(false);
 
   const [cleaningEditId, setCleaningEditId] = useState<string | null>(null);
-  const [cleaningRoom, setCleaningRoom] = useState("전체");
+  const [cleaningRooms, setCleaningRooms] = useState<string[]>(["머무룸1", "머무룸2", "머무룸3"]);
   const [cleanerName, setCleanerName] = useState("");
   const [cleaningDate, setCleaningDate] = useState(format(initialDate, "yyyy-MM-dd"));
   const [cleaningStartTime, setCleaningStartTime] = useState("09:00");
@@ -297,7 +303,7 @@ export default function CalendarPage() {
 
   const filteredCleaningSchedules = roomFilter === "all"
     ? cleaningSchedules
-    : cleaningSchedules.filter((schedule) => schedule.roomName === roomFilter || schedule.roomName === "전체");
+    : cleaningSchedules.filter((schedule) => schedule.roomNames.includes(roomFilter));
 
   const selectedReservations = filteredReservations
     .filter((res) => isSameDay(new Date(res.startTime), selectedDate))
@@ -524,7 +530,7 @@ export default function CalendarPage() {
 
   const resetCleaningForm = (date = selectedDate) => {
     setCleaningEditId(null);
-    setCleaningRoom(roomFilter === "all" ? "전체" : roomFilter);
+    setCleaningRooms(roomFilter === "all" ? ["머무룸1", "머무룸2", "머무룸3"] : [roomFilter]);
     setCleanerName("");
     setCleaningDate(format(date, "yyyy-MM-dd"));
     setCleaningStartTime("09:00");
@@ -546,7 +552,7 @@ export default function CalendarPage() {
       `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
 
     setCleaningEditId(schedule.id);
-    setCleaningRoom(schedule.roomName);
+    setCleaningRooms(schedule.roomNames);
     setCleanerName(schedule.cleanerName);
     setCleaningDate(format(start, "yyyy-MM-dd"));
     setCleaningStartTime(clock(startParts));
@@ -559,6 +565,7 @@ export default function CalendarPage() {
   const handleSaveCleaning = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!cleanerName.trim()) return alert("청소한 사람을 입력해 주세요.");
+    if (cleaningRooms.length === 0) return alert("청소할 공간을 하나 이상 선택해 주세요.");
 
     const normalizedEndTime = normalizeEndClock(cleaningStartTime, cleaningEndTime);
     const startMinutes = parseClockMinutes(cleaningStartTime);
@@ -568,7 +575,7 @@ export default function CalendarPage() {
     }
 
     const payload = {
-      roomName: cleaningRoom,
+      roomNames: cleaningRooms,
       cleanerName: cleanerName.trim(),
       startTime: buildLocalDateTime(cleaningDate, cleaningStartTime).toISOString(),
       endTime: buildLocalDateTime(cleaningDate, normalizedEndTime).toISOString(),
@@ -865,7 +872,7 @@ export default function CalendarPage() {
                         <span
                           key={`cleaning-${agendaItem.id}`}
                           className="block min-w-0 truncate rounded bg-teal-100 px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight text-teal-800"
-                          title={`${clock} ${agendaItem.cleaning.roomName} 청소 · ${agendaItem.cleaning.cleanerName}`}
+                          title={`${clock} ${formatCleaningRooms(agendaItem.cleaning.roomNames)} 청소 · ${agendaItem.cleaning.cleanerName}`}
                         >
                           {compactClock} 청소
                         </span>
@@ -970,9 +977,17 @@ export default function CalendarPage() {
                           <span className="inline-flex items-center gap-1 rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-800">
                             <Sparkles className="h-3 w-3" /> 청소
                           </span>
-                          <span className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
-                            {schedule.roomName}
-                          </span>
+                          {(schedule.roomNames.length === CLEANING_ROOM_OPTIONS.length
+                            ? ["전체 공간"]
+                            : schedule.roomNames
+                          ).map((roomName) => (
+                            <span
+                              key={roomName}
+                              className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600"
+                            >
+                              {roomName}
+                            </span>
+                          ))}
                           <strong className="min-w-0 truncate text-sm text-slate-900">{schedule.cleanerName}</strong>
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
@@ -1624,31 +1639,50 @@ export default function CalendarPage() {
             </div>
 
             <form onSubmit={handleSaveCleaning} className="max-h-[75vh] space-y-4 overflow-y-auto p-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500">청소 공간</label>
-                  <select
-                    value={cleaningRoom}
-                    onChange={(event) => setCleaningRoom(event.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm font-medium outline-hidden focus:border-teal-500"
-                  >
-                    <option value="전체">전체 공간</option>
-                    <option value="머무룸1">머무룸1</option>
-                    <option value="머무룸2">머무룸2</option>
-                    <option value="머무룸3">머무룸3</option>
-                  </select>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500">청소 공간 (중복 선택 가능)</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {CLEANING_ROOM_OPTIONS.map((roomName) => {
+                    const isChecked = cleaningRooms.includes(roomName);
+                    return (
+                      <label
+                        key={roomName}
+                        className={cn(
+                          "flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2.5 text-xs font-bold transition",
+                          isChecked
+                            ? "border-teal-500 bg-teal-50 text-teal-700"
+                            : "border-slate-200 bg-white text-slate-500 hover:border-teal-300",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(event) => {
+                            setCleaningRooms((current) =>
+                              event.target.checked
+                                ? CLEANING_ROOM_OPTIONS.filter((room) => current.includes(room) || room === roomName)
+                                : current.filter((room) => room !== roomName),
+                            );
+                          }}
+                          className="h-4 w-4 accent-teal-600"
+                        />
+                        {roomName}
+                      </label>
+                    );
+                  })}
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500">청소한 사람</label>
-                  <input
-                    type="text"
-                    required
-                    value={cleanerName}
-                    onChange={(event) => setCleanerName(event.target.value)}
-                    placeholder="이름 입력"
-                    className="w-full rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden focus:border-teal-500"
-                  />
-                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">청소한 사람</label>
+                <input
+                  type="text"
+                  required
+                  value={cleanerName}
+                  onChange={(event) => setCleanerName(event.target.value)}
+                  placeholder="이름 입력"
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden focus:border-teal-500"
+                />
               </div>
 
               <div className="space-y-1">

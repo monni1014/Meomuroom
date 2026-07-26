@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateCleaningScheduleInput } from "@/lib/cleaning-schedule";
+import { parseCleaningRoomNames, validateCleaningScheduleInput } from "@/lib/cleaning-schedule";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,13 @@ export async function GET() {
     const schedules = await prisma.cleaningSchedule.findMany({
       orderBy: [{ startTime: "asc" }, { createdAt: "asc" }],
     });
-    return NextResponse.json(schedules, { headers: NO_STORE_HEADERS });
+    return NextResponse.json(
+      schedules.map((schedule) => ({
+        ...schedule,
+        roomNames: parseCleaningRoomNames(schedule.roomName),
+      })),
+      { headers: NO_STORE_HEADERS },
+    );
   } catch (error) {
     console.error("GET cleaning schedules error:", error);
     return NextResponse.json(
@@ -31,7 +37,10 @@ export async function POST(request: Request) {
     }
 
     const schedule = await prisma.cleaningSchedule.create({ data: validation.data });
-    return NextResponse.json(schedule, { status: 201 });
+    return NextResponse.json(
+      { ...schedule, roomNames: parseCleaningRoomNames(schedule.roomName) },
+      { status: 201 },
+    );
   } catch (error) {
     console.error("POST cleaning schedule error:", error);
     return NextResponse.json({ error: "청소 일정을 저장하지 못했습니다." }, { status: 500 });

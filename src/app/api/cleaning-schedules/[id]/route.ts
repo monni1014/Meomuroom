@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateCleaningScheduleInput } from "@/lib/cleaning-schedule";
+import { parseCleaningRoomNames, validateCleaningScheduleInput } from "@/lib/cleaning-schedule";
 
 export async function PATCH(
   request: Request,
@@ -22,7 +22,10 @@ export async function PATCH(
       where: { id },
       data: validation.data,
     });
-    return NextResponse.json(schedule);
+    return NextResponse.json({
+      ...schedule,
+      roomNames: parseCleaningRoomNames(schedule.roomName),
+    });
   } catch (error) {
     console.error("PATCH cleaning schedule error:", error);
     return NextResponse.json({ error: "청소 일정을 수정하지 못했습니다." }, { status: 500 });

@@ -1,13 +1,31 @@
-export const CLEANING_ROOM_NAMES = ["전체", "머무룸1", "머무룸2", "머무룸3"] as const;
+export const CLEANING_ROOM_NAMES = ["머무룸1", "머무룸2", "머무룸3"] as const;
+
+export type CleaningRoomName = (typeof CLEANING_ROOM_NAMES)[number];
 
 export type CleaningScheduleInput = {
-  roomName: (typeof CLEANING_ROOM_NAMES)[number];
+  roomName: string;
   cleanerName: string;
   startTime: Date;
   endTime: Date;
   cost: number;
   memo: string | null;
 };
+
+export function parseCleaningRoomNames(value: string): CleaningRoomName[] {
+  if (value === "전체") return [...CLEANING_ROOM_NAMES];
+
+  return value
+    .split(",")
+    .map((roomName) => roomName.trim())
+    .filter((roomName): roomName is CleaningRoomName =>
+      CLEANING_ROOM_NAMES.includes(roomName as CleaningRoomName),
+    )
+    .filter((roomName, index, roomNames) => roomNames.indexOf(roomName) === index);
+}
+
+export function formatCleaningRoomNames(roomNames: CleaningRoomName[]) {
+  return CLEANING_ROOM_NAMES.filter((roomName) => roomNames.includes(roomName)).join(",");
+}
 
 type ValidationResult =
   | { ok: true; data: CleaningScheduleInput }
@@ -25,15 +43,23 @@ export function validateCleaningScheduleInput(body: unknown): ValidationResult {
   }
 
   const input = body as Record<string, unknown>;
-  const roomName = typeof input.roomName === "string" ? input.roomName.trim() : "";
+  const legacyRoomNames = typeof input.roomName === "string"
+    ? parseCleaningRoomNames(input.roomName.trim())
+    : [];
+  const roomNames = Array.isArray(input.roomNames)
+    ? input.roomNames.filter((roomName): roomName is CleaningRoomName =>
+        typeof roomName === "string" && CLEANING_ROOM_NAMES.includes(roomName as CleaningRoomName),
+      )
+    : legacyRoomNames;
+  const uniqueRoomNames = CLEANING_ROOM_NAMES.filter((roomName) => roomNames.includes(roomName));
   const cleanerName = typeof input.cleanerName === "string" ? input.cleanerName.trim() : "";
   const startTime = parseDate(input.startTime);
   const endTime = parseDate(input.endTime);
   const rawCost = typeof input.cost === "string" ? Number(input.cost.replace(/,/g, "")) : Number(input.cost);
   const memo = typeof input.memo === "string" ? input.memo.trim() : "";
 
-  if (!CLEANING_ROOM_NAMES.includes(roomName as CleaningScheduleInput["roomName"])) {
-    return { ok: false, error: "청소 공간을 확인해 주세요." };
+  if (uniqueRoomNames.length === 0) {
+    return { ok: false, error: "청소할 공간을 하나 이상 선택해 주세요." };
   }
   if (!cleanerName || cleanerName.length > 100) {
     return { ok: false, error: "청소한 사람을 100자 이내로 입력해 주세요." };
@@ -51,7 +77,7 @@ export function validateCleaningScheduleInput(body: unknown): ValidationResult {
   return {
     ok: true,
     data: {
-      roomName: roomName as CleaningScheduleInput["roomName"],
+      roomName: formatCleaningRoomNames(uniqueRoomNames),
       cleanerName,
       startTime,
       endTime,
