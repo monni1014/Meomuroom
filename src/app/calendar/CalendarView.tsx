@@ -946,7 +946,7 @@ export default function CalendarPage() {
           </h3>
           <span className="whitespace-nowrap text-xs font-semibold text-slate-500">
             하루 총 매출{" "}
-            <strong className="font-black tabular-nums text-slate-900">
+            <strong className="text-sm font-black tabular-nums text-slate-950">
               {selectedDayRevenue.toLocaleString("ko-KR")}원
             </strong>
           </span>
@@ -1115,7 +1115,14 @@ export default function CalendarPage() {
                         )}
                         <span>·</span>
                         <span>{headCount}명</span>
-                        {res.price > 0 && <><span>·</span><span>{res.price.toLocaleString()}원</span></>}
+                        {res.price > 0 && (
+                          <>
+                            <span>·</span>
+                            <strong className="font-extrabold tabular-nums text-slate-800">
+                              {res.price.toLocaleString()}원
+                            </strong>
+                          </>
+                        )}
                         {isCancelled && <span className="font-bold text-slate-500">· 취소</span>}
                       </div>
                     </div>
@@ -1209,7 +1216,12 @@ export default function CalendarPage() {
                       {res.price > 0 && (
                         <p className="flex min-w-0 items-center gap-1 text-slate-700">
                           <Wallet className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                          <span>{isCancelled ? "수수료" : "요금"}: <strong className="text-slate-800">{res.price.toLocaleString()}원</strong></span>
+                          <span>
+                            {isCancelled ? "수수료" : "요금"}: {" "}
+                            <strong className="font-extrabold tabular-nums text-slate-950">
+                              {res.price.toLocaleString()}원
+                            </strong>
+                          </span>
                         </p>
                       )}
                       {res.phone && (
