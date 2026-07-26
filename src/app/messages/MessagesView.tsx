@@ -16,7 +16,10 @@ import {
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 import { formatKoreanPhone } from "@/lib/phone-number";
 import PushNotificationSetup from "@/components/PushNotificationSetup";
-import type { SolapiDailyUsage } from "@/lib/solapi-daily-usage";
+import type {
+  SolapiDailyUsage,
+  SolapiOperationalMessageDetail,
+} from "@/lib/solapi-daily-usage";
 
 type DeliveryEntry = {
   entryId: string;
@@ -119,6 +122,52 @@ function sortWeight(entry: DeliveryEntry) {
   if (SCHEDULED_STATUSES.has(entry.status)) return 2;
   if (entry.status === "DELIVERED") return 3;
   return 4;
+}
+
+function OperationalWarningDetails({
+  details,
+  className,
+}: {
+  details: SolapiOperationalMessageDetail[];
+  className: string;
+}) {
+  return (
+    <section className={className}>
+      <div className="border-b border-amber-100 bg-amber-50 px-4 py-3">
+        <h2 className="text-sm font-black text-amber-900">운영 경고 문자 상세</h2>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {details.map((detail) => {
+          const statusClass = detail.status === "DELIVERED"
+            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+            : detail.status === "FAILED"
+              ? "bg-rose-50 text-rose-700 ring-rose-200"
+              : "bg-indigo-50 text-indigo-700 ring-indigo-200";
+          return (
+            <article key={detail.id} className="p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-extrabold text-amber-800 ring-1 ring-inset ring-amber-200">
+                  {detail.label}
+                </span>
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ring-1 ring-inset ${statusClass}`}>
+                  {detail.statusLabel}
+                </span>
+                <span className="text-xs font-semibold text-slate-400">
+                  {detail.sentAt ? formatKst(detail.sentAt) : "발송 시각 확인 불가"}
+                </span>
+              </div>
+              <p className="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700">
+                {detail.text}
+              </p>
+              {detail.recipient && (
+                <p className="mt-1 text-xs text-slate-400">수신자 {formatKoreanPhone(detail.recipient)}</p>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 export default function MessagesView({
@@ -286,6 +335,7 @@ export default function MessagesView({
               <button
                 type="button"
                 onClick={() => setShowOperationalDetails((current) => !current)}
+                aria-expanded={showOperationalDetails}
                 className="mt-1.5 flex w-full items-center justify-between gap-2 text-left text-[11px] font-bold text-amber-700"
               >
                 <span>{operationalBreakdown.join(" · ")}</span>
@@ -293,6 +343,12 @@ export default function MessagesView({
                   ? <ChevronUp className="h-3.5 w-3.5 shrink-0" />
                   : <ChevronDown className="h-3.5 w-3.5 shrink-0" />}
               </button>
+            )}
+            {showOperationalDetails && dailyUsage.operational.details.length > 0 && (
+              <OperationalWarningDetails
+                details={dailyUsage.operational.details}
+                className="mt-3 overflow-hidden rounded-xl border border-amber-200 bg-white lg:hidden"
+              />
             )}
           </div>
           {[
@@ -310,41 +366,10 @@ export default function MessagesView({
         </section>
 
         {showOperationalDetails && dailyUsage.operational.details.length > 0 && (
-          <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm">
-            <div className="border-b border-amber-100 bg-amber-50 px-4 py-3">
-              <h2 className="text-sm font-black text-amber-900">운영 경고 문자 상세</h2>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {dailyUsage.operational.details.map((detail) => {
-                const statusClass = detail.status === "DELIVERED"
-                  ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                  : detail.status === "FAILED"
-                    ? "bg-rose-50 text-rose-700 ring-rose-200"
-                    : "bg-indigo-50 text-indigo-700 ring-indigo-200";
-                return (
-                  <article key={detail.id} className="p-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-extrabold text-amber-800 ring-1 ring-inset ring-amber-200">
-                        {detail.label}
-                      </span>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ring-1 ring-inset ${statusClass}`}>
-                        {detail.statusLabel}
-                      </span>
-                      <span className="text-xs font-semibold text-slate-400">
-                        {detail.sentAt ? formatKst(detail.sentAt) : "발송 시각 확인 불가"}
-                      </span>
-                    </div>
-                    <p className="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700">
-                      {detail.text}
-                    </p>
-                    {detail.recipient && (
-                      <p className="mt-1 text-xs text-slate-400">수신자 {formatKoreanPhone(detail.recipient)}</p>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          </section>
+          <OperationalWarningDetails
+            details={dailyUsage.operational.details}
+            className="hidden overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm lg:block"
+          />
         )}
 
         <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
