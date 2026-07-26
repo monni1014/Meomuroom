@@ -58,6 +58,7 @@
     "test:notification-edit-policy": "node --experimental-strip-types scripts/test-reservation-notification-edit-policy.mjs",
     "test:notification-grouping": "node --experimental-strip-types scripts/test-reservation-notification-grouping.mjs",
     "test:phone-lock": "node --experimental-strip-types scripts/test-reservation-phone-lock.mjs",
+    "test:contact-alert-policy": "node --experimental-strip-types scripts/test-reservation-contact-alert-policy.mjs",
     "test:notification-recovery": "node --experimental-strip-types scripts/test-solapi-recovery-dedupe.mjs",
     "test:dawn-booking-notifications": "node --experimental-strip-types scripts/test-dawn-booking-notifications.mjs",
     "test:forced-notification-link": "node scripts/test-forced-notification-reservation-link.mjs"

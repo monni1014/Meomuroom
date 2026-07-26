@@ -2,6 +2,7 @@ import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-aler
 import { getKstDateKey } from "@/lib/kst-time";
 import { isValidKoreanMobilePhone } from "@/lib/phone-number";
 import { prisma } from "@/lib/prisma";
+import { hasContactAlertGraceElapsed } from "@/lib/reservation-contact-alert-policy";
 
 const ALERT_TYPE = "RESERVATION_CONTACT_MISSING";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -42,6 +43,7 @@ export async function runReservationContactPreflight(now = new Date()) {
       startTime: true,
       phone: true,
       emailId: true,
+      createdAt: true,
     },
     orderBy: { startTime: "asc" },
   });
@@ -50,6 +52,7 @@ export async function runReservationContactPreflight(now = new Date()) {
   const missing = reservations.filter((reservation) =>
     !isValidKoreanMobilePhone(reservation.phone)
     && (reservation.source !== "manual" || getKstDateKey(reservation.startTime) === todayKey)
+    && hasContactAlertGraceElapsed(reservation.source, reservation.createdAt, now)
   );
   const missingKeys = new Set(missing.map((reservation) => alertKey(reservation.id)));
 
