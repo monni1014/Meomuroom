@@ -663,7 +663,7 @@ export default function CalendarPage() {
                 className={cn(
                   "flex min-h-[72px] flex-col items-stretch rounded-lg p-0.5 relative transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
                   isSelected
-                    ? "bg-indigo-50 text-indigo-800 sm:bg-indigo-600 sm:text-white"
+                    ? "bg-indigo-50 text-indigo-800 sm:bg-indigo-100 sm:text-indigo-900"
                     : "hover:bg-slate-50 text-slate-700",
                   isToday
                     ? "ring-2 ring-inset ring-orange-500"
@@ -725,7 +725,7 @@ export default function CalendarPage() {
                         key={res.id}
                         className={cn(
                           "w-1.5 h-1.5 rounded-full",
-                          isSelected ? "bg-white" : dotClass
+                          dotClass
                         )}
                       />
                     );
