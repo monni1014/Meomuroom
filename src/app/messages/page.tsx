@@ -1,51 +1,82 @@
 import MessagesView from "./MessagesView";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
-import { getKstDayRange } from "@/lib/kst-time";
+import { createKstDate, getKstDayRange } from "@/lib/kst-time";
 import { getSolapiDailyUsage } from "@/lib/solapi-daily-usage";
 import { buildReservationNotificationGroups } from "@/lib/reservation-notification-grouping";
 import { customerMessageDisplay } from "@/lib/customer-message-display";
 
 export const dynamic = "force-dynamic";
 
-export default async function MessagesPage() {
+type MessagesSearchParams = Promise<{
+  date?: string | string[];
+}>;
+
+function selectedKstDay(value: string | string[] | undefined, fallback: Date) {
+  const dateKey = Array.isArray(value) ? value[0] : value;
+  const match = dateKey?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return getKstDayRange(fallback);
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = createKstDate(year, month, day);
+  const range = getKstDayRange(parsed);
+  return range.key === dateKey ? range : getKstDayRange(fallback);
+}
+
+export default async function MessagesPage({
+  searchParams,
+}: {
+  searchParams: MessagesSearchParams;
+}) {
   const now = new Date();
-  const today = getKstDayRange(now);
-  const tomorrowStart = new Date(today.end.getTime() + 1);
+  const currentDay = getKstDayRange(now);
+  const query = await searchParams;
+  const selectedDay = selectedKstDay(query.date, now);
+  const isToday = selectedDay.key === currentDay.key;
+  const nextDayStart = new Date(selectedDay.end.getTime() + 1);
   const twoHoursMs = 2 * 60 * 60 * 1000;
-  const plannedReservationStart = new Date(today.start.getTime() + twoHoursMs);
-  const plannedReservationEnd = new Date(tomorrowStart.getTime() + twoHoursMs);
+  const plannedReservationStart = new Date(selectedDay.start.getTime() + twoHoursMs);
+  const plannedReservationEnd = new Date(nextDayStart.getTime() + twoHoursMs);
   const twoHoursLater = new Date(now.getTime() + twoHoursMs);
+
+  const reservationFilters: Prisma.ReservationWhereInput[] = [
+    {
+      status: "CONFIRMED",
+      startTime: {
+        gte: plannedReservationStart,
+        lt: plannedReservationEnd,
+      },
+    },
+    {
+      messages: {
+        some: {
+          direction: "OUTBOUND",
+          occurredAt: { gte: selectedDay.start, lt: nextDayStart },
+          OR: [
+            { dedupeKey: { startsWith: "reservation-reminder:" } },
+            { dedupeKey: { startsWith: "reservation-test:" } },
+          ],
+        },
+      },
+    },
+  ];
+
+  if (isToday) {
+    reservationFilters.push({
+      status: "CONFIRMED",
+      startTime: { gte: now, lte: twoHoursLater },
+      notificationStatus: {
+        in: ["PENDING", "SENDING", "RECOVERING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "FAILED"],
+      },
+    });
+  }
 
   const [reservations, situationMessages, dailyUsage] = await Promise.all([prisma.reservation.findMany({
     where: {
-      status: "CONFIRMED",
-      OR: [
-        {
-          startTime: {
-            gte: plannedReservationStart,
-            lt: plannedReservationEnd,
-          },
-        },
-        {
-          messages: {
-            some: {
-              direction: "OUTBOUND",
-              occurredAt: { gte: today.start, lt: tomorrowStart },
-              OR: [
-                { dedupeKey: { startsWith: "reservation-reminder:" } },
-                { dedupeKey: { startsWith: "reservation-test:" } },
-              ],
-            },
-          },
-        },
-        {
-          startTime: { gte: now, lte: twoHoursLater },
-          notificationStatus: {
-            in: ["PENDING", "SENDING", "RECOVERING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "FAILED"],
-          },
-        },
-      ],
+      OR: reservationFilters,
     },
     orderBy: { startTime: "asc" },
     include: {
@@ -56,6 +87,7 @@ export default async function MessagesPage() {
             { dedupeKey: { startsWith: "reservation-reminder:" } },
             { dedupeKey: { startsWith: "reservation-test:" } },
           ],
+          occurredAt: { gte: selectedDay.start, lt: nextDayStart },
         },
         orderBy: { occurredAt: "desc" },
         take: 1,
@@ -73,11 +105,11 @@ export default async function MessagesPage() {
     where: {
       direction: "OUTBOUND",
       dedupeKey: { startsWith: "situation:" },
-      occurredAt: { gte: today.start, lt: tomorrowStart },
+      occurredAt: { gte: selectedDay.start, lt: nextDayStart },
     },
     include: { reservation: true },
     orderBy: { occurredAt: "desc" },
-  }), getSolapiDailyUsage(today.start, tomorrowStart)]);
+  }), getSolapiDailyUsage(selectedDay.start, nextDayStart)]);
 
   const notificationGroups = buildReservationNotificationGroups(reservations);
   const groupLeaderByFollowerId = new Map<string, (typeof reservations)[number]>();
@@ -157,7 +189,9 @@ export default async function MessagesPage() {
   return (
     <MessagesView
       initialEntries={[...entries, ...situationEntries]}
-      todayLabel={`${today.parts.month}월 ${today.parts.day}일`}
+      selectedDateKey={selectedDay.key}
+      selectedDateLabel={`${selectedDay.parts.year}년 ${selectedDay.parts.month}월 ${selectedDay.parts.day}일`}
+      isToday={isToday}
       dailyUsage={dailyUsage}
     />
   );

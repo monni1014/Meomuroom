@@ -6,11 +6,29 @@ export type SolapiDailyUsage = {
   totalCost: number;
   totalCount: number;
   reservation: { cost: number; count: number };
-  operational: { cost: number; count: number };
+  operational: {
+    cost: number;
+    count: number;
+    tailscaleCount: number;
+    serverCount: number;
+    otherCount: number;
+    details: SolapiOperationalMessageDetail[];
+  };
   other: { cost: number; count: number };
   unpricedCount: number;
   checkedAt: string;
   error: string | null;
+};
+
+export type SolapiOperationalMessageDetail = {
+  id: string;
+  kind: "TAILSCALE" | "SERVER" | "OTHER";
+  label: string;
+  recipient: string;
+  text: string;
+  status: "DELIVERED" | "PROCESSING" | "FAILED";
+  statusLabel: string;
+  sentAt: string | null;
 };
 
 type SolapiHistoryItem = {
@@ -20,6 +38,11 @@ type SolapiHistoryItem = {
   status?: string | null;
   statusCode?: string | null;
   text?: string | null;
+  to?: string | string[] | null;
+  dateCreated?: string | null;
+  dateProcessed?: string | null;
+  dateReceived?: string | null;
+  dateReported?: string | null;
   customFields?: Record<string, string> | null;
 };
 
@@ -38,7 +61,14 @@ function emptyUsage(error: string | null = null): SolapiDailyUsage {
     totalCost: 0,
     totalCount: 0,
     reservation: { cost: 0, count: 0 },
-    operational: { cost: 0, count: 0 },
+    operational: {
+      cost: 0,
+      count: 0,
+      tailscaleCount: 0,
+      serverCount: 0,
+      otherCount: 0,
+      details: [],
+    },
     other: { cost: 0, count: 0 },
     unpricedCount: 0,
     checkedAt: new Date().toISOString(),
@@ -67,6 +97,32 @@ function usageCategory(
   if (message.customFields?.reservationId || stored?.reservationId) return "reservation";
   if (/tailscale|테일스케일|서버|장애|접속|점검|rpa/i.test(message.text || "")) return "operational";
   return "other";
+}
+
+function operationalKind(text: string) {
+  if (/tailscale|테일스케일/i.test(text)) {
+    return { kind: "TAILSCALE" as const, label: "Tailscale" };
+  }
+  if (/서버|자동복구|재부팅/i.test(text)) {
+    return { kind: "SERVER" as const, label: "서버" };
+  }
+  return { kind: "OTHER" as const, label: "기타 경고" };
+}
+
+function operationalDeliveryStatus(message: SolapiHistoryItem) {
+  if (message.status === "COMPLETE" && message.statusCode === "4000") {
+    return { status: "DELIVERED" as const, statusLabel: "수신 완료" };
+  }
+  if (message.status === "COMPLETE" || message.status === "FAILED") {
+    return { status: "FAILED" as const, statusLabel: "수신 실패" };
+  }
+  return { status: "PROCESSING" as const, statusLabel: "처리 중" };
+}
+
+function isoDateOrNull(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 export async function getSolapiDailyUsage(
@@ -125,6 +181,32 @@ export async function getSolapiDailyUsage(
 
     const result = emptyUsage();
     for (const message of messages) {
+      const storedMessage = message.messageId ? storedByProviderId.get(message.messageId) : undefined;
+      const category = usageCategory(message, storedMessage);
+
+      if (category === "operational") {
+        const text = message.text?.trim() || "내용 없음";
+        const kind = operationalKind(text);
+        const delivery = operationalDeliveryStatus(message);
+        const recipient = Array.isArray(message.to) ? message.to.join(", ") : message.to || "";
+        result.operational.details.push({
+          id: message.messageId || `${message.groupId || "operational"}:${message.dateCreated || text}`,
+          ...kind,
+          recipient,
+          text,
+          ...delivery,
+          sentAt: isoDateOrNull(
+            message.dateCreated
+              || message.dateProcessed
+              || message.dateReceived
+              || message.dateReported,
+          ),
+        });
+        if (kind.kind === "TAILSCALE") result.operational.tailscaleCount += 1;
+        else if (kind.kind === "SERVER") result.operational.serverCount += 1;
+        else result.operational.otherCount += 1;
+      }
+
       if (message.status !== "COMPLETE" || message.statusCode !== "4000") continue;
       const group = message.groupId ? groupPrices.get(message.groupId) : null;
       const cost = group && !group.refunded ? unitPrice(group.price, message.type) : group?.refunded ? 0 : null;
@@ -133,15 +215,17 @@ export async function getSolapiDailyUsage(
         continue;
       }
 
-      const category = usageCategory(
-        message,
-        message.messageId ? storedByProviderId.get(message.messageId) : undefined,
-      );
       result[category].count += 1;
       result[category].cost += cost;
       result.totalCount += 1;
       result.totalCost += cost;
     }
+
+    result.operational.details.sort((left, right) => {
+      const leftTime = left.sentAt ? new Date(left.sentAt).getTime() : 0;
+      const rightTime = right.sentAt ? new Date(right.sentAt).getTime() : 0;
+      return rightTime - leftTime;
+    });
 
     usageCache = {
       key: cacheKey,
