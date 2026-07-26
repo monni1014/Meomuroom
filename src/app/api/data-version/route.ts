@@ -13,12 +13,16 @@ function dateStamp(value: Date | null | undefined) {
 }
 
 async function getReservationVersion() {
-  const [reservations, usageLogs] = await Promise.all([
+  const [reservations, usageLogs, cleaningSchedules] = await Promise.all([
     prisma.reservation.aggregate({
       _count: { _all: true },
       _max: { updatedAt: true },
     }),
     prisma.usageLog.aggregate({
+      _count: { _all: true },
+      _max: { updatedAt: true },
+    }),
+    prisma.cleaningSchedule.aggregate({
       _count: { _all: true },
       _max: { updatedAt: true },
     }),
@@ -30,6 +34,8 @@ async function getReservationVersion() {
     dateStamp(reservations._max.updatedAt),
     usageLogs._count._all,
     dateStamp(usageLogs._max.updatedAt),
+    cleaningSchedules._count._all,
+    dateStamp(cleaningSchedules._max.updatedAt),
   ].join(":");
 }
 

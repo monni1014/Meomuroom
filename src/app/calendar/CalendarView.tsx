@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star, Sparkles } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
@@ -56,6 +56,22 @@ interface Reservation {
   emailId: string | null; // null = 수기 입력 (메일 자동연동 아님)
   usageLog: UsageLog | null;
 }
+
+interface CleaningSchedule {
+  id: string;
+  roomName: string;
+  cleanerName: string;
+  startTime: string;
+  endTime: string;
+  cost: number;
+  memo: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+type CalendarAgendaItem =
+  | { kind: "reservation"; id: string; startTime: string; reservation: Reservation }
+  | { kind: "cleaning"; id: string; startTime: string; cleaning: CleaningSchedule };
 
 const ROOM_FILTERS = ["all", "머무룸1", "머무룸2", "머무룸3"] as const;
 type RoomFilter = (typeof ROOM_FILTERS)[number];
@@ -156,8 +172,10 @@ export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [selectedDate, setSelectedDate] = useState<Date>(initialDate);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [cleaningSchedules, setCleaningSchedules] = useState<CleaningSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCleaningModalOpen, setIsCleaningModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [roomFilter, setRoomFilter] = useState<RoomFilter>(initialRoomFilter);
@@ -189,15 +207,26 @@ export default function CalendarPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showMultiPicker, setShowMultiPicker] = useState(false);
 
+  const [cleaningEditId, setCleaningEditId] = useState<string | null>(null);
+  const [cleaningRoom, setCleaningRoom] = useState("전체");
+  const [cleanerName, setCleanerName] = useState("");
+  const [cleaningDate, setCleaningDate] = useState(format(initialDate, "yyyy-MM-dd"));
+  const [cleaningStartTime, setCleaningStartTime] = useState("09:00");
+  const [cleaningEndTime, setCleaningEndTime] = useState("10:00");
+  const [cleaningCost, setCleaningCost] = useState("0");
+  const [cleaningMemo, setCleaningMemo] = useState("");
+  const [isCleaningSubmitting, setIsCleaningSubmitting] = useState(false);
+
   const fetchReservations = useCallback(async () => {
     try {
-      const res = await fetch("/api/reservations");
-      if (res.ok) {
-        const data = await res.json();
-        setReservations(data);
-      }
+      const [reservationResponse, cleaningResponse] = await Promise.all([
+        fetch("/api/reservations"),
+        fetch("/api/cleaning-schedules"),
+      ]);
+      if (reservationResponse.ok) setReservations(await reservationResponse.json());
+      if (cleaningResponse.ok) setCleaningSchedules(await cleaningResponse.json());
     } catch (err) {
-      console.error("Failed to load reservations:", err);
+      console.error("Failed to load calendar data:", err);
     } finally {
       setIsLoading(false);
     }
@@ -266,6 +295,10 @@ export default function CalendarPage() {
     ? reservations 
     : reservations.filter((res) => res.roomName === roomFilter);
 
+  const filteredCleaningSchedules = roomFilter === "all"
+    ? cleaningSchedules
+    : cleaningSchedules.filter((schedule) => schedule.roomName === roomFilter || schedule.roomName === "전체");
+
   const selectedReservations = filteredReservations
     .filter((res) => isSameDay(new Date(res.startTime), selectedDate))
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
@@ -273,6 +306,23 @@ export default function CalendarPage() {
     (sum, reservation) => sum + (reservation.price || 0),
     0,
   );
+  const selectedCleaningSchedules = filteredCleaningSchedules
+    .filter((schedule) => isSameDay(new Date(schedule.startTime), selectedDate))
+    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  const selectedAgendaItems: CalendarAgendaItem[] = [
+    ...selectedReservations.map((reservation) => ({
+      kind: "reservation" as const,
+      id: reservation.id,
+      startTime: reservation.startTime,
+      reservation,
+    })),
+    ...selectedCleaningSchedules.map((cleaning) => ({
+      kind: "cleaning" as const,
+      id: cleaning.id,
+      startTime: cleaning.startTime,
+      cleaning,
+    })),
+  ].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
   const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -472,6 +522,96 @@ export default function CalendarPage() {
     }
   };
 
+  const resetCleaningForm = (date = selectedDate) => {
+    setCleaningEditId(null);
+    setCleaningRoom(roomFilter === "all" ? "전체" : roomFilter);
+    setCleanerName("");
+    setCleaningDate(format(date, "yyyy-MM-dd"));
+    setCleaningStartTime("09:00");
+    setCleaningEndTime("10:00");
+    setCleaningCost("0");
+    setCleaningMemo("");
+  };
+
+  const openCleaningCreateModal = () => {
+    resetCleaningForm(selectedDate);
+    setIsCleaningModalOpen(true);
+  };
+
+  const openCleaningEditModal = (schedule: CleaningSchedule) => {
+    const start = new Date(schedule.startTime);
+    const end = new Date(schedule.endTime);
+    const startParts = getKstDateParts(start);
+    const clock = (parts: ReturnType<typeof getKstDateParts>) =>
+      `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
+
+    setCleaningEditId(schedule.id);
+    setCleaningRoom(schedule.roomName);
+    setCleanerName(schedule.cleanerName);
+    setCleaningDate(format(start, "yyyy-MM-dd"));
+    setCleaningStartTime(clock(startParts));
+    setCleaningEndTime(extendedEndClock(start, end));
+    setCleaningCost(schedule.cost.toLocaleString("ko-KR"));
+    setCleaningMemo(schedule.memo || "");
+    setIsCleaningModalOpen(true);
+  };
+
+  const handleSaveCleaning = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!cleanerName.trim()) return alert("청소한 사람을 입력해 주세요.");
+
+    const normalizedEndTime = normalizeEndClock(cleaningStartTime, cleaningEndTime);
+    const startMinutes = parseClockMinutes(cleaningStartTime);
+    const endMinutes = parseClockMinutes(normalizedEndTime);
+    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || endMinutes <= startMinutes) {
+      return alert("청소 종료 시간은 시작 시간보다 늦어야 합니다.");
+    }
+
+    const payload = {
+      roomName: cleaningRoom,
+      cleanerName: cleanerName.trim(),
+      startTime: buildLocalDateTime(cleaningDate, cleaningStartTime).toISOString(),
+      endTime: buildLocalDateTime(cleaningDate, normalizedEndTime).toISOString(),
+      cost: Number(cleaningCost.replace(/,/g, "")) || 0,
+      memo: cleaningMemo.trim() || null,
+    };
+
+    try {
+      setIsCleaningSubmitting(true);
+      const response = await fetch(
+        cleaningEditId ? `/api/cleaning-schedules/${cleaningEditId}` : "/api/cleaning-schedules",
+        {
+          method: cleaningEditId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "청소 일정 저장 실패");
+
+      setIsCleaningModalOpen(false);
+      await fetchReservations();
+    } catch (error) {
+      console.error("Save cleaning schedule error:", error);
+      alert(error instanceof Error ? error.message : "청소 일정 저장에 실패했습니다.");
+    } finally {
+      setIsCleaningSubmitting(false);
+    }
+  };
+
+  const handleDeleteCleaning = async (id: string) => {
+    if (!confirm("이 청소 일정을 삭제할까요?")) return;
+
+    try {
+      const response = await fetch(`/api/cleaning-schedules/${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("청소 일정 삭제 실패");
+      await fetchReservations();
+    } catch (error) {
+      console.error("Delete cleaning schedule error:", error);
+      alert("청소 일정을 삭제하지 못했습니다.");
+    }
+  };
+
   const getSourceDisplay = (source: string) => {
     switch (source) {
       case "naver":
@@ -561,6 +701,13 @@ export default function CalendarPage() {
           >
             <Plus className="w-4 h-4" />
             수동 예약 추가
+          </button>
+          <button
+            onClick={openCleaningCreateModal}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-teal-600 text-white text-sm font-bold rounded-xl shadow-md hover:bg-teal-700 active:scale-95 transition-all whitespace-nowrap"
+          >
+            <Sparkles className="w-4 h-4" />
+            청소 일정 추가
           </button>
         </div>
       </header>
@@ -656,6 +803,23 @@ export default function CalendarPage() {
             const dayReservations = filteredReservations
               .filter((res) => isSameDay(new Date(res.startTime), day))
               .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+            const dayCleaningSchedules = filteredCleaningSchedules
+              .filter((schedule) => isSameDay(new Date(schedule.startTime), day))
+              .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+            const dayAgendaItems: CalendarAgendaItem[] = [
+              ...dayReservations.map((reservation) => ({
+                kind: "reservation" as const,
+                id: reservation.id,
+                startTime: reservation.startTime,
+                reservation,
+              })),
+              ...dayCleaningSchedules.map((cleaning) => ({
+                kind: "cleaning" as const,
+                id: cleaning.id,
+                startTime: cleaning.startTime,
+                cleaning,
+              })),
+            ].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
             
             const hasUnpaid = dayReservations.some((res) => !res.isPaid && res.status !== "CANCELLED");
             const hasUnpaidExtra = dayReservations.some((res) => res.usageLog && (res.usageLog.extraPrice ?? 0) > 0 && !res.usageLog.isExtraPaid && res.status !== "CANCELLED");
@@ -690,16 +854,28 @@ export default function CalendarPage() {
                 
                 {/* 모바일은 타임트리처럼 일정 내용을, 넓은 화면은 기존 점 표시를 사용 */}
                 <div data-testid="mobile-month-events" className="mt-1 flex min-w-0 flex-col gap-0.5 sm:hidden">
-                  {dayReservations.slice(0, 2).map((res) => {
-                    const startParts = getKstDateParts(new Date(res.startTime));
+                  {dayAgendaItems.slice(0, 2).map((agendaItem) => {
+                    const startParts = getKstDateParts(new Date(agendaItem.startTime));
                     const clock = `${String(startParts.hour).padStart(2, "0")}:${String(startParts.minute).padStart(2, "0")}`;
                     const compactClock = startParts.minute === 0
                       ? String(startParts.hour)
                       : `${startParts.hour}:${String(startParts.minute).padStart(2, "0")}`;
+                    if (agendaItem.kind === "cleaning") {
+                      return (
+                        <span
+                          key={`cleaning-${agendaItem.id}`}
+                          className="block min-w-0 truncate rounded bg-teal-100 px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight text-teal-800"
+                          title={`${clock} ${agendaItem.cleaning.roomName} 청소 · ${agendaItem.cleaning.cleanerName}`}
+                        >
+                          {compactClock} 청소
+                        </span>
+                      );
+                    }
+                    const res = agendaItem.reservation;
                     const isCancelled = res.status === "CANCELLED";
                     return (
                       <span
-                        key={res.id}
+                        key={`reservation-${res.id}`}
                         className={cn(
                           "block min-w-0 truncate rounded px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight",
                           getRoomCalendarStyle(res.roomName, isCancelled)
@@ -710,9 +886,9 @@ export default function CalendarPage() {
                       </span>
                     );
                   })}
-                  {dayReservations.length > 2 && (
+                  {dayAgendaItems.length > 2 && (
                     <span className="px-1 text-left text-[9px] font-bold leading-none text-slate-400">
-                      +{dayReservations.length - 2}건
+                      +{dayAgendaItems.length - 2}건
                     </span>
                   )}
                 </div>
@@ -734,6 +910,13 @@ export default function CalendarPage() {
                       />
                     );
                   })}
+                  {dayCleaningSchedules.map((schedule) => (
+                    <span
+                      key={`cleaning-${schedule.id}`}
+                      className="h-1.5 w-1.5 rounded-full bg-teal-500"
+                      title={`${schedule.cleanerName} 청소`}
+                    />
+                  ))}
                 </div>
               </button>
             );
@@ -745,7 +928,7 @@ export default function CalendarPage() {
       <section ref={selectedDaySectionRef} className="scroll-mt-4 bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-4">
         <div className="flex justify-between items-center pb-2 border-b border-slate-50">
           <h3 className="text-sm font-bold text-slate-800">
-            {format(selectedDate, "M월 d일")} 일정 ({selectedReservations.length}건)
+            {format(selectedDate, "M월 d일")} 일정 ({selectedAgendaItems.length}건)
           </h3>
           <span className="whitespace-nowrap text-xs font-semibold text-slate-500">
             하루 총 매출{" "}
@@ -757,13 +940,75 @@ export default function CalendarPage() {
 
         <div className="space-y-3">
           {isLoading ? (
-            <div className="text-center py-6 text-slate-400 text-xs">예약 데이터를 불러오는 중...</div>
-          ) : selectedReservations.length === 0 ? (
+            <div className="text-center py-6 text-slate-400 text-xs">일정 데이터를 불러오는 중...</div>
+          ) : selectedAgendaItems.length === 0 ? (
             <div className="text-center py-8 text-slate-400 text-sm">
-              이날 잡힌 예약이 없습니다. 우측 상단 &quot;+&quot; 버튼으로 수동 예약을 추가할 수 있습니다.
+              이날 잡힌 일정이 없습니다.
             </div>
           ) : (
-            selectedReservations.map((res) => {
+            selectedAgendaItems.map((agendaItem) => {
+              if (agendaItem.kind === "cleaning") {
+                const schedule = agendaItem.cleaning;
+                const start = new Date(schedule.startTime);
+                const end = new Date(schedule.endTime);
+                const startClock = `${String(getKstDateParts(start).hour).padStart(2, "0")}:${String(getKstDateParts(start).minute).padStart(2, "0")}`;
+                const displayEndTime = extendedEndClock(start, end);
+
+                return (
+                  <div
+                    key={`cleaning-${schedule.id}`}
+                    data-testid="cleaning-agenda-card"
+                    className="relative flex flex-col gap-3 rounded-xl border border-l-4 border-slate-100 border-l-teal-500 bg-teal-50/60 p-3 sm:p-4 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="w-[58px] shrink-0 text-center">
+                        <strong className="block text-sm text-slate-900">{startClock}</strong>
+                        <span className="text-[10px] font-medium text-slate-400">~ {displayEndTime}</span>
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1 rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-800">
+                            <Sparkles className="h-3 w-3" /> 청소
+                          </span>
+                          <span className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
+                            {schedule.roomName}
+                          </span>
+                          <strong className="min-w-0 truncate text-sm text-slate-900">{schedule.cleanerName}</strong>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3.5 w-3.5" /> {formatDuration(start, end)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Wallet className="h-3.5 w-3.5" /> 비용 <strong className="text-slate-800">{schedule.cost.toLocaleString("ko-KR")}원</strong>
+                          </span>
+                        </div>
+                        {schedule.memo && (
+                          <p className="whitespace-pre-wrap text-xs text-slate-500">{schedule.memo}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 justify-end gap-1 border-t border-teal-100 pt-2 md:border-t-0 md:pt-0">
+                      <button
+                        onClick={() => openCleaningEditModal(schedule)}
+                        className="rounded-lg p-2 text-slate-400 transition hover:bg-white hover:text-teal-600 active:scale-95"
+                        title="청소 일정 수정"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCleaning(schedule.id)}
+                        className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-500 active:scale-95"
+                        title="청소 일정 삭제"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              const res = agendaItem.reservation;
               const start = new Date(res.startTime);
               const end = new Date(res.endTime);
               const formatTime = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -1355,6 +1600,115 @@ export default function CalendarPage() {
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 text-sm rounded-xl hover:shadow-lg transition-all active:scale-[0.98] disabled:opacity-50"
               >
                 {isSubmitting ? "처리 중..." : modalMode === "edit" ? "수정 사항 저장" : modalMode === "copy" ? "여러 날짜에 복사하기" : "예약 생성 완료"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isCleaningModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 bg-teal-50 p-4">
+              <h2 className="flex items-center gap-2 font-bold text-slate-800">
+                <Sparkles className="h-5 w-5 text-teal-600" />
+                {cleaningEditId ? "청소 일정 수정" : "새 청소 일정 추가"}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsCleaningModalOpen(false)}
+                className="rounded-full p-1 text-slate-400 transition hover:bg-white active:scale-90"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCleaning} className="max-h-[75vh] space-y-4 overflow-y-auto p-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500">청소 공간</label>
+                  <select
+                    value={cleaningRoom}
+                    onChange={(event) => setCleaningRoom(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm font-medium outline-hidden focus:border-teal-500"
+                  >
+                    <option value="전체">전체 공간</option>
+                    <option value="머무룸1">머무룸1</option>
+                    <option value="머무룸2">머무룸2</option>
+                    <option value="머무룸3">머무룸3</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500">청소한 사람</label>
+                  <input
+                    type="text"
+                    required
+                    value={cleanerName}
+                    onChange={(event) => setCleanerName(event.target.value)}
+                    placeholder="이름 입력"
+                    className="w-full rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">청소 날짜</label>
+                <input
+                  type="date"
+                  required
+                  value={cleaningDate}
+                  onChange={(event) => setCleaningDate(event.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm font-medium outline-hidden focus:border-teal-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500">시작 시간</label>
+                  <TimeSelect value={cleaningStartTime} onChange={setCleaningStartTime} maxHour={23} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500">종료 시간</label>
+                  <TimeSelect value={cleaningEndTime} onChange={setCleaningEndTime} maxHour={24} />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">청소 비용</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    inputMode="numeric"
+                    value={cleaningCost}
+                    onChange={(event) => {
+                      const digits = event.target.value.replace(/\D/g, "");
+                      setCleaningCost(digits ? Number(digits).toLocaleString("ko-KR") : "");
+                    }}
+                    placeholder="0"
+                    className="w-full rounded-xl border border-slate-200 py-2.5 pl-3 pr-9 text-sm font-medium outline-hidden focus:border-teal-500"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">메모 (선택)</label>
+                <textarea
+                  value={cleaningMemo}
+                  onChange={(event) => setCleaningMemo(event.target.value)}
+                  rows={3}
+                  placeholder="청소 범위나 특이사항"
+                  className="w-full resize-y rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden focus:border-teal-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isCleaningSubmitting}
+                className="w-full rounded-xl bg-teal-600 py-3 text-sm font-bold text-white transition-all hover:bg-teal-700 hover:shadow-lg active:scale-[0.98] disabled:opacity-50"
+              >
+                {isCleaningSubmitting ? "저장 중..." : cleaningEditId ? "수정 사항 저장" : "청소 일정 저장"}
               </button>
             </form>
           </div>
