@@ -11,7 +11,7 @@ export const SITUATION_MESSAGE_TEMPLATE_DEFINITIONS = [
     key: "ON_TIME_EXIT_REMINDER",
     name: "정시퇴실 안내",
     triggerDescription: "같은 공간에 다른 고객의 예약이 바로 이어지는 경우",
-    automationDescription: "같은 고객의 연속 예약은 제외합니다. 발송 시점을 확정한 뒤 정시퇴실 자동발송에 연결합니다.",
+    automationDescription: "같은 고객의 연속 예약은 제외하고, 이용안내와 같은 시각에 별도 문자로 자동발송합니다.",
   },
   {
     key: "UNPAID_RESERVATION",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sendDueReservationReminders } from "@/lib/reservation-notifications";
 import { sendDueDawnBookingConfirmations } from "@/lib/dawn-booking-notifications";
+import { sendDueOnTimeExitMessages } from "@/lib/on-time-exit-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,8 @@ export async function GET() {
   try {
     const dawn = await sendDueDawnBookingConfirmations();
     const result = await sendDueReservationReminders();
-    return NextResponse.json({ ...result, dawn });
+    const onTimeExit = await sendDueOnTimeExitMessages();
+    return NextResponse.json({ ...result, dawn, onTimeExit });
   } catch (error) {
     console.error("Reservation notification cron error:", error);
     return NextResponse.json(

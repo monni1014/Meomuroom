@@ -63,13 +63,15 @@ function triggerPostRpaReservationCommunication(job: RpaEmailJob, reservationId?
   void import("./reservation-notifications")
     .then(async ({ sendDueReservationReminders }) => {
       const { sendDueDawnBookingConfirmations } = await import("./dawn-booking-notifications");
+      const { sendDueOnTimeExitMessages } = await import("./on-time-exit-notifications");
       const dawnResult = await sendDueDawnBookingConfirmations();
       const result = await sendDueReservationReminders();
-      return { result, dawnResult };
+      const exitResult = await sendDueOnTimeExitMessages();
+      return { result, dawnResult, exitResult };
     })
-    .then(({ result, dawnResult }) => {
+    .then(({ result, dawnResult, exitResult }) => {
       console.log(
-        `[RPAQueue] Post-RPA contact sync/notification: reservation=${reservationId}, guide-checked=${result.checkedCount}, guide-sent=${result.sentCount}, dawn-checked=${dawnResult.checkedCount}, dawn-sent=${dawnResult.sentCount}, waiting-contact=${result.waitingContactCount + dawnResult.waitingContactCount}, waiting-contact-sync=${result.waitingContactSyncCount}, google-sync=${result.contactSyncMs}ms, pipeline=${result.pipelineMs + dawnResult.pipelineMs}ms`,
+        `[RPAQueue] Post-RPA contact sync/notification: reservation=${reservationId}, guide-checked=${result.checkedCount}, guide-sent=${result.sentCount}, dawn-checked=${dawnResult.checkedCount}, dawn-sent=${dawnResult.sentCount}, exit-checked=${exitResult.checkedCount}, exit-sent=${exitResult.sentCount}, waiting-contact=${result.waitingContactCount + dawnResult.waitingContactCount}, waiting-contact-sync=${result.waitingContactSyncCount}, google-sync=${result.contactSyncMs}ms, pipeline=${result.pipelineMs + dawnResult.pipelineMs + exitResult.pipelineMs}ms`,
       );
     })
     .catch((error) => {

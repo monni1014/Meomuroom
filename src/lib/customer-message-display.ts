@@ -1,4 +1,4 @@
-export type CustomerMessageDisplayType = "GUIDE" | "DAWN_BOOKING" | "UNPAID" | "SITUATION";
+export type CustomerMessageDisplayType = "GUIDE" | "DAWN_BOOKING" | "ON_TIME_EXIT" | "UNPAID" | "SITUATION";
 
 export type CustomerMessageDisplay = {
   type: CustomerMessageDisplayType;
@@ -8,6 +8,9 @@ export type CustomerMessageDisplay = {
 export function customerMessageDisplay(dedupeKey: string): CustomerMessageDisplay {
   if (dedupeKey.startsWith("situation:dawn-booking:")) {
     return { type: "DAWN_BOOKING", label: "새벽시간 확인" };
+  }
+  if (dedupeKey.startsWith("situation:on-time-exit:")) {
+    return { type: "ON_TIME_EXIT", label: "정시퇴실 안내" };
   }
   if (dedupeKey.startsWith("situation:unpaid:")) {
     return { type: "UNPAID", label: "미정산 안내" };

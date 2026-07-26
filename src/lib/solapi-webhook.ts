@@ -115,9 +115,12 @@ export async function processSolapiReport(report: SolapiReport) {
   }
 
   const isDawnConfirmation = message.dedupeKey.startsWith("situation:dawn-booking:");
+  const isOnTimeExit = message.dedupeKey.startsWith("situation:on-time-exit:");
   const alertKey = isDawnConfirmation
     ? `dawn-booking-notification:${reservation.id}`
-    : notificationAlertKey(reservation.id);
+    : isOnTimeExit
+      ? `on-time-exit-notification:${reservation.id}`
+      : notificationAlertKey(reservation.id);
 
   if (status === "DELIVERED") {
     after(async () => {
@@ -133,9 +136,17 @@ export async function processSolapiReport(report: SolapiReport) {
     });
     after(async () => {
       await createAdminAlert({
-        type: isDawnConfirmation ? "DAWN_BOOKING_NOTIFICATION_FAILED" : "NOTIFICATION_DELIVERY",
+        type: isDawnConfirmation
+          ? "DAWN_BOOKING_NOTIFICATION_FAILED"
+          : isOnTimeExit
+            ? "ON_TIME_EXIT_NOTIFICATION_FAILED"
+            : "NOTIFICATION_DELIVERY",
         severity: "CRITICAL",
-        title: isDawnConfirmation ? "새벽 예약 확인 문자 수신 실패" : failureAlert.title,
+        title: isDawnConfirmation
+          ? "새벽 예약 확인 문자 수신 실패"
+          : isOnTimeExit
+            ? "정시퇴실 문자 수신 실패"
+            : failureAlert.title,
         message: failureAlert.message,
         dedupeKey: alertKey,
       });

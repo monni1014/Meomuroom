@@ -10,6 +10,10 @@ assert.deepEqual(
   { type: "DAWN_BOOKING", label: "새벽시간 확인" },
 );
 assert.deepEqual(
+  customerMessageDisplay("situation:on-time-exit:reservation-1"),
+  { type: "ON_TIME_EXIT", label: "정시퇴실 안내" },
+);
+assert.deepEqual(
   customerMessageDisplay("situation:unpaid:reservation-1"),
   { type: "UNPAID", label: "미정산 안내" },
 );
