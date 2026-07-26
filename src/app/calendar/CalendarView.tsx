@@ -214,7 +214,7 @@ export default function CalendarPage() {
   const [showMultiPicker, setShowMultiPicker] = useState(false);
 
   const [cleaningEditId, setCleaningEditId] = useState<string | null>(null);
-  const [cleaningRooms, setCleaningRooms] = useState<string[]>(["머무룸1", "머무룸2", "머무룸3"]);
+  const [cleaningRooms, setCleaningRooms] = useState<string[]>([]);
   const [cleanerName, setCleanerName] = useState("");
   const [cleaningDate, setCleaningDate] = useState(format(initialDate, "yyyy-MM-dd"));
   const [cleaningStartTime, setCleaningStartTime] = useState("09:00");
@@ -530,7 +530,7 @@ export default function CalendarPage() {
 
   const resetCleaningForm = (date = selectedDate) => {
     setCleaningEditId(null);
-    setCleaningRooms(roomFilter === "all" ? ["머무룸1", "머무룸2", "머무룸3"] : [roomFilter]);
+    setCleaningRooms([]);
     setCleanerName("");
     setCleaningDate(format(date, "yyyy-MM-dd"));
     setCleaningStartTime("09:00");
