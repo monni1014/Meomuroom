@@ -747,8 +747,11 @@ export default function CalendarPage() {
           <h3 className="text-sm font-bold text-slate-800">
             {format(selectedDate, "M월 d일")} 일정 ({selectedReservations.length}건)
           </h3>
-          <span className="whitespace-nowrap text-xs font-bold tabular-nums text-slate-500">
-            하루 총 매출 {selectedDayRevenue.toLocaleString("ko-KR")}원
+          <span className="whitespace-nowrap text-xs font-semibold text-slate-500">
+            하루 총 매출{" "}
+            <strong className="font-black tabular-nums text-slate-900">
+              {selectedDayRevenue.toLocaleString("ko-KR")}원
+            </strong>
           </span>
         </div>
 
