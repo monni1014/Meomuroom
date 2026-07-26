@@ -11,7 +11,7 @@ const TRACKED_END_HOUR = 24;
 const DATE_SELECTED = "SELECTED";
 const DATE_UNAVAILABLE = "UNAVAILABLE";
 const DATE_NOT_YET_OPEN = "NOT_YET_OPEN";
-const CALENDAR_ASYNC_SETTLE_MS = 1_000;
+const CALENDAR_ASYNC_SETTLE_MS = 2_000;
 
 function previousStateKey(competitorId, targetKey, hour) {
   return `${competitorId}|${targetKey}|${hour}`;
