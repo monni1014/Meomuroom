@@ -167,7 +167,7 @@ function formatCleaningRooms(roomNames: string[]) {
 function getCleaningRoomTextStyle(roomName: string) {
   if (roomName === "머무룸1") return "text-sky-700";
   if (roomName === "머무룸2") return "text-purple-700";
-  if (roomName === "머무룸3") return "text-orange-700";
+  if (roomName === "머무룸3") return "text-slate-600";
   return "text-slate-600";
 }
 
@@ -1115,14 +1115,7 @@ export default function CalendarPage() {
                         )}
                         <span>·</span>
                         <span>{headCount}명</span>
-                        {res.price > 0 && (
-                          <>
-                            <span>·</span>
-                            <strong className="font-extrabold tabular-nums text-slate-800">
-                              {res.price.toLocaleString()}원
-                            </strong>
-                          </>
-                        )}
+                        {res.price > 0 && <><span>·</span><span>{res.price.toLocaleString()}원</span></>}
                         {isCancelled && <span className="font-bold text-slate-500">· 취소</span>}
                       </div>
                     </div>
@@ -1216,12 +1209,7 @@ export default function CalendarPage() {
                       {res.price > 0 && (
                         <p className="flex min-w-0 items-center gap-1 text-slate-700">
                           <Wallet className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                          <span>
-                            {isCancelled ? "수수료" : "요금"}: {" "}
-                            <strong className="font-extrabold tabular-nums text-slate-950">
-                              {res.price.toLocaleString()}원
-                            </strong>
-                          </span>
+                          <span>{isCancelled ? "수수료" : "요금"}: <strong className="text-slate-800">{res.price.toLocaleString()}원</strong></span>
                         </p>
                       )}
                       {res.phone && (
