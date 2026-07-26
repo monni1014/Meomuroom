@@ -1004,9 +1004,6 @@ export default function CalendarPage() {
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                           <strong className="min-w-0 truncate text-slate-900 md:hidden">{schedule.cleanerName}</strong>
-                          <span className="hidden items-center gap-1 md:flex">
-                            <Clock className="h-3.5 w-3.5" /> {formatDuration(start, end)}
-                          </span>
                           <span className="flex items-center gap-1">
                             <Wallet className="h-3.5 w-3.5" /> 비용 <strong className="text-slate-800">{schedule.cost.toLocaleString("ko-KR")}원</strong>
                           </span>
