@@ -269,6 +269,10 @@ export default function CalendarPage() {
   const selectedReservations = filteredReservations
     .filter((res) => isSameDay(new Date(res.startTime), selectedDate))
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  const selectedDayRevenue = selectedReservations.reduce(
+    (sum, reservation) => sum + (reservation.price || 0),
+    0,
+  );
 
   const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -743,7 +747,9 @@ export default function CalendarPage() {
           <h3 className="text-sm font-bold text-slate-800">
             {format(selectedDate, "M월 d일")} 일정 ({selectedReservations.length}건)
           </h3>
-          <span className="text-xs text-slate-400">선택한 날짜별 예약</span>
+          <span className="whitespace-nowrap text-xs font-bold tabular-nums text-slate-500">
+            하루 총 매출 {selectedDayRevenue.toLocaleString("ko-KR")}원
+          </span>
         </div>
 
         <div className="space-y-3">
