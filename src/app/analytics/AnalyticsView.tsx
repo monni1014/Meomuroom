@@ -201,7 +201,6 @@ export default function AnalyticsPage() {
       <header className="flex flex-col gap-4 pt-8 pb-4 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">결산 및 통계</h1>
-          <p className="text-sm text-slate-500 mt-1">포스 및 예약 채널 실시간 자동 종합 레포트</p>
         </div>
         <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm md:w-auto">
           <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
