@@ -15,13 +15,13 @@ const pushes = buildSynergyBookingPushes([
 assert.deepEqual(pushes, [
   {
     title: "시너지 신규 예약 발견",
-    body: "7월 30일 15:00~18:00",
+    body: "7월 30일 / 15시부터 18시까지",
     url: "/competitors?year=2026&month=7",
     tag: "competitor-synergy-booked-2026-07-30-15-18",
   },
   {
     title: "시너지 신규 예약 발견",
-    body: "7월 30일 20:00~21:00",
+    body: "7월 30일 / 20시부터 21시까지",
     url: "/competitors?year=2026&month=7",
     tag: "competitor-synergy-booked-2026-07-30-20-21",
   },

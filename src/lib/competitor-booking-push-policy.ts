@@ -13,7 +13,7 @@ export type SynergyBookingPush = {
 };
 
 function formatHour(hour: number) {
-  return `${String(hour).padStart(2, "0")}:00`;
+  return `${hour}시`;
 }
 
 function formatDate(dateKey: string) {
@@ -43,7 +43,7 @@ export function buildSynergyBookingPushes(
     const appendPush = (endHour: number) => {
       pushes.push({
         title: "시너지 신규 예약 발견",
-        body: `${formatDate(dateKey)} ${formatHour(startHour)}~${formatHour(endHour)}`,
+        body: `${formatDate(dateKey)} / ${formatHour(startHour)}부터 ${formatHour(endHour)}까지`,
         url: `/competitors?year=${dateKey.slice(0, 4)}&month=${Number(dateKey.slice(5, 7))}`,
         tag: `competitor-synergy-booked-${dateKey}-${startHour}-${endHour}`,
       });
