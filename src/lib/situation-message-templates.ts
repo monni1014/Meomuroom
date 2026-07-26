@@ -13,6 +13,12 @@ export const SITUATION_MESSAGE_TEMPLATE_DEFINITIONS = [
     triggerDescription: "예약이 미정산 상태인 경우",
     automationDescription: "발송 시점을 확정한 뒤 미정산 자동발송에 연결합니다.",
   },
+  {
+    key: "ON_TIME_EXIT_REMINDER",
+    name: "정시퇴실 안내",
+    triggerDescription: "같은 공간에 다른 고객의 예약이 바로 이어지는 경우",
+    automationDescription: "같은 고객의 연속 예약은 제외합니다. 발송 시점을 확정한 뒤 정시퇴실 자동발송에 연결합니다.",
+  },
 ] as const;
 
 export type SituationMessageTemplateKey =

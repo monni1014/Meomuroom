@@ -7,6 +7,7 @@ import {
   Bot,
   CircleDollarSign,
   CheckCircle2,
+  Clock3,
   CloudCog,
   ContactRound,
   Cpu,
@@ -40,7 +41,7 @@ type MessageTemplateState = {
 };
 
 type SituationMessageTemplateState = {
-  key: "DAWN_BOOKING_CONFIRMATION" | "UNPAID_RESERVATION";
+  key: "DAWN_BOOKING_CONFIRMATION" | "UNPAID_RESERVATION" | "ON_TIME_EXIT_REMINDER";
   name: string;
   triggerDescription: string;
   automationDescription: string;
@@ -1081,10 +1082,14 @@ export default function SettingsView({
                           "rounded-lg p-2",
                           template.key === "DAWN_BOOKING_CONFIRMATION"
                             ? "bg-indigo-50 text-indigo-600"
-                            : "bg-amber-50 text-amber-600",
+                            : template.key === "ON_TIME_EXIT_REMINDER"
+                              ? "bg-emerald-50 text-emerald-600"
+                              : "bg-amber-50 text-amber-600",
                         )}>
                           {template.key === "DAWN_BOOKING_CONFIRMATION" ? (
                             <AlertTriangle className="h-4 w-4" />
+                          ) : template.key === "ON_TIME_EXIT_REMINDER" ? (
+                            <Clock3 className="h-4 w-4" />
                           ) : (
                             <CircleDollarSign className="h-4 w-4" />
                           )}
