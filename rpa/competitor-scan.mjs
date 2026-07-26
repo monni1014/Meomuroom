@@ -11,6 +11,7 @@ const TRACKED_END_HOUR = 24;
 const DATE_SELECTED = "SELECTED";
 const DATE_UNAVAILABLE = "UNAVAILABLE";
 const DATE_NOT_YET_OPEN = "NOT_YET_OPEN";
+const CALENDAR_ASYNC_SETTLE_MS = 1_000;
 
 function previousStateKey(competitorId, targetKey, hour) {
   return `${competitorId}|${targetKey}|${hour}`;
@@ -196,6 +197,10 @@ async function waitForCalendar(page) {
     null,
     { timeout: 30_000 },
   );
+  // Naver renders the month title and disabled date buttons first, then fills
+  // their real availability asynchronously. Reading immediately can turn an
+  // entire future month into NOT_YET_OPEN or UNKNOWN.
+  await page.waitForTimeout(CALENDAR_ASYNC_SETTLE_MS);
 }
 
 async function visibleMonth(page) {
@@ -228,6 +233,8 @@ async function navigateToMonth(page, targetKey) {
       target,
       { timeout: 15_000 },
     );
+    // The title changes before the target month's date availability is ready.
+    await page.waitForTimeout(CALENDAR_ASYNC_SETTLE_MS);
   }
 
   throw new Error(`Could not navigate calendar to ${target.year}.${target.month}`);

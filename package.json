@@ -18,6 +18,7 @@
     "test:rpa-queue": "node --experimental-strip-types scripts/test-rpa-job-priority.mjs",
     "test:competitor-ranges": "node --experimental-strip-types scripts/test-competitor-scan-ranges.mjs",
     "test:competitor-cancellations": "node --experimental-strip-types scripts/test-competitor-cancellations.mjs",
+    "test:competitor-booking-discovery": "node --experimental-strip-types scripts/test-competitor-booking-discovery.mjs",
     "test:naver-rpa-performance": "node scripts/test-naver-rpa-performance.mjs",
     "test:naver-booking-row": "node scripts/test-naver-booking-row.mjs",
     "test:naver-cancellation-times": "node --experimental-strip-types scripts/test-naver-cancellation-times.mjs",

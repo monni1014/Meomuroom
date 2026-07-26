@@ -165,8 +165,8 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       cancellationPending: slot.pendingState === "AVAILABLE",
       bookingNumber: null,
       bookingGroup: null,
-      // A baseline that was already closed is a useful occupancy snapshot, but
-      // only AVAILABLE -> BOOKED is a confirmed first-detection event.
+      // lastBookedAt records the first time monitoring discovered this booking,
+      // including bookings found when a new scan horizon is introduced.
       firstDetectedAt: slot.lastBookedAt?.toISOString() || null,
     };
     bookingGroupKeys.set(

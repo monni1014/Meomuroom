@@ -9,6 +9,7 @@ import {
   resolveCompetitorScanRange,
   type CompetitorScanMode,
 } from "@/lib/competitor-scan-range";
+import { shouldCreateBookingDiscoveryEvent } from "@/lib/competitor-booking-discovery";
 import { competitorCancellationFeeRate } from "@/lib/competitor-cancellation";
 import { prisma } from "@/lib/prisma";
 
@@ -423,10 +424,10 @@ function resolveState(current: ExistingSlot | undefined, observation: ScannerObs
     }
   }
 
-  // Only a known AVAILABLE -> BOOKED transition proves that this booking
-  // appeared after monitoring began. Initial baselines and UNKNOWN states do
-  // not have enough evidence for an opportunity-loss judgement.
-  if (state === "BOOKED" && current?.state === "AVAILABLE") eventType = "BOOKED";
+  // The operator needs every first discovery to be visible, including a
+  // booking already present when a newly extended scan horizon is first read.
+  // lastBookedAt makes this one-shot for legacy baseline rows as well.
+  if (shouldCreateBookingDiscoveryEvent(state, current)) eventType = "BOOKED";
 
   return {
     state,
@@ -663,8 +664,8 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
       if (resolved.eventType === "CANCELLED" || resolved.eventType === "BOOKED") {
         opportunityLostRooms = null;
       } else if (resolved.state === "BOOKED" && !current?.lastBookedAt) {
-        // First-baseline closed slots are observable, but are not proof of a
-        // newly won competitor booking or an opportunity lost by Memoroom.
+        // Retain compatibility for legacy baseline rows that have not yet been
+        // revisited by the first-discovery event policy.
         opportunityLostRooms = "NONE";
       }
       const bookingDurationHours = resolved.eventType === "CANCELLED"
