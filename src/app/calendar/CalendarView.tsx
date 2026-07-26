@@ -101,6 +101,19 @@ function buildLocalDateTime(dateText: string, clockText: string) {
   return createKstDate(year, month, day, hour, minute);
 }
 
+async function getCurrentPushSubscriptionEndpoint() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return null;
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration("/");
+    const subscription = await registration?.pushManager.getSubscription();
+    return subscription?.endpoint || null;
+  } catch (error) {
+    console.warn("Current push subscription lookup failed:", error);
+    return null;
+  }
+}
+
 function formatClock(totalMinutes: number) {
   const hour = Math.floor(totalMinutes / 60);
   const minute = totalMinutes % 60;
@@ -303,11 +316,15 @@ export default function CalendarPage() {
         );
         if (!res.ok) throw new Error("수정 실패");
       } else {
+        const pushSubscriptionEndpoint = await getCurrentPushSubscriptionEndpoint();
         const promises = formDates.map((dateStr) =>
           fetch("/api/reservations", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildPayload(dateStr)),
+            body: JSON.stringify({
+              ...buildPayload(dateStr),
+              pushSubscriptionEndpoint,
+            }),
           })
         );
         const results = await Promise.all(promises);

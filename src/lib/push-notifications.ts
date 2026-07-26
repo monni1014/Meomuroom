@@ -1,5 +1,9 @@
 import webpush from "web-push";
 import { prisma } from "@/lib/prisma";
+import {
+  selectPushSubscriptions,
+  type PushDeliveryOptions,
+} from "@/lib/push-subscription-selection";
 
 const SUBSCRIPTIONS_KEY = "webpush.subscriptions";
 
@@ -104,11 +108,15 @@ export async function removePushSubscription(endpoint: string) {
   if (next.length !== subscriptions.length) await writeSubscriptions(next);
 }
 
-export async function sendPushNotification(payload: PushPayload) {
+export async function sendPushNotification(
+  payload: PushPayload,
+  options: PushDeliveryOptions = {},
+) {
   if (!isPushConfigured()) return { configured: false, sent: 0, failed: 0 };
 
   const subscriptions = await readSubscriptions();
-  if (subscriptions.length === 0) return { configured: true, sent: 0, failed: 0 };
+  const targets = selectPushSubscriptions(subscriptions, options);
+  if (targets.length === 0) return { configured: true, sent: 0, failed: 0 };
 
   webpush.setVapidDetails(
     env("WEB_PUSH_SUBJECT"),
@@ -120,7 +128,7 @@ export async function sendPushNotification(payload: PushPayload) {
   let sent = 0;
   let failed = 0;
 
-  await Promise.all(subscriptions.map(async (subscription) => {
+  await Promise.all(targets.map(async (subscription) => {
     try {
       await webpush.sendNotification(
         {

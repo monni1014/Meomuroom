@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeCustomerType } from "@/lib/customer-types";
+import { buildManualReservationPush } from "@/lib/manual-reservation-push";
+import { sendPushNotification } from "@/lib/push-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +33,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { source, roomName, customerName, customerType, phone, startTime, endTime, price, headCount, coffeeCount, purpose, detail, paymentMethod, isPaid, memo, discount } = body;
+    const { source, roomName, customerName, customerType, phone, startTime, endTime, price, headCount, coffeeCount, purpose, detail, paymentMethod, isPaid, memo, discount, pushSubscriptionEndpoint } = body;
 
     if (!VALID_ROOM_NAMES.has(roomName)) {
       return NextResponse.json({ error: "A valid roomName is required" }, { status: 400 });
@@ -92,6 +94,22 @@ export async function POST(request: NextRequest) {
         usageLog: true,
       },
     });
+
+    try {
+      const excludedEndpoint = typeof pushSubscriptionEndpoint === "string"
+        && pushSubscriptionEndpoint.startsWith("https://")
+        ? pushSubscriptionEndpoint
+        : null;
+      const pushResult = await sendPushNotification(
+        buildManualReservationPush(reservation),
+        { excludeEndpoints: excludedEndpoint ? [excludedEndpoint] : [] },
+      );
+      console.info(
+        `[ManualReservation] Push sent ${pushResult.sent}, failed ${pushResult.failed}, origin excluded ${Boolean(excludedEndpoint)}`,
+      );
+    } catch (pushError) {
+      console.error("Manual reservation push failed:", pushError);
+    }
 
     return NextResponse.json(reservation, { status: 201 });
   } catch (error) {
