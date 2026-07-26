@@ -128,6 +128,10 @@ function formatDuration(start: Date, end: Date) {
   return minutes === 0 ? `${hours}시간` : `${hours}시간 ${minutes}분`;
 }
 
+function getPaymentMethodDisplay(paymentMethod: string) {
+  return paymentMethod === "현장카드" ? "카드" : paymentMethod;
+}
+
 export default function CalendarPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -784,8 +788,21 @@ export default function CalendarPage() {
                         <strong className={cn("min-w-0 truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
                           {res.customerName ?? "이름 미확인"}
                         </strong>
+                        {!isCancelled && !res.isPaid && (
+                          <span className="shrink-0 text-[11px] font-bold text-rose-600">미수</span>
+                        )}
+                        {(hasUnpaid || hasUnpaidExtra) && (
+                          <span className="flex shrink-0 items-center gap-0.5" aria-label="미결제 상태">
+                            {hasUnpaid && (
+                              <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500 drop-shadow-sm" aria-label="예약금 미수" />
+                            )}
+                            {hasUnpaidExtra && (
+                              <Star className="h-3.5 w-3.5 fill-red-500 text-red-500 drop-shadow-sm" aria-label="추가금 미결제" />
+                            )}
+                          </span>
+                        )}
                       </div>
-                      <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
+                      <div className="mt-1 flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden whitespace-nowrap text-[11px] text-slate-500">
                         <span className={cn("shrink-0 text-[11px] font-medium", getSourceBadgeStyle(res.source))}>
                           {getSourceDisplay(res.source)}
                         </span>
@@ -796,27 +813,16 @@ export default function CalendarPage() {
                               ? "border-slate-200 bg-slate-100 text-slate-600"
                               : "border-rose-300 bg-rose-50 text-rose-600"
                           )}>
-                            {res.paymentMethod}
+                            {getPaymentMethodDisplay(res.paymentMethod)}
                           </span>
                         )}
                         <span>·</span>
                         <span>{headCount}명</span>
                         {res.price > 0 && <><span>·</span><span>{res.price.toLocaleString()}원</span></>}
                         {isCancelled && <span className="font-bold text-slate-500">· 취소</span>}
-                        {!isCancelled && !res.isPaid && <span className="font-bold text-rose-600">· 미수</span>}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      {(hasUnpaid || hasUnpaidExtra) && (
-                        <span className="flex items-center gap-0.5" aria-label="미결제 상태">
-                          {hasUnpaid && (
-                            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500 drop-shadow-sm" aria-label="예약금 미수" />
-                          )}
-                          {hasUnpaidExtra && (
-                            <Star className="h-3.5 w-3.5 fill-red-500 text-red-500 drop-shadow-sm" aria-label="추가금 미결제" />
-                          )}
-                        </span>
-                      )}
+                    <div className="flex shrink-0 items-center">
                       <ChevronDown className={cn("h-4 w-4 text-slate-400 transition-transform", isExpanded && "rotate-180")} />
                     </div>
                   </div>
@@ -874,7 +880,7 @@ export default function CalendarPage() {
                             ? "bg-slate-100 text-slate-600 border-slate-200" 
                             : "bg-rose-50 text-rose-600 border-rose-300 shadow-sm shadow-rose-100"
                         )}>
-                          {res.paymentMethod}{!res.isPaid && "(미수)"}
+                          {getPaymentMethodDisplay(res.paymentMethod)}{!res.isPaid && "(미수)"}
                         </span>
                       )}
                       {!isCancelled && res.usageLog && (res.usageLog.extraPrice ?? 0) > 0 && (
@@ -1253,7 +1259,7 @@ export default function CalendarPage() {
                     onChange={(e) => setPaymentMethod(e.target.value)}
                     className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium bg-white"
                   >
-                    <option value="현장카드">현장카드</option>
+                    <option value="현장카드">카드</option>
                     <option value="계좌이체">계좌이체</option>
                     <option value="온라인">온라인</option>
                   </select>
