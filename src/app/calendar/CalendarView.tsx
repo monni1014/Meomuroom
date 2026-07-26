@@ -871,7 +871,7 @@ export default function CalendarPage() {
                       return (
                         <span
                           key={`cleaning-${agendaItem.id}`}
-                          className="block min-w-0 truncate rounded border border-dashed border-cyan-300 bg-cyan-50 px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight text-cyan-800"
+                          className="block min-w-0 truncate rounded border border-dashed border-amber-400 bg-amber-100 px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight text-amber-950"
                           title={`${clock} ${formatCleaningRooms(agendaItem.cleaning.roomNames)} 청소 · ${agendaItem.cleaning.cleanerName}`}
                         >
                           {compactClock} 청소
@@ -920,7 +920,7 @@ export default function CalendarPage() {
                   {dayCleaningSchedules.map((schedule) => (
                     <span
                       key={`cleaning-${schedule.id}`}
-                      className="h-1.5 w-1.5 rounded-xs bg-cyan-500 ring-1 ring-cyan-700"
+                      className="h-1.5 w-1.5 rounded-xs bg-amber-400 ring-1 ring-amber-600"
                       title={`${schedule.cleanerName} 청소`}
                     />
                   ))}
@@ -965,7 +965,7 @@ export default function CalendarPage() {
                   <div
                     key={`cleaning-${schedule.id}`}
                     data-testid="cleaning-agenda-card"
-                    className="relative flex flex-col gap-3 rounded-xl border-2 border-dashed border-cyan-300 bg-cyan-50/80 p-3 sm:p-4 md:flex-row md:items-center md:justify-between"
+                    className="relative flex flex-col gap-3 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/90 p-3 sm:p-4 md:flex-row md:items-center md:justify-between"
                   >
                     <div className="flex min-w-0 items-start gap-3">
                       <div className="w-[58px] shrink-0 text-center">
@@ -974,7 +974,7 @@ export default function CalendarPage() {
                       </div>
                       <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="inline-flex items-center gap-1 rounded bg-cyan-700 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                          <span className="inline-flex items-center gap-1 rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-amber-950">
                             <SprayCan className="h-3 w-3" /> 청소 일정
                           </span>
                           {(schedule.roomNames.length === CLEANING_ROOM_OPTIONS.length
@@ -1003,7 +1003,7 @@ export default function CalendarPage() {
                         )}
                       </div>
                     </div>
-                    <div className="flex shrink-0 justify-end gap-1 border-t border-cyan-200 pt-2 md:border-t-0 md:pt-0">
+                    <div className="flex shrink-0 justify-end gap-1 border-t border-amber-200 pt-2 md:border-t-0 md:pt-0">
                       <button
                         onClick={() => openCleaningEditModal(schedule)}
                         className="rounded-lg p-2 text-slate-400 transition hover:bg-white hover:text-teal-600 active:scale-95"
