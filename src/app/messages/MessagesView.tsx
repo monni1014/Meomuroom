@@ -60,6 +60,15 @@ const ATTENTION_STATUSES = new Set(["FAILED", "MISSING_PHONE", "OVERDUE", "DRY_R
 const PROCESSING_STATUSES = new Set(["SENDING", "RECOVERING", "SUBMITTED", "CARRIER_ACCEPTED"]);
 const SCHEDULED_STATUSES = new Set(["SCHEDULED", "PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC"]);
 
+type MessageFilter = "ALL" | "GUIDE" | "SITUATION" | "UNSENT";
+
+const MESSAGE_FILTERS: Array<{ value: MessageFilter; label: string }> = [
+  { value: "ALL", label: "전체" },
+  { value: "GUIDE", label: "이용 안내" },
+  { value: "SITUATION", label: "상황별" },
+  { value: "UNSENT", label: "미발송/실패" },
+];
+
 function formatKst(value: string, includeDate = true) {
   return new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
@@ -127,6 +136,7 @@ export default function MessagesView({
 }) {
   const router = useRouter();
   const [showOperationalDetails, setShowOperationalDetails] = useState(false);
+  const [messageFilter, setMessageFilter] = useState<MessageFilter>("ALL");
   const refresh = useCallback(() => router.refresh(), [router]);
   useDataChangePolling("/api/data-version?scope=messages", refresh, { intervalMs: 5_000 });
 
@@ -147,6 +157,17 @@ export default function MessagesView({
       }
       return new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime();
     }), [initialEntries]);
+
+  const filteredEntries = useMemo(() => sortedEntries.filter((entry) => {
+    if (messageFilter === "GUIDE") return entry.messageType === "GUIDE";
+    if (messageFilter === "SITUATION") return entry.messageType !== "GUIDE";
+    if (messageFilter === "UNSENT") {
+      return SCHEDULED_STATUSES.has(entry.status)
+        || PROCESSING_STATUSES.has(entry.status)
+        || ATTENTION_STATUSES.has(entry.status);
+    }
+    return true;
+  }), [messageFilter, sortedEntries]);
 
   const [selectedYear, selectedMonth, selectedDay] = selectedDateKey.split("-").map(Number);
   const currentYear = new Date().getFullYear();
@@ -329,10 +350,30 @@ export default function MessagesView({
         <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-4 sm:p-5">
             <h2 className="font-black text-slate-900">{selectedDateLabel} 발송 관리</h2>
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-0.5">
+              {MESSAGE_FILTERS.map((filter) => {
+                const active = messageFilter === filter.value;
+                return (
+                  <button
+                    key={filter.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setMessageFilter(filter.value)}
+                    className={`shrink-0 rounded-full px-3 py-2 text-xs font-extrabold transition-colors ${
+                      active
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="divide-y divide-slate-100">
-            {sortedEntries.map((entry) => {
+            {filteredEntries.map((entry) => {
               const style = statusStyle(entry.status);
               return (
                 <article key={entry.entryId} className="p-4 sm:p-5">
@@ -373,8 +414,12 @@ export default function MessagesView({
                 </article>
               );
             })}
-            {sortedEntries.length === 0 && (
-              <div className="p-12 text-center text-sm text-slate-400">선택한 날짜의 문자 내역이 없습니다.</div>
+            {filteredEntries.length === 0 && (
+              <div className="p-12 text-center text-sm text-slate-400">
+                {messageFilter === "ALL"
+                  ? "선택한 날짜의 문자 내역이 없습니다."
+                  : "선택한 조건에 해당하는 문자 내역이 없습니다."}
+              </div>
             )}
           </div>
         </section>
