@@ -4,6 +4,7 @@ import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-numb
 import { getKstDayRange } from "@/lib/kst-time";
 import { getSolapiDailyUsage } from "@/lib/solapi-daily-usage";
 import { buildReservationNotificationGroups } from "@/lib/reservation-notification-grouping";
+import { customerMessageDisplay } from "@/lib/customer-message-display";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export default async function MessagesPage() {
   const plannedReservationEnd = new Date(tomorrowStart.getTime() + twoHoursMs);
   const twoHoursLater = new Date(now.getTime() + twoHoursMs);
 
-  const [reservations, dailyUsage] = await Promise.all([prisma.reservation.findMany({
+  const [reservations, situationMessages, dailyUsage] = await Promise.all([prisma.reservation.findMany({
     where: {
       status: "CONFIRMED",
       OR: [
@@ -68,6 +69,14 @@ export default async function MessagesPage() {
         },
       },
     },
+  }), prisma.customerMessage.findMany({
+    where: {
+      direction: "OUTBOUND",
+      dedupeKey: { startsWith: "situation:" },
+      occurredAt: { gte: today.start, lt: tomorrowStart },
+    },
+    include: { reservation: true },
+    orderBy: { occurredAt: "desc" },
   }), getSolapiDailyUsage(today.start, tomorrowStart)]);
 
   const notificationGroups = buildReservationNotificationGroups(reservations);
@@ -98,6 +107,7 @@ export default async function MessagesPage() {
     }
 
     return {
+      entryId: message?.id || `guide:${reservation.id}`,
       reservationId: reservation.id,
       customerName: reservation.customerName,
       roomName: reservation.roomName,
@@ -112,12 +122,41 @@ export default async function MessagesPage() {
       resultAt: message?.updatedAt.toISOString() || reservation.notifiedAt?.toISOString() || null,
       providerMessageId: message?.providerMessageId || null,
       isTest: message?.dedupeKey.startsWith("reservation-test:") || false,
+      messageType: "GUIDE" as const,
+      messageLabel: "이용 안내",
     };
+  });
+
+  const situationEntries = situationMessages.flatMap((message) => {
+    const reservation = message.reservation;
+    if (!reservation) return [];
+
+    const display = customerMessageDisplay(message.dedupeKey);
+    const status = message.status === "SENT" ? "SUBMITTED" : message.status;
+    return [{
+      entryId: message.id,
+      reservationId: reservation.id,
+      customerName: reservation.customerName,
+      roomName: reservation.roomName,
+      phone: normalizeKoreanPhone(reservation.phone),
+      startTime: reservation.startTime.toISOString(),
+      endTime: reservation.endTime.toISOString(),
+      scheduledAt: message.occurredAt.toISOString(),
+      reservationStatus: reservation.status,
+      status,
+      error: status === "FAILED" ? `${display.label} 문자 발송에 실패했습니다.` : null,
+      sentAt: message.occurredAt.toISOString(),
+      resultAt: message.updatedAt.toISOString(),
+      providerMessageId: message.providerMessageId,
+      isTest: false,
+      messageType: display.type,
+      messageLabel: display.label,
+    }];
   });
 
   return (
     <MessagesView
-      initialEntries={entries}
+      initialEntries={[...entries, ...situationEntries]}
       todayLabel={`${today.parts.month}월 ${today.parts.day}일`}
       dailyUsage={dailyUsage}
     />
