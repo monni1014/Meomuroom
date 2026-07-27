@@ -714,16 +714,16 @@ export default function CalendarPage() {
 
   return (
     <div className="p-4 md:p-8 space-y-6 pb-24 max-w-7xl mx-auto w-full">
-      <header className="pt-8 pb-4 flex justify-between items-center gap-3 flex-wrap">
+      <header className="pt-8 pb-4 flex justify-between items-start gap-3 flex-wrap sm:items-center">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">통합 캘린더</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
           <button
             onClick={handleSyncEmails}
             disabled={isSyncing}
             className={cn(
-              "flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl shadow-md text-sm font-bold transition-all active:scale-95 whitespace-nowrap",
+              "flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl shadow-md text-sm font-bold transition-all active:scale-95 whitespace-nowrap",
               isSyncing ? "bg-slate-400 cursor-wait" : "bg-emerald-600 hover:bg-emerald-700",
               "text-white"
             )}
@@ -739,14 +739,14 @@ export default function CalendarPage() {
               setFormDates([format(selectedDate, "yyyy-MM-dd")]);
               setIsModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-xl shadow-md hover:bg-indigo-700 active:scale-95 transition-all whitespace-nowrap"
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-xl shadow-md hover:bg-indigo-700 active:scale-95 transition-all whitespace-nowrap"
           >
             <Plus className="w-4 h-4" />
             수동 예약 추가
           </button>
           <button
             onClick={() => setIsScheduleTypeModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-amber-400 text-amber-950 text-sm font-bold rounded-xl shadow-md hover:bg-amber-500 active:scale-95 transition-all whitespace-nowrap"
+            className="col-span-2 flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-amber-400 text-amber-950 text-sm font-bold rounded-xl shadow-md hover:bg-amber-500 active:scale-95 transition-all whitespace-nowrap sm:col-span-1"
           >
             <SprayCan className="w-4 h-4" />
             청소/사전답사 일정 추가
