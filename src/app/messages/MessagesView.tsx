@@ -227,6 +227,7 @@ export default function MessagesView({
     }), [initialEntries]);
 
   const filteredEntries = useMemo(() => sortedEntries.filter((entry) => {
+    if (entry.messageType === "ON_TIME_EXIT") return messageFilter === "SITUATION";
     if (messageFilter === "GUIDE") return entry.messageType === "GUIDE";
     if (messageFilter === "SITUATION") return entry.messageType !== "GUIDE";
     if (messageFilter === "UNSENT") {
