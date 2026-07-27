@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeCustomerType } from "@/lib/customer-types";
 import { reservationNotificationEditPolicy } from "@/lib/reservation-notification-edit-policy";
-import { isValidKoreanMobilePhone } from "@/lib/phone-number";
+import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { shouldLockManuallyEditedPhone } from "@/lib/reservation-phone-lock";
 import { shouldLockManuallyEditedTime } from "@/lib/reservation-time-lock";
+import { validateReviewProgress } from "@/lib/review-event-policy";
 
 const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
 
@@ -20,7 +21,7 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow, resendNotification } = body;
+    const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, visitorReviewRequested, visitorReviewCompleted, visitorReviewRefunded, blogReviewRequested, blogReviewCompleted, blogReviewRefunded, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow, resendNotification } = body;
 
     if (typeof phone === "string" && phone.trim() && !isValidKoreanMobilePhone(phone)) {
       return NextResponse.json({ error: "Invalid phone number" }, { status: 400 });
@@ -38,6 +39,65 @@ export async function PATCH(
 
     if (!existing) {
       return NextResponse.json({ error: "Reservation not found" }, { status: 404 });
+    }
+
+    const nextVisitorReviewRequested = visitorReviewRequested !== undefined
+      ? Boolean(visitorReviewRequested)
+      : existing.visitorReviewRequested;
+    const nextVisitorReviewCompleted = visitorReviewCompleted !== undefined
+      ? Boolean(visitorReviewCompleted)
+      : existing.visitorReviewCompleted;
+    const nextVisitorReviewRefunded = visitorReviewRefunded !== undefined
+      ? Boolean(visitorReviewRefunded)
+      : existing.visitorReviewRefunded;
+    const nextBlogReviewRequested = blogReviewRequested !== undefined
+      ? Boolean(blogReviewRequested)
+      : existing.blogReviewRequested;
+    const nextBlogReviewCompleted = blogReviewCompleted !== undefined
+      ? Boolean(blogReviewCompleted)
+      : existing.blogReviewCompleted;
+    const nextBlogReviewRefunded = blogReviewRefunded !== undefined
+      ? Boolean(blogReviewRefunded)
+      : existing.blogReviewRefunded;
+
+    const reviewProgressError = validateReviewProgress({
+      visitorReviewRequested: nextVisitorReviewRequested,
+      visitorReviewCompleted: nextVisitorReviewCompleted,
+      visitorReviewRefunded: nextVisitorReviewRefunded,
+      blogReviewRequested: nextBlogReviewRequested,
+      blogReviewCompleted: nextBlogReviewCompleted,
+      blogReviewRefunded: nextBlogReviewRefunded,
+    });
+    if (reviewProgressError) {
+      return NextResponse.json({
+        error: reviewProgressError,
+        code: "INVALID_REVIEW_PROGRESS",
+      }, { status: 400 });
+    }
+
+    if (nextBlogReviewRefunded && !existing.blogReviewRefunded) {
+      const nextPhone = normalizeKoreanPhone(typeof phone === "string" ? phone : existing.phone);
+      if (nextPhone) {
+        const previousBlogRefunds = await prisma.reservation.findMany({
+          where: {
+            id: { not: existing.id },
+            blogReviewRefunded: true,
+            phone: { not: null },
+          },
+          select: { id: true, customerName: true, startTime: true, phone: true },
+          orderBy: { startTime: "desc" },
+        });
+        const previousBlogRefund = previousBlogRefunds.find(
+          (reservation) => normalizeKoreanPhone(reservation.phone) === nextPhone,
+        );
+        if (previousBlogRefund) {
+          return NextResponse.json({
+            error: "이 전화번호는 블로그 리뷰 환급 이력이 있습니다. 블로그 리뷰는 고객당 1회만 환급할 수 있습니다.",
+            code: "BLOG_REVIEW_ALREADY_REFUNDED",
+            previousReservation: previousBlogRefund,
+          }, { status: 409 });
+        }
+      }
     }
 
     const parsedStartTime = startTime !== undefined ? parseReservationDate(startTime) : existing.startTime;
@@ -66,6 +126,12 @@ export async function PATCH(
     if (complaints !== undefined) updateData.complaints = complaints;
     if (roomName !== undefined) updateData.roomName = roomName;
     if (isCleanUpBad !== undefined) updateData.isCleanUpBad = Boolean(isCleanUpBad);
+    if (visitorReviewRequested !== undefined) updateData.visitorReviewRequested = Boolean(visitorReviewRequested);
+    if (visitorReviewCompleted !== undefined) updateData.visitorReviewCompleted = Boolean(visitorReviewCompleted);
+    if (visitorReviewRefunded !== undefined) updateData.visitorReviewRefunded = Boolean(visitorReviewRefunded);
+    if (blogReviewRequested !== undefined) updateData.blogReviewRequested = Boolean(blogReviewRequested);
+    if (blogReviewCompleted !== undefined) updateData.blogReviewCompleted = Boolean(blogReviewCompleted);
+    if (blogReviewRefunded !== undefined) updateData.blogReviewRefunded = Boolean(blogReviewRefunded);
     if (status !== undefined) updateData.status = status; // CONFIRMED ↔ CANCELLED (취소 되살리기 등)
     if (isNoShow !== undefined) updateData.isNoShow = Boolean(isNoShow); // 노쇼 표기 (취소의 하위 구분)
 

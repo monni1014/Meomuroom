@@ -86,6 +86,8 @@ export async function ensureRpaPendingReservation(
         status,
         price: parsed.isCancelled ? price : (existing.price > 0 ? existing.price : price),
         discount: parsed.discount ?? existing.discount,
+        ...(parsed.visitorReviewRequested ? { visitorReviewRequested: true } : {}),
+        ...(parsed.blogReviewRequested ? { blogReviewRequested: true } : {}),
         memo,
         isPaid: parsed.isCancelled ? price > 0 : existing.isPaid,
         usageLog: existing.usageLog
@@ -106,6 +108,8 @@ export async function ensureRpaPendingReservation(
       createdAt: receivedAt || new Date(),
       price,
       discount: parsed.discount ?? 0,
+      visitorReviewRequested: parsed.visitorReviewRequested ?? false,
+      blogReviewRequested: parsed.blogReviewRequested ?? false,
       status,
       paymentMethod: "온라인",
       isPaid: parsed.isCancelled ? price > 0 : true,

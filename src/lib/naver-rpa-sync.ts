@@ -75,6 +75,8 @@ type NormalizedNaverReservation = {
   status: "CONFIRMED" | "CANCELLED";
   paymentMethod: string;
   isPaid: boolean;
+  visitorReviewRequested?: boolean;
+  blogReviewRequested?: boolean;
 };
 
 type SlotActionResult = {
@@ -435,6 +437,8 @@ function normalizeParsedReservation(parsed: ParsedReservation, bookingId?: strin
     status: parsed.isCancelled ? "CANCELLED" : "CONFIRMED",
     paymentMethod: "온라인",
     isPaid: true,
+    visitorReviewRequested: parsed.visitorReviewRequested ?? false,
+    blogReviewRequested: parsed.blogReviewRequested ?? false,
   };
 }
 
@@ -490,6 +494,8 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
         status: item.status,
         paymentMethod: item.paymentMethod,
         isPaid: item.isPaid,
+        ...(item.visitorReviewRequested ? { visitorReviewRequested: true } : {}),
+        ...(item.blogReviewRequested ? { blogReviewRequested: true } : {}),
         usageLog: existing.usageLog
           ? { update: { reservedHeadCount: item.headCount } }
           : { create: { headCount: item.headCount, reservedHeadCount: item.headCount, purpose: null } },
@@ -519,6 +525,8 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
       status: item.status,
       paymentMethod: item.paymentMethod,
       isPaid: item.isPaid,
+      visitorReviewRequested: item.visitorReviewRequested ?? false,
+      blogReviewRequested: item.blogReviewRequested ?? false,
       usageLog: {
         create: {
           headCount: item.headCount,
@@ -1535,6 +1543,8 @@ export async function processNaverEmailWithRpa({
   const detail = await readNaverDetail(bookingId!, toKstDateValue(parsedReservation.startTime));
   detail.bookingNumber ||= bookingId;
   const normalized = normalizeDetail(detail, parsedReservation.discount ?? 0);
+  normalized.visitorReviewRequested = parsedReservation.visitorReviewRequested ?? false;
+  normalized.blogReviewRequested = parsedReservation.blogReviewRequested ?? false;
   const result = await upsertNaverReservation(normalized, messageId, receivedAt);
 
   if (normalized.status === "CONFIRMED") {

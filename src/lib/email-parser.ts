@@ -10,6 +10,20 @@ export interface ParsedReservation {
   emailId: string;
   isCancelled?: boolean;  // 취소 메일 여부
   refundFee?: number;     // 환불수수료 (취소 시 매출로 반영)
+  visitorReviewRequested?: boolean;
+  blogReviewRequested?: boolean;
+}
+
+export function parseNaverReviewRequests(text: string) {
+  const isSelected = (labelPattern: RegExp) => {
+    const match = text.match(labelPattern);
+    return Boolean(match?.[0].match(/\(\s*1\s*\)/));
+  };
+
+  return {
+    visitorReviewRequested: isSelected(/방문자\s*리뷰[\s\S]{0,40}?환급\s*\(\s*[01]\s*\)/i),
+    blogReviewRequested: isSelected(/블로그\s*리뷰[\s\S]{0,40}?환급\s*\(\s*[01]\s*\)/i),
+  };
 }
 
 function parseSeoulDateTime(dateValue: string, hour: number, minute = 0) {
@@ -101,6 +115,7 @@ export function parseNaverEmail(subject: string, text: string, messageId: string
   try {
     const roomSource = `${subject} ${text}`;
     const roomName = parseRoomName(roomSource);
+    const reviewRequests = parseNaverReviewRequests(text);
 
     // 2. 금액 및 인원 추출
     //    기본형: "결제금액 머무룸 예약하기 1(1) 24,000원"
@@ -185,6 +200,7 @@ export function parseNaverEmail(subject: string, text: string, messageId: string
       emailId: messageId,
       isCancelled,
       refundFee,
+      ...reviewRequests,
     };
   } catch (e) {
     console.error("Naver 파싱 에러:", e);

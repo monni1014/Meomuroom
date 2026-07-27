@@ -396,6 +396,8 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
             endTime: reservationData.endTime,
             price: reservationData.price,
             discount: reservationData.discount ?? 0,
+            visitorReviewRequested: reservationData.visitorReviewRequested ?? false,
+            blogReviewRequested: reservationData.blogReviewRequested ?? false,
             emailId: reservationData.emailId,
             createdAt: parsedMail.date || new Date(),
             usageLog: {

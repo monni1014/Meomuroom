@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Search, Users, Coffee, Tag, AlertCircle, Pencil, ChevronDown, Wallet, Clock } from "lucide-react";
+import { Check, Search, Users, Coffee, Tag, AlertCircle, Pencil, ChevronDown, Wallet, Clock, Star } from "lucide-react";
 import { MAJOR_CATEGORIES, SUB_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
 import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "@/lib/customer-types";
 import TimeSelect from "@/components/TimeSelect";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
 import { createKstDate, getKstDateKey, getKstDateParts, isKstWeekend } from "@/lib/kst-time";
 import { patchReservationWithNotificationConfirmation } from "@/lib/reservation-notification-resend-client";
+import { calculateReviewRefund } from "@/lib/review-event-policy";
 
 interface UsageLog {
   id: string;
@@ -43,6 +44,12 @@ interface Reservation {
   emailId: string | null; // null = 수기 입력
   isPaid: boolean;
   isCleanUpBad: boolean;
+  visitorReviewRequested: boolean;
+  visitorReviewCompleted: boolean;
+  visitorReviewRefunded: boolean;
+  blogReviewRequested: boolean;
+  blogReviewCompleted: boolean;
+  blogReviewRefunded: boolean;
   usageLog: UsageLog | null;
 }
 
@@ -72,6 +79,39 @@ function buildCalendarReturnUrl(date: string, room: CalendarRoomFilter) {
   return `/calendar?${params.toString()}`;
 }
 
+function ReviewStageButton({
+  label,
+  checked,
+  disabled = false,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${
+        checked
+          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+          : disabled
+            ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300"
+            : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+      }`}
+    >
+      <span className={`flex h-3.5 w-3.5 items-center justify-center rounded border text-[10px] ${checked ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300"}`}>
+        {checked ? "✓" : ""}
+      </span>
+      {label}
+    </button>
+  );
+}
+
 export default function UsagePage() {
   const router = useRouter();
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -92,6 +132,13 @@ export default function UsagePage() {
   const [complaints, setComplaints] = useState(""); // 고객 불만사항
   const [isPaid, setIsPaid] = useState(true); // 결제여부
   const [isCleanUpBad, setIsCleanUpBad] = useState(false); // 정리불량
+  const [visitorReviewRequested, setVisitorReviewRequested] = useState(false);
+  const [visitorReviewCompleted, setVisitorReviewCompleted] = useState(false);
+  const [visitorReviewRefunded, setVisitorReviewRefunded] = useState(false);
+  const [blogReviewRequested, setBlogReviewRequested] = useState(false);
+  const [blogReviewCompleted, setBlogReviewCompleted] = useState(false);
+  const [blogReviewRefunded, setBlogReviewRefunded] = useState(false);
+  const [isReviewDetailsOpen, setIsReviewDetailsOpen] = useState(false);
   const [isExtraPaid, setIsExtraPaid] = useState(false); // 추가 금액 결제 여부
   const [extraPaymentMethod, setExtraPaymentMethod] = useState<string>("계좌이체"); // 추가 금액 결제 수단
   const [extraTime, setExtraTime] = useState(0); // 추가된 시간 (시간 단위)
@@ -154,6 +201,13 @@ export default function UsagePage() {
           setComplaints(defaultRes.complaints || "");
           setIsPaid(defaultRes.isPaid ?? true);
           setIsCleanUpBad(defaultRes.isCleanUpBad ?? false);
+          setVisitorReviewRequested(defaultRes.visitorReviewRequested ?? false);
+          setVisitorReviewCompleted(defaultRes.visitorReviewCompleted ?? false);
+          setVisitorReviewRefunded(defaultRes.visitorReviewRefunded ?? false);
+          setBlogReviewRequested(defaultRes.blogReviewRequested ?? false);
+          setBlogReviewCompleted(defaultRes.blogReviewCompleted ?? false);
+          setBlogReviewRefunded(defaultRes.blogReviewRefunded ?? false);
+          setIsReviewDetailsOpen(false);
           setIsExtraPaid(defaultRes.usageLog?.isExtraPaid ?? false);
           setExtraPaymentMethod(defaultRes.usageLog?.extraPaymentMethod || "계좌이체");
           setExtraTime(defaultRes.usageLog?.extraTime || 0);
@@ -249,6 +303,13 @@ export default function UsagePage() {
       setComplaints(found.complaints || "");
       setIsPaid(found.isPaid ?? true);
       setIsCleanUpBad(found.isCleanUpBad ?? false);
+      setVisitorReviewRequested(found.visitorReviewRequested ?? false);
+      setVisitorReviewCompleted(found.visitorReviewCompleted ?? false);
+      setVisitorReviewRefunded(found.visitorReviewRefunded ?? false);
+      setBlogReviewRequested(found.blogReviewRequested ?? false);
+      setBlogReviewCompleted(found.blogReviewCompleted ?? false);
+      setBlogReviewRefunded(found.blogReviewRefunded ?? false);
+      setIsReviewDetailsOpen(false);
       setIsExtraPaid(found.usageLog?.isExtraPaid ?? false);
       setExtraPaymentMethod(found.usageLog?.extraPaymentMethod || "계좌이체");
       setExtraTime(found.usageLog?.extraTime || 0);
@@ -412,6 +473,12 @@ export default function UsagePage() {
           complaints: complaints.trim() || null, // 고객 불만사항
           isPaid,
           isCleanUpBad,
+          visitorReviewRequested,
+          visitorReviewCompleted,
+          visitorReviewRefunded,
+          blogReviewRequested,
+          blogReviewCompleted,
+          blogReviewRefunded,
           // 시간 수정 (26시 등은 익일로 변환)
           ...(editDate && editStart ? { startTime: buildISO(editDate, editStart) } : {}),
           ...(editDate && normalizedEditEnd ? { endTime: buildISO(editDate, normalizedEditEnd) } : {}),
@@ -431,7 +498,8 @@ export default function UsagePage() {
           router.push(buildCalendarReturnUrl(editDate, returnRoom));
         }
       } else {
-        alert("이용 기록 저장에 실패했습니다.");
+        const errorBody = await response.json().catch(() => null) as { error?: string } | null;
+        alert(errorBody?.error || "이용 기록 저장에 실패했습니다.");
       }
     } catch (err) {
       console.error(err);
@@ -495,6 +563,13 @@ export default function UsagePage() {
     .slice(0, 5);
 
   const selectedRes = reservations.find((r) => r.id === selectedResId);
+  const reviewRequestedCount = Number(visitorReviewRequested) + Number(blogReviewRequested);
+  const reviewCompletedCount = Number(visitorReviewCompleted) + Number(blogReviewCompleted);
+  const reviewRefundedCount = Number(visitorReviewRefunded) + Number(blogReviewRefunded);
+  const reviewRefundAmount = calculateReviewRefund({ visitorReviewRefunded, blogReviewRefunded });
+  const reviewSummary = reviewRequestedCount === 0
+    ? "리뷰 이벤트"
+    : `신청 ${reviewRequestedCount} · 작성 ${reviewCompletedCount} · 환급 ${reviewRefundedCount}`;
 
   return (
     <div className="p-4 md:p-8 space-y-6 pb-24 max-w-5xl mx-auto w-full">
@@ -998,7 +1073,7 @@ export default function UsagePage() {
             <AlertCircle className="w-4 h-4 text-orange-500" />
             고객 상태 플래그
           </label>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               type="button"
               onClick={() => setIsCleanUpBad(!isCleanUpBad)}
@@ -1006,7 +1081,102 @@ export default function UsagePage() {
             >
               {isCleanUpBad ? "🧹 정리불량 (체크됨)" : "🧹 정리상태 불량 표시"}
             </button>
+            <button
+              type="button"
+              onClick={() => setIsReviewDetailsOpen((open) => !open)}
+              className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition ${
+                reviewRequestedCount > 0
+                  ? "border-amber-300 bg-amber-50 text-amber-800"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              <Star className={`h-4 w-4 ${reviewRequestedCount > 0 ? "fill-amber-400 text-amber-500" : "text-slate-400"}`} />
+              {reviewSummary}
+              <ChevronDown className={`h-4 w-4 transition-transform ${isReviewDetailsOpen ? "rotate-180" : ""}`} />
+            </button>
           </div>
+
+          {isReviewDetailsOpen && (
+            <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50/40 p-3.5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-slate-800">방문자 리뷰</p>
+                  <p className="text-xs font-medium text-slate-500">예약 때마다 가능 · 환급 3,000원</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <ReviewStageButton
+                    label="신청"
+                    checked={visitorReviewRequested}
+                    onChange={(checked) => {
+                      setVisitorReviewRequested(checked);
+                      if (!checked) {
+                        setVisitorReviewCompleted(false);
+                        setVisitorReviewRefunded(false);
+                      }
+                    }}
+                  />
+                  <ReviewStageButton
+                    label="작성"
+                    checked={visitorReviewCompleted}
+                    onChange={(checked) => {
+                      setVisitorReviewCompleted(checked);
+                      if (checked) setVisitorReviewRequested(true);
+                      if (!checked) setVisitorReviewRefunded(false);
+                    }}
+                  />
+                  <ReviewStageButton
+                    label="환급"
+                    checked={visitorReviewRefunded}
+                    disabled={!visitorReviewCompleted}
+                    onChange={setVisitorReviewRefunded}
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-amber-200/70" />
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-slate-800">블로그 리뷰</p>
+                  <p className="text-xs font-medium text-slate-500">고객당 1회 · 환급 5,000원</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <ReviewStageButton
+                    label="신청"
+                    checked={blogReviewRequested}
+                    onChange={(checked) => {
+                      setBlogReviewRequested(checked);
+                      if (!checked) {
+                        setBlogReviewCompleted(false);
+                        setBlogReviewRefunded(false);
+                      }
+                    }}
+                  />
+                  <ReviewStageButton
+                    label="작성"
+                    checked={blogReviewCompleted}
+                    onChange={(checked) => {
+                      setBlogReviewCompleted(checked);
+                      if (checked) setBlogReviewRequested(true);
+                      if (!checked) setBlogReviewRefunded(false);
+                    }}
+                  />
+                  <ReviewStageButton
+                    label="환급"
+                    checked={blogReviewRefunded}
+                    disabled={!blogReviewCompleted}
+                    onChange={setBlogReviewRefunded}
+                  />
+                </div>
+              </div>
+
+              {reviewRefundAmount > 0 && (
+                <p className="rounded-lg bg-white px-3 py-2 text-right text-xs font-bold text-emerald-700">
+                  환급 완료 합계 {reviewRefundAmount.toLocaleString()}원
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Submit action */}

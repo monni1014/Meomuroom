@@ -7,36 +7,42 @@ datasource db {
 }
 
 model Reservation {
-  id                  String    @id @default(cuid())
-  source              String // "naver", "spacecloud", "manual"
-  roomName            String    @default("머무룸1")
-  customerName        String?
-  customerType        String    @default("UNSPECIFIED") // "UNSPECIFIED" | "PERSONAL" | "CORPORATE"
-  phone               String?
-  syncedPhone         String? // 네이버·스클에서 마지막으로 확인한 원본 전화번호
-  phoneLocked         Boolean   @default(false) // 캘린더에서 수동 수정한 전화번호는 RPA 재동기화로 덮어쓰지 않음
-  startTime           DateTime
-  endTime             DateTime
-  syncedStartTime     DateTime? // 네이버·스클에서 마지막으로 확인한 원본 시작시간
-  syncedEndTime       DateTime? // 네이버·스클에서 마지막으로 확인한 원본 종료시간
-  timeLocked          Boolean   @default(false) // 캘린더에서 수동 수정한 시간은 RPA 재동기화로 덮어쓰지 않음
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  notifiedAt          DateTime?
-  notificationStatus  String    @default("PENDING") // PENDING | SENDING | RECOVERING | SUBMITTED | CARRIER_ACCEPTED | DELIVERED | FAILED | DRY_RUN
-  notificationChannel String?
-  notificationError   String?
-  notified            Boolean   @default(false) // 예약 2시간 전 알림 발송 여부
-  price               Int       @default(0) // 최종 매출액 (쿠폰 할인 적용 후)
-  discount            Int       @default(0) // 사용한 쿠폰/할인 금액 (원가 - 최종가)
-  status              String    @default("CONFIRMED") // "CONFIRMED" | "CANCELLED"
-  isNoShow            Boolean   @default(false) // 취소 중에서도 노쇼인 경우 (수수료/집계는 취소와 동일, 표기만 구분)
-  paymentMethod       String?   @default("온라인") // "현장카드" | "계좌이체" | "온라인"
-  isPaid              Boolean   @default(true) // 결제 완료 여부 (이체 등 미결제는 false)
-  emailId             String?   @unique
-  memo                String? // 자유 기입 비고란
-  complaints          String? // 고객 불만사항 (CS 관리용 별도 항목)
-  isCleanUpBad        Boolean   @default(false) // 정리 상태 불량 여부 (블랙리스트 기능)
+  id                     String    @id @default(cuid())
+  source                 String // "naver", "spacecloud", "manual"
+  roomName               String    @default("머무룸1")
+  customerName           String?
+  customerType           String    @default("UNSPECIFIED") // "UNSPECIFIED" | "PERSONAL" | "CORPORATE"
+  phone                  String?
+  syncedPhone            String? // 네이버·스클에서 마지막으로 확인한 원본 전화번호
+  phoneLocked            Boolean   @default(false) // 캘린더에서 수동 수정한 전화번호는 RPA 재동기화로 덮어쓰지 않음
+  startTime              DateTime
+  endTime                DateTime
+  syncedStartTime        DateTime? // 네이버·스클에서 마지막으로 확인한 원본 시작시간
+  syncedEndTime          DateTime? // 네이버·스클에서 마지막으로 확인한 원본 종료시간
+  timeLocked             Boolean   @default(false) // 캘린더에서 수동 수정한 시간은 RPA 재동기화로 덮어쓰지 않음
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  notifiedAt             DateTime?
+  notificationStatus     String    @default("PENDING") // PENDING | SENDING | RECOVERING | SUBMITTED | CARRIER_ACCEPTED | DELIVERED | FAILED | DRY_RUN
+  notificationChannel    String?
+  notificationError      String?
+  notified               Boolean   @default(false) // 예약 2시간 전 알림 발송 여부
+  price                  Int       @default(0) // 최종 매출액 (쿠폰 할인 적용 후)
+  discount               Int       @default(0) // 사용한 쿠폰/할인 금액 (원가 - 최종가)
+  status                 String    @default("CONFIRMED") // "CONFIRMED" | "CANCELLED"
+  isNoShow               Boolean   @default(false) // 취소 중에서도 노쇼인 경우 (수수료/집계는 취소와 동일, 표기만 구분)
+  paymentMethod          String?   @default("온라인") // "현장카드" | "계좌이체" | "온라인"
+  isPaid                 Boolean   @default(true) // 결제 완료 여부 (이체 등 미결제는 false)
+  emailId                String?   @unique
+  memo                   String? // 자유 기입 비고란
+  complaints             String? // 고객 불만사항 (CS 관리용 별도 항목)
+  isCleanUpBad           Boolean   @default(false) // 정리 상태 불량 여부 (블랙리스트 기능)
+  visitorReviewRequested Boolean   @default(false)
+  visitorReviewCompleted Boolean   @default(false)
+  visitorReviewRefunded  Boolean   @default(false)
+  blogReviewRequested    Boolean   @default(false)
+  blogReviewCompleted    Boolean   @default(false)
+  blogReviewRefunded     Boolean   @default(false)
 
   usageLog UsageLog?
   messages CustomerMessage[]
