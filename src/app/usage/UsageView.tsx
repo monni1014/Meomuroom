@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Search, Users, Coffee, Tag, AlertCircle, Pencil, ChevronDown, Wallet, Clock, Star } from "lucide-react";
+import { Check, Search, Users, Coffee, Tag, AlertCircle, Pencil, ChevronDown, Wallet, Clock, MessageSquareText, BadgeCheck, CircleDollarSign } from "lucide-react";
 import { MAJOR_CATEGORIES, SUB_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
 import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "@/lib/customer-types";
 import TimeSelect from "@/components/TimeSelect";
@@ -90,6 +90,12 @@ function ReviewStageButton({
   disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
+  const StageIcon = label === "환급"
+    ? CircleDollarSign
+    : label === "작성"
+      ? BadgeCheck
+      : MessageSquareText;
+
   return (
     <button
       type="button"
@@ -104,9 +110,7 @@ function ReviewStageButton({
             : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
       }`}
     >
-      <span className={`flex h-3.5 w-3.5 items-center justify-center rounded border text-[10px] ${checked ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300"}`}>
-        {checked ? "✓" : ""}
-      </span>
+      <StageIcon className={`h-3.5 w-3.5 ${checked ? "text-emerald-600" : "text-slate-400"}`} />
       {label}
     </button>
   );
@@ -569,7 +573,7 @@ export default function UsagePage() {
   const reviewRefundAmount = calculateReviewRefund({ visitorReviewRefunded, blogReviewRefunded });
   const reviewSummary = reviewRequestedCount === 0
     ? "리뷰 이벤트"
-    : `신청 ${reviewRequestedCount} · 작성 ${reviewCompletedCount} · 환급 ${reviewRefundedCount}`;
+    : `리뷰 신청 ${reviewRequestedCount} · 작성 ${reviewCompletedCount} · 환급 ${reviewRefundedCount}`;
 
   return (
     <div className="p-4 md:p-8 space-y-6 pb-24 max-w-5xl mx-auto w-full">
@@ -1086,18 +1090,18 @@ export default function UsagePage() {
               onClick={() => setIsReviewDetailsOpen((open) => !open)}
               className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition ${
                 reviewRequestedCount > 0
-                  ? "border-amber-300 bg-amber-50 text-amber-800"
+                  ? "border-violet-300 bg-violet-50 text-violet-700"
                   : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
               }`}
             >
-              <Star className={`h-4 w-4 ${reviewRequestedCount > 0 ? "fill-amber-400 text-amber-500" : "text-slate-400"}`} />
+              <MessageSquareText className={`h-4 w-4 ${reviewRequestedCount > 0 ? "text-violet-600" : "text-slate-400"}`} />
               {reviewSummary}
               <ChevronDown className={`h-4 w-4 transition-transform ${isReviewDetailsOpen ? "rotate-180" : ""}`} />
             </button>
           </div>
 
           {isReviewDetailsOpen && (
-            <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50/40 p-3.5">
+            <div className="space-y-3 rounded-2xl border border-violet-200 bg-violet-50/40 p-3.5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-bold text-slate-800">방문자 리뷰</p>
@@ -1133,7 +1137,7 @@ export default function UsagePage() {
                 </div>
               </div>
 
-              <div className="border-t border-amber-200/70" />
+              <div className="border-t border-violet-200/70" />
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
