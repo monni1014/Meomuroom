@@ -6,6 +6,7 @@ import { createKstDate, getKstDayRange } from "@/lib/kst-time";
 import { getSolapiDailyUsage } from "@/lib/solapi-daily-usage";
 import { buildReservationNotificationGroups } from "@/lib/reservation-notification-grouping";
 import { customerMessageDisplay } from "@/lib/customer-message-display";
+import { resolveOnTimeExitTargets } from "@/lib/on-time-exit-policy";
 import {
   SITE_VISIT_MESSAGE_PREFIX,
   siteVisitMessageDedupeKey,
@@ -139,6 +140,42 @@ export default async function MessagesPage({
     return { messages, schedules };
   })(), getSolapiDailyUsage(selectedDay.start, nextDayStart)]);
 
+  const reservationIds = reservations.map((reservation) => reservation.id);
+  const reservationDayRanges = reservations.map((reservation) => getKstDayRange(reservation.startTime));
+  const [onTimeExitCandidates, onTimeExitMessages] = await Promise.all([
+    reservationDayRanges.length > 0
+      ? prisma.reservation.findMany({
+          where: {
+            startTime: {
+              gte: new Date(Math.min(...reservationDayRanges.map((range) => range.start.getTime()))),
+              lte: new Date(Math.max(...reservationDayRanges.map((range) => range.end.getTime())) + 24 * 60 * 60 * 1000),
+            },
+            status: "CONFIRMED",
+            isNoShow: false,
+          },
+          orderBy: [{ startTime: "asc" }, { id: "asc" }],
+        })
+      : Promise.resolve([]),
+    reservationIds.length > 0
+      ? prisma.customerMessage.findMany({
+          where: {
+            direction: "OUTBOUND",
+            reservationId: { in: reservationIds },
+            dedupeKey: { startsWith: "situation:on-time-exit:" },
+          },
+          orderBy: { occurredAt: "desc" },
+        })
+      : Promise.resolve([]),
+  ]);
+  const onTimeExitTargetIds = new Set(
+    resolveOnTimeExitTargets(onTimeExitCandidates).map((target) => target.leader.id),
+  );
+  const onTimeExitMessageByReservationId = new Map(
+    onTimeExitMessages.flatMap((message) => (
+      message.reservationId ? [[message.reservationId, message] as const] : []
+    )),
+  );
+
   const notificationGroups = buildReservationNotificationGroups(reservations);
   const groupLeaderByFollowerId = new Map<string, (typeof reservations)[number]>();
   for (const members of notificationGroups.values()) {
@@ -151,6 +188,7 @@ export default async function MessagesPage({
 
   const entries = reservations.map((reservation) => {
     const message = reservation.messages[0] || null;
+    const onTimeExitMessage = onTimeExitMessageByReservationId.get(reservation.id) || null;
     const groupLeader = groupLeaderByFollowerId.get(reservation.id) || null;
     const scheduledAt = new Date(reservation.startTime.getTime() - 2 * 60 * 60 * 1000);
     const phone = normalizeKoreanPhone(reservation.phone);
@@ -184,6 +222,15 @@ export default async function MessagesPage({
       isTest: message?.dedupeKey.startsWith("reservation-test:") || false,
       messageType: "GUIDE" as const,
       messageLabel: "이용 안내",
+      onTimeExitAction: onTimeExitTargetIds.has(reservation.id) || onTimeExitMessage
+        ? {
+            eligible: onTimeExitTargetIds.has(reservation.id)
+              && isValidKoreanMobilePhone(phone)
+              && !onTimeExitMessage,
+            status: onTimeExitMessage?.status || null,
+            resultAt: onTimeExitMessage?.updatedAt.toISOString() || null,
+          }
+        : null,
     };
   });
 

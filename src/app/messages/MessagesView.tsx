@@ -12,6 +12,7 @@ import {
   MessageSquareText,
   Coins,
   Radio,
+  Send,
 } from "lucide-react";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 import { formatKoreanPhone } from "@/lib/phone-number";
@@ -39,6 +40,11 @@ type DeliveryEntry = {
   isTest: boolean;
   messageType: "GUIDE" | "DAWN_BOOKING" | "ON_TIME_EXIT" | "SITE_VISIT" | "UNPAID" | "SITUATION";
   messageLabel: string;
+  onTimeExitAction?: {
+    eligible: boolean;
+    status: string | null;
+    resultAt: string | null;
+  } | null;
 };
 
 const STATUS_STYLE: Record<string, { label: string; className: string }> = {
@@ -128,6 +134,13 @@ function sortWeight(entry: DeliveryEntry) {
   return 4;
 }
 
+function onTimeExitStatusLabel(status: string) {
+  if (status === "DELIVERED") return "정시퇴실 수신 완료";
+  if (status === "FAILED") return "정시퇴실 발송 실패";
+  if (status === "DRY_RUN") return "정시퇴실 테스트 완료";
+  return "정시퇴실 발송됨";
+}
+
 function OperationalWarningDetails({
   details,
   className,
@@ -190,6 +203,8 @@ export default function MessagesView({
   const router = useRouter();
   const [showOperationalDetails, setShowOperationalDetails] = useState(false);
   const [messageFilter, setMessageFilter] = useState<MessageFilter>("ALL");
+  const [sendingOnTimeExitId, setSendingOnTimeExitId] = useState<string | null>(null);
+  const [onTimeExitErrors, setOnTimeExitErrors] = useState<Record<string, string>>({});
   const refresh = useCallback(() => router.refresh(), [router]);
   useDataChangePolling("/api/data-version?scope=messages", refresh, { intervalMs: 5_000 });
 
@@ -264,6 +279,32 @@ export default function MessagesView({
 
   function formatCost(value: number) {
     return `${Math.round(value).toLocaleString("ko-KR")}원`;
+  }
+
+  async function sendOnTimeExitMessage(entry: DeliveryEntry) {
+    if (!entry.onTimeExitAction?.eligible || sendingOnTimeExitId) return;
+
+    setSendingOnTimeExitId(entry.reservationId);
+    setOnTimeExitErrors((current) => ({ ...current, [entry.reservationId]: "" }));
+    try {
+      const response = await fetch("/api/messages/on-time-exit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reservationId: entry.reservationId }),
+      });
+      const payload = await response.json().catch(() => ({})) as { success?: boolean; error?: string };
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "정시퇴실 문자 발송에 실패했습니다.");
+      }
+      router.refresh();
+    } catch (error) {
+      setOnTimeExitErrors((current) => ({
+        ...current,
+        [entry.reservationId]: error instanceof Error ? error.message : "정시퇴실 문자 발송에 실패했습니다.",
+      }));
+    } finally {
+      setSendingOnTimeExitId(null);
+    }
   }
 
   return (
@@ -435,9 +476,40 @@ export default function MessagesView({
                         <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{entry.error}</p>
                       )}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2 text-xs text-slate-400">
-                      <Clock3 className="h-4 w-4" />
-                      {processingLabel(entry)}
+                    <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+                      {entry.messageType === "GUIDE" && entry.onTimeExitAction?.eligible && (
+                        <button
+                          type="button"
+                          onClick={() => void sendOnTimeExitMessage(entry)}
+                          disabled={Boolean(sendingOnTimeExitId)}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          {sendingOnTimeExitId === entry.reservationId
+                            ? "정시퇴실 발송 중"
+                            : "정시퇴실 지금 보내기"}
+                        </button>
+                      )}
+                      {entry.messageType === "GUIDE" && entry.onTimeExitAction?.status && (
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ring-1 ring-inset ${
+                          entry.onTimeExitAction.status === "DELIVERED"
+                            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                            : entry.onTimeExitAction.status === "FAILED"
+                              ? "bg-rose-50 text-rose-700 ring-rose-200"
+                              : "bg-indigo-50 text-indigo-700 ring-indigo-200"
+                        }`}>
+                          {onTimeExitStatusLabel(entry.onTimeExitAction.status)}
+                        </span>
+                      )}
+                      {onTimeExitErrors[entry.reservationId] && (
+                        <p className="max-w-xs rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                          {onTimeExitErrors[entry.reservationId]}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2 text-xs text-slate-400">
+                        <Clock3 className="h-4 w-4" />
+                        {processingLabel(entry)}
+                      </div>
                     </div>
                   </div>
                 </article>

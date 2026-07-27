@@ -373,7 +373,7 @@ export async function registerNodeInstrumentation() {
   });
 
   console.log("[Cron] Email auto sync started (15 second interval)");
-  console.log("[Cron] Reservation notification monitor started (30 second interval, immediate after email changes, dawn booking and separate on-time-exit messages enabled)");
+  console.log("[Cron] Reservation notification monitor started (30 second interval, immediate after email changes, dawn booking enabled, on-time-exit is manual-only)");
   console.log("[Cron] Reservation end reminder monitor started (10 minutes before end, 30 second interval, startup recovery)");
   console.log("[Cron] Reservation contact preflight started (5 minute interval)");
   console.log("[Cron] Google contacts sync started (5 minute interval after account connection)");

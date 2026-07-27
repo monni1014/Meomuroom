@@ -12,11 +12,9 @@ const SITUATION_TYPE = "ON_TIME_EXIT_REMINDER";
 const MESSAGE_PREFIX = "situation:on-time-exit:";
 const ATTEMPT_PREFIX = "attempt:";
 const ALERT_PREFIX = "on-time-exit-notification:";
-const GUIDE_PREFIX = "reservation-reminder:";
 const RECOVERY_WAIT_MS = 2 * 60 * 1000;
 const RECOVERY_FAIL_MS = 10 * 60 * 1000;
-const GUIDE_WINDOW_MS = 2 * 60 * 60 * 1000;
-const GUIDE_SUCCESS_STATUSES = ["SUBMITTED", "CARRIER_ACCEPTED", "DELIVERED", "DRY_RUN"];
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function messageDedupeKey(reservationId: string) {
   return `${MESSAGE_PREFIX}${reservationId}`;
@@ -121,140 +119,127 @@ export async function sendDueOnTimeExitMessages(now = new Date()) {
   const recovery = await recoverInterruptedMessages(now);
   const template = (await getSituationMessageTemplates()).find((item) => item.key === SITUATION_TYPE);
 
-  if (!template?.content.trim()) {
-    return {
-      success: recovery.recoveryWaitingCount === 0,
-      checkedCount: 0,
-      sentCount: 0,
-      dryRunCount: 0,
-      failedCount: 0,
-      skippedCount: 0,
-      templateReady: false,
-      ...recovery,
-      pipelineMs: Date.now() - pipelineStartedAt,
-    };
+  return {
+    success: recovery.recoveryWaitingCount === 0,
+    checkedCount: 0,
+    sentCount: 0,
+    dryRunCount: 0,
+    failedCount: 0,
+    skippedCount: 0,
+    templateReady: Boolean(template?.content.trim()),
+    manualOnly: true,
+    ...recovery,
+    pipelineMs: Date.now() - pipelineStartedAt,
+  };
+}
+
+export async function sendManualOnTimeExitMessage(reservationId: string, now = new Date()) {
+  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
+  if (!reservation) {
+    return { success: false, statusCode: 404, error: "예약을 찾을 수 없습니다." };
+  }
+  if (reservation.status !== "CONFIRMED" || reservation.isNoShow) {
+    return { success: false, statusCode: 400, error: "취소 또는 노쇼 예약에는 정시퇴실 문자를 보낼 수 없습니다." };
   }
 
-  const upcoming = await prisma.reservation.findMany({
+  const dayRange = getKstDayRange(reservation.startTime);
+  const candidates = await prisma.reservation.findMany({
     where: {
-      startTime: { gte: now, lte: new Date(now.getTime() + GUIDE_WINDOW_MS) },
+      startTime: {
+        gte: dayRange.start,
+        lte: new Date(dayRange.end.getTime() + DAY_MS),
+      },
       status: "CONFIRMED",
       isNoShow: false,
     },
-    include: {
-      messages: {
-        where: {
-          direction: "OUTBOUND",
-          dedupeKey: { startsWith: GUIDE_PREFIX },
-          status: { in: GUIDE_SUCCESS_STATUSES },
-        },
-        select: { id: true },
-      },
-    },
     orderBy: [{ startTime: "asc" }, { id: "asc" }],
-    take: 200,
   });
-  const guidedReservationIds = new Set(
-    upcoming.filter((reservation) => reservation.messages.length > 0).map((reservation) => reservation.id),
-  );
-  const dayRanges = upcoming.map((reservation) => getKstDayRange(reservation.startTime));
-  const candidates = dayRanges.length > 0
-    ? await prisma.reservation.findMany({
-        where: {
-          startTime: {
-            gte: new Date(Math.min(...dayRanges.map((range) => range.start.getTime()))),
-            lte: new Date(Math.max(...dayRanges.map((range) => range.end.getTime()))),
-          },
-          status: "CONFIRMED",
-          isNoShow: false,
-        },
-        orderBy: [{ startTime: "asc" }, { id: "asc" }],
-      })
-    : [];
-  const targets = resolveOnTimeExitTargets(candidates)
-    .filter((target) => guidedReservationIds.has(target.leader.id));
+  const target = resolveOnTimeExitTargets(candidates)
+    .find((item) => item.leader.id === reservation.id);
+  if (!target) {
+    return {
+      success: false,
+      statusCode: 409,
+      error: "같은 공간에 다른 고객의 예약이 바로 이어지는 경우에만 발송할 수 있습니다.",
+    };
+  }
 
-  let sentCount = 0;
-  let dryRunCount = 0;
-  let failedCount = 0;
-  let skippedCount = 0;
+  const phone = normalizeKoreanPhone(reservation.phone);
+  if (!isValidKoreanMobilePhone(phone)) {
+    return { success: false, statusCode: 400, error: "예약의 고객 전화번호를 확인해 주세요." };
+  }
 
-  for (const target of targets) {
-    const reservation = target.leader;
-    const phone = normalizeKoreanPhone(reservation.phone);
-    if (!isValidKoreanMobilePhone(phone)) {
-      skippedCount += 1;
-      continue;
-    }
+  const template = (await getSituationMessageTemplates()).find((item) => item.key === SITUATION_TYPE);
+  if (!template?.content.trim()) {
+    return { success: false, statusCode: 400, error: "설정에서 정시퇴실 문자 내용을 먼저 저장해 주세요." };
+  }
 
-    const dedupeKey = messageDedupeKey(reservation.id);
-    const attemptId = randomUUID();
-    try {
-      await prisma.customerMessage.create({
-        data: {
-          direction: "OUTBOUND",
-          channel: "SMS",
-          status: "SENDING",
-          senderNumber: "",
-          recipientNumber: phone,
-          customerPhone: phone,
-          body: template.content,
-          providerMessageId: `${ATTEMPT_PREFIX}${attemptId}`,
-          dedupeKey,
-          reservationId: reservation.id,
-          occurredAt: now,
-        },
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        skippedCount += 1;
-        continue;
-      }
-      throw error;
-    }
+  const dedupeKey = messageDedupeKey(reservation.id);
+  const existing = await prisma.customerMessage.findUnique({ where: { dedupeKey } });
+  if (existing) {
+    return existing.status === "FAILED"
+      ? { success: false, statusCode: 409, alreadyProcessed: true, status: existing.status, error: "이 예약의 정시퇴실 문자 발송이 이미 실패했습니다. 중복 발송 방지를 위해 자동 재발송하지 않습니다." }
+      : { success: true, statusCode: 200, alreadyProcessed: true, status: existing.status };
+  }
 
-    const result = await sendReservationSituationMessage({
-      reservationId: reservation.id,
-      notificationAttemptId: attemptId,
-      messageDedupeKey: dedupeKey,
-      situationType: SITUATION_TYPE,
-      phone: reservation.phone,
-      subject: template.subject,
-      text: template.content,
-    });
-    await prisma.customerMessage.update({
-      where: { dedupeKey },
+  const attemptId = randomUUID();
+  try {
+    await prisma.customerMessage.create({
       data: {
-        status: result.success ? (result.dryRun ? "DRY_RUN" : "SUBMITTED") : "FAILED",
-        channel: result.channel,
-        senderNumber: result.from,
-        recipientNumber: result.to || phone,
-        customerPhone: result.to || phone,
-        body: result.text,
-        providerMessageId: result.messageId || `${ATTEMPT_PREFIX}${attemptId}`,
+        direction: "OUTBOUND",
+        channel: "SMS",
+        status: "SENDING",
+        senderNumber: "",
+        recipientNumber: phone,
+        customerPhone: phone,
+        body: template.content,
+        providerMessageId: `${ATTEMPT_PREFIX}${attemptId}`,
+        dedupeKey,
+        reservationId: reservation.id,
+        occurredAt: now,
       },
     });
-
-    if (result.success && result.dryRun) {
-      dryRunCount += 1;
-    } else if (result.success) {
-      sentCount += 1;
-      await resolveAdminAlertByDedupeKey(alertDedupeKey(reservation.id));
-    } else {
-      failedCount += 1;
-      await recordFailure(reservation, result.error || "솔라피 발송 실패");
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return { success: true, statusCode: 200, alreadyProcessed: true, status: "SENDING" };
     }
+    throw error;
+  }
+
+  const result = await sendReservationSituationMessage({
+    reservationId: reservation.id,
+    notificationAttemptId: attemptId,
+    messageDedupeKey: dedupeKey,
+    situationType: SITUATION_TYPE,
+    phone: reservation.phone,
+    subject: template.subject,
+    text: template.content,
+  });
+  const status = result.success ? (result.dryRun ? "DRY_RUN" : "SUBMITTED") : "FAILED";
+  await prisma.customerMessage.update({
+    where: { dedupeKey },
+    data: {
+      status,
+      channel: result.channel,
+      senderNumber: result.from,
+      recipientNumber: result.to || phone,
+      customerPhone: result.to || phone,
+      body: result.text,
+      providerMessageId: result.messageId || `${ATTEMPT_PREFIX}${attemptId}`,
+    },
+  });
+
+  if (result.success) {
+    await resolveAdminAlertByDedupeKey(alertDedupeKey(reservation.id));
+  } else {
+    await recordFailure(reservation, result.error || "솔라피 발송 실패");
   }
 
   return {
-    success: failedCount === 0 && recovery.recoveryWaitingCount === 0,
-    checkedCount: targets.length,
-    sentCount,
-    dryRunCount,
-    failedCount,
-    skippedCount,
-    templateReady: true,
-    ...recovery,
-    pipelineMs: Date.now() - pipelineStartedAt,
+    success: result.success,
+    statusCode: result.success ? 200 : 502,
+    status,
+    dryRun: result.dryRun,
+    error: result.error,
   };
 }
