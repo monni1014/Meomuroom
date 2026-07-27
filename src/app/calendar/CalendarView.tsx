@@ -718,19 +718,20 @@ export default function CalendarPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">통합 캘린더</h1>
         </div>
-        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
+        <div className="grid w-full grid-cols-3 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:justify-end sm:gap-2">
           <button
             onClick={handleSyncEmails}
             disabled={isSyncing}
             className={cn(
-              "flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl shadow-md text-sm font-bold transition-all active:scale-95 whitespace-nowrap",
+              "flex min-w-0 items-center justify-center gap-1 px-2 py-2 rounded-xl shadow-md text-[11px] font-bold transition-all active:scale-95 whitespace-nowrap sm:gap-1.5 sm:px-3.5 sm:py-2.5 sm:text-sm",
               isSyncing ? "bg-slate-400 cursor-wait" : "bg-emerald-600 hover:bg-emerald-700",
               "text-white"
             )}
             title="메일 동기화"
           >
-            <RefreshCw className={cn("w-4 h-4", isSyncing && "animate-spin")} />
-            {isSyncing ? "동기화 중..." : "메일 동기화"}
+            <RefreshCw className={cn("h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4", isSyncing && "animate-spin")} />
+            <span className="sm:hidden">{isSyncing ? "동기화 중" : "메일 동기화"}</span>
+            <span className="hidden sm:inline">{isSyncing ? "동기화 중..." : "메일 동기화"}</span>
           </button>
           <button
             onClick={() => {
@@ -739,17 +740,19 @@ export default function CalendarPage() {
               setFormDates([format(selectedDate, "yyyy-MM-dd")]);
               setIsModalOpen(true);
             }}
-            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-xl shadow-md hover:bg-indigo-700 active:scale-95 transition-all whitespace-nowrap"
+            className="flex min-w-0 items-center justify-center gap-1 rounded-xl bg-indigo-600 px-2 py-2 text-[11px] font-bold text-white shadow-md transition-all hover:bg-indigo-700 active:scale-95 whitespace-nowrap sm:gap-1.5 sm:px-3.5 sm:py-2.5 sm:text-sm"
           >
-            <Plus className="w-4 h-4" />
-            수동 예약 추가
+            <Plus className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+            <span className="sm:hidden">예약 추가</span>
+            <span className="hidden sm:inline">수동 예약 추가</span>
           </button>
           <button
             onClick={() => setIsScheduleTypeModalOpen(true)}
-            className="col-span-2 flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-amber-400 text-amber-950 text-sm font-bold rounded-xl shadow-md hover:bg-amber-500 active:scale-95 transition-all whitespace-nowrap sm:col-span-1"
+            className="flex min-w-0 items-center justify-center gap-1 rounded-xl bg-amber-400 px-2 py-2 text-[11px] font-bold text-amber-950 shadow-md transition-all hover:bg-amber-500 active:scale-95 whitespace-nowrap sm:gap-1.5 sm:px-3.5 sm:py-2.5 sm:text-sm"
           >
-            <SprayCan className="w-4 h-4" />
-            청소/사전답사 일정 추가
+            <SprayCan className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+            <span className="sm:hidden">청소·답사</span>
+            <span className="hidden sm:inline">청소/사전답사 일정 추가</span>
           </button>
         </div>
       </header>
