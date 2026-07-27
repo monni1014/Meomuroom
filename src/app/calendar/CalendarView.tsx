@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star, SprayCan } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star, SprayCan, MessageSquareText } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
@@ -53,6 +53,8 @@ interface Reservation {
   memo: string | null;
   complaints: string | null;
   isCleanUpBad: boolean;
+  visitorReviewRequested: boolean;
+  blogReviewRequested: boolean;
   emailId: string | null; // null = 수기 입력 (메일 자동연동 아님)
   usageLog: UsageLog | null;
 }
@@ -1045,6 +1047,8 @@ export default function CalendarPage() {
               const hasUnpaidExtra = !isCancelled
                 && (res.usageLog?.extraPrice ?? 0) > 0
                 && !res.usageLog?.isExtraPaid;
+              const hasReviewRequest = !isCancelled
+                && (res.visitorReviewRequested || res.blogReviewRequested);
 
               return (
                 <div
@@ -1082,9 +1086,18 @@ export default function CalendarPage() {
                         <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold", getRoomCalendarStyle(res.roomName, isCancelled))}>
                           {res.roomName}
                         </span>
-                        <strong className={cn("min-w-0 truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
-                          {res.customerName ?? "이름 미확인"}
-                        </strong>
+                        <span className="relative min-w-0 pr-2">
+                          <strong className={cn("block min-w-0 truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
+                            {res.customerName ?? "이름 미확인"}
+                          </strong>
+                          {hasReviewRequest && (
+                            <MessageSquareText
+                              data-testid="calendar-review-badge"
+                              className="absolute -right-0.5 -top-1 h-2.5 w-2.5 text-violet-600"
+                              aria-label="리뷰 이벤트 신청"
+                            />
+                          )}
+                        </span>
                         {!isCancelled && !res.isPaid && (
                           <span className="shrink-0 text-[11px] font-bold text-rose-600">미수</span>
                         )}
@@ -1157,9 +1170,18 @@ export default function CalendarPage() {
                       <span className={cn("hidden px-1.5 py-0.5 rounded text-[10px] font-semibold md:inline-flex", getRoomBadgeStyle(res.roomName))}>
                         {res.roomName}
                       </span>
-                      <strong className={cn("hidden text-sm md:inline", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
-                        {res.customerName}
-                      </strong>
+                      <span className="relative hidden pr-2 md:inline-flex">
+                        <strong className={cn("text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
+                          {res.customerName}
+                        </strong>
+                        {hasReviewRequest && (
+                          <MessageSquareText
+                            data-testid="calendar-review-badge"
+                            className="absolute -right-0.5 -top-1 h-2.5 w-2.5 text-violet-600"
+                            aria-label="리뷰 이벤트 신청"
+                          />
+                        )}
+                      </span>
                       {(hasUnpaid || hasUnpaidExtra) && (
                         <span className="hidden items-center gap-0.5 md:inline-flex" aria-label="미결제 상태">
                           {hasUnpaid && (
