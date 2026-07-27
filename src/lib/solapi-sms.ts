@@ -4,6 +4,7 @@ import { getSelectedSolapiSenderNumber } from "@/lib/solapi-sender-setting";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { reservationMessageSubject } from "@/lib/reservation-message-subject";
 import { findSolapiTextEncodingIssue } from "@/lib/solapi-text-safety";
+import { formatSolapiMessageText } from "@/lib/solapi-message-text";
 import {
   findReservationReminderInSolapiHistory,
   type ReservationReminderLookupResult,
@@ -120,7 +121,7 @@ export async function sendReservationSituationMessage(input: {
   text: string;
 }, options: SendOptions = {}): Promise<SendResult> {
   const to = normalizeKoreanPhone(input.phone);
-  const text = input.text.trim();
+  const text = formatSolapiMessageText(input.text);
   const subject = input.subject?.trim() || "";
   const messageBytes = getSolapiSmsByteLength(text);
   const channel: NotificationChannel = subject || messageBytes > SOLAPI_SMS_MAX_BYTES ? "LMS" : "SMS";
@@ -248,7 +249,7 @@ export async function buildReservationReminder(input: ReservationReminderInput) 
     reservationTime,
     roomName: input.roomName,
     guide,
-    text: guide,
+    text: formatSolapiMessageText(guide),
   };
 }
 
@@ -352,7 +353,7 @@ export async function sendOperationalAlertSms(input: {
   text: string;
 }): Promise<SendResult> {
   const to = normalizeKoreanPhone(input.to);
-  const text = input.text.trim();
+  const text = formatSolapiMessageText(input.text);
   const channel: NotificationChannel = "SMS";
 
   if (!isValidKoreanMobilePhone(to)) {
