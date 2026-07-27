@@ -17,12 +17,15 @@ export interface ParsedReservation {
 export function parseNaverReviewRequests(text: string) {
   const isSelected = (labelPattern: RegExp) => {
     const match = text.match(labelPattern);
-    return Boolean(match?.[0].match(/\(\s*1\s*\)/));
+    const quantity = Number(match?.[1] || 0);
+    return Number.isFinite(quantity) && quantity > 0;
   };
 
   return {
-    visitorReviewRequested: isSelected(/방문자\s*리뷰[\s\S]{0,40}?환급\s*\(\s*[01]\s*\)/i),
-    blogReviewRequested: isSelected(/블로그\s*리뷰[\s\S]{0,40}?환급\s*\(\s*[01]\s*\)/i),
+    // 괄호 값은 리뷰 횟수가 아니라 네이버 옵션 수량이다.
+    // 1 이상이면 수량과 관계없이 해당 리뷰 이벤트를 한 번 신청한 것으로 저장한다.
+    visitorReviewRequested: isSelected(/방문자\s*리뷰[\s\S]{0,40}?환급\s*\(\s*(\d+)\s*\)/i),
+    blogReviewRequested: isSelected(/블로그\s*리뷰[\s\S]{0,40}?환급\s*\(\s*(\d+)\s*\)/i),
   };
 }
 

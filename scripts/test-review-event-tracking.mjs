@@ -19,6 +19,18 @@ const visitorOnly = parseNaverReviewRequests(
 assertEqual("visitor-only request", visitorOnly.visitorReviewRequested, true);
 assertEqual("visitor-only excludes blog", visitorOnly.blogReviewRequested, false);
 
+const quantityStillMeansOneRequest = parseNaverReviewRequests(
+  "방문자리뷰 3천원 환급(4)0원 + 블로그리뷰 5천원 환급(5)0원",
+);
+assertEqual("visitor quantity 4 means one request", quantityStillMeansOneRequest.visitorReviewRequested, true);
+assertEqual("blog quantity 5 means one request", quantityStillMeansOneRequest.blogReviewRequested, true);
+
+const zeroQuantityMeansNoRequest = parseNaverReviewRequests(
+  "방문자리뷰 3천원 환급(0)0원 + 블로그리뷰 5천원 환급(0)0원",
+);
+assertEqual("visitor quantity 0 means no request", zeroQuantityMeansNoRequest.visitorReviewRequested, false);
+assertEqual("blog quantity 0 means no request", zeroQuantityMeansNoRequest.blogReviewRequested, false);
+
 assertEqual(
   "refund before completion is rejected",
   validateReviewProgress({
