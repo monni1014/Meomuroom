@@ -8,6 +8,7 @@ const cleaning = validateCleaningScheduleInput({
   scheduleType: "CLEANING",
   roomNames: ["머무룸1", "머무룸3"],
   cleanerName: "청소 담당자",
+  contactPhone: "010-9876-5432",
   startTime: "2026-07-28T00:00:00.000Z",
   endTime: "2026-07-28T01:00:00.000Z",
   cost: 20000,
@@ -16,7 +17,7 @@ const cleaning = validateCleaningScheduleInput({
 assert(cleaning.ok, "cleaning schedule should be valid");
 if (cleaning.ok) {
   assert(cleaning.data.scheduleType === "CLEANING", "cleaning type should be preserved");
-  assert(cleaning.data.contactPhone === null, "cleaning should not store a contact phone");
+  assert(cleaning.data.contactPhone === "010-9876-5432", "cleaning phone should be preserved");
   assert(cleaning.data.source === null, "cleaning should not store a source");
   assert(cleaning.data.cost === 20000, "cleaning cost should be preserved");
 }
@@ -74,5 +75,16 @@ const invalidPhone = validateCleaningScheduleInput({
   endTime: "2026-07-28T03:00:00.000Z",
 });
 assert(!invalidPhone.ok, "site visit phone must be validated");
+
+const invalidCleaningPhone = validateCleaningScheduleInput({
+  scheduleType: "CLEANING",
+  roomNames: ["머무룸2"],
+  cleanerName: "청소 담당자",
+  contactPhone: "1234",
+  startTime: "2026-07-28T04:00:00.000Z",
+  endTime: "2026-07-28T05:00:00.000Z",
+  cost: 10000,
+});
+assert(!invalidCleaningPhone.ok, "cleaning phone must be validated when provided");
 
 console.log("Calendar schedule validation tests passed.");

@@ -144,6 +144,18 @@ function formatClock(totalMinutes: number) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+function formatPhoneNumberInput(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+
+  if (digits.length > 7) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length > 3) {
+    return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  }
+  return digits;
+}
+
 function extendedEndClock(start: Date, end: Date) {
   const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
   const startParts = getKstDateParts(start);
@@ -230,7 +242,7 @@ export default function CalendarPage() {
   const [calendarScheduleType, setCalendarScheduleType] = useState<"CLEANING" | "SITE_VISIT">("CLEANING");
   const [cleaningRooms, setCleaningRooms] = useState<string[]>([]);
   const [cleanerName, setCleanerName] = useState("");
-  const [siteVisitPhone, setSiteVisitPhone] = useState("");
+  const [scheduleContactPhone, setScheduleContactPhone] = useState("");
   const [siteVisitSource, setSiteVisitSource] = useState<"naver" | "spacecloud" | "">("");
   const [cleaningDate, setCleaningDate] = useState(format(initialDate, "yyyy-MM-dd"));
   const [cleaningStartTime, setCleaningStartTime] = useState("09:00");
@@ -552,7 +564,7 @@ export default function CalendarPage() {
     setCalendarScheduleType(scheduleType);
     setCleaningRooms([]);
     setCleanerName("");
-    setSiteVisitPhone("");
+    setScheduleContactPhone("");
     setSiteVisitSource("");
     setCleaningDate(format(date, "yyyy-MM-dd"));
     setCleaningStartTime("09:00");
@@ -578,7 +590,7 @@ export default function CalendarPage() {
     setCalendarScheduleType(schedule.scheduleType || "CLEANING");
     setCleaningRooms(schedule.roomNames);
     setCleanerName(schedule.cleanerName);
-    setSiteVisitPhone(schedule.contactPhone || "");
+    setScheduleContactPhone(formatPhoneNumberInput(schedule.contactPhone || ""));
     setSiteVisitSource(schedule.source || "");
     setCleaningDate(format(start, "yyyy-MM-dd"));
     setCleaningStartTime(clock(startParts));
@@ -593,8 +605,8 @@ export default function CalendarPage() {
     const isSiteVisit = calendarScheduleType === "SITE_VISIT";
     if (!cleanerName.trim()) return alert(`${isSiteVisit ? "방문자 이름" : "청소한 사람"}을 입력해 주세요.`);
     if (cleaningRooms.length === 0) return alert(`${isSiteVisit ? "사전답사할" : "청소할"} 공간을 하나 이상 선택해 주세요.`);
-    if (isSiteVisit && siteVisitPhone.trim() && !/^01[016789]-?\d{3,4}-?\d{4}$/.test(siteVisitPhone.trim())) {
-      return alert("사전답사 연락처를 올바르게 입력해 주세요.");
+    if (scheduleContactPhone.trim() && !/^01[016789]-?\d{3,4}-?\d{4}$/.test(scheduleContactPhone.trim())) {
+      return alert(`${isSiteVisit ? "사전답사" : "청소"} 연락처를 올바르게 입력해 주세요.`);
     }
     if (isSiteVisit && !siteVisitSource) return alert("사전답사 유입 경로를 선택해 주세요.");
 
@@ -609,7 +621,7 @@ export default function CalendarPage() {
       roomNames: cleaningRooms,
       cleanerName: cleanerName.trim(),
       scheduleType: calendarScheduleType,
-      contactPhone: isSiteVisit ? siteVisitPhone.trim() || null : null,
+      contactPhone: scheduleContactPhone.trim() || null,
       source: isSiteVisit ? siteVisitSource : null,
       startTime: buildLocalDateTime(cleaningDate, cleaningStartTime).toISOString(),
       endTime: buildLocalDateTime(cleaningDate, normalizedEndTime).toISOString(),
@@ -1065,14 +1077,21 @@ export default function CalendarPage() {
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                           <strong className="min-w-0 truncate text-slate-900 md:hidden">{schedule.cleanerName}</strong>
-                          {isSiteVisit ? (
+                          {isSiteVisit ? schedule.contactPhone && (
                             <span className="flex items-center gap-1">
                               <Phone className="h-3.5 w-3.5" /> {schedule.contactPhone}
                             </span>
                           ) : (
-                            <span className="flex items-center gap-1">
-                              <Wallet className="h-3.5 w-3.5" /> 비용 <strong className="text-slate-800">{schedule.cost.toLocaleString("ko-KR")}원</strong>
-                            </span>
+                            <>
+                              <span className="flex items-center gap-1">
+                                <Wallet className="h-3.5 w-3.5" /> 비용 <strong className="text-slate-800">{schedule.cost.toLocaleString("ko-KR")}원</strong>
+                              </span>
+                              {schedule.contactPhone && (
+                                <span className="flex items-center gap-1">
+                                  <Phone className="h-3.5 w-3.5" /> {schedule.contactPhone}
+                                </span>
+                              )}
+                            </>
                           )}
                         </div>
                         {schedule.memo && (
@@ -1457,16 +1476,7 @@ export default function CalendarPage() {
                     type="tel"
                     placeholder="010-1234-5678"
                     value={formPhone}
-                    onChange={(e) => {
-                      const digits = e.target.value.replace(/\D/g, "");
-                      let formatted = digits;
-                      if (digits.length > 3 && digits.length <= 7) {
-                        formatted = `${digits.slice(0, 3)}-${digits.slice(3)}`;
-                      } else if (digits.length > 7) {
-                        formatted = `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`;
-                      }
-                      setFormPhone(formatted);
-                    }}
+                    onChange={(e) => setFormPhone(formatPhoneNumberInput(e.target.value))}
                     className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium"
                   />
                 </div>
@@ -1835,20 +1845,22 @@ export default function CalendarPage() {
                 />
               </div>
 
-              {calendarScheduleType === "SITE_VISIT" && (
-                <>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500">연락처 (선택)</label>
-                    <input
-                      type="tel"
-                      inputMode="tel"
-                      value={siteVisitPhone}
-                      onChange={(event) => setSiteVisitPhone(event.target.value)}
-                      placeholder="010-0000-0000"
-                      className="w-full rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden focus:border-sky-500"
-                    />
-                  </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">연락처 (선택)</label>
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  value={scheduleContactPhone}
+                  onChange={(event) => setScheduleContactPhone(formatPhoneNumberInput(event.target.value))}
+                  placeholder="010-0000-0000"
+                  className={cn(
+                    "w-full rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden",
+                    calendarScheduleType === "SITE_VISIT" ? "focus:border-sky-500" : "focus:border-teal-500",
+                  )}
+                />
+              </div>
 
+              {calendarScheduleType === "SITE_VISIT" && (
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-500">유입 경로</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -1871,7 +1883,6 @@ export default function CalendarPage() {
                       ))}
                     </div>
                   </div>
-                </>
               )}
 
               <div className="space-y-1">
