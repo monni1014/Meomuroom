@@ -8,9 +8,10 @@ assert.deepEqual(buildSpaceCloudBookingPush({
   customerName: "정윤희",
   startTime: new Date("2026-07-29T13:00:00+09:00"),
   endTime: new Date("2026-07-29T16:00:00+09:00"),
+  price: 75000,
 }), {
   title: "스클 신규 예약",
-  body: "머무룸3\n정윤희\n7월 29일 / 13시~16시",
+  body: "머무룸3\n정윤희\n7월 29일 / 13시~16시\n매출액 75,000원",
   url: "/calendar?date=2026-07-29",
   tag: "spacecloud-booking-reservation-1",
 });
