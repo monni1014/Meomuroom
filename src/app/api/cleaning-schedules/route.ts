@@ -23,7 +23,7 @@ export async function GET() {
   } catch (error) {
     console.error("GET cleaning schedules error:", error);
     return NextResponse.json(
-      { error: "청소 일정을 불러오지 못했습니다." },
+      { error: "청소/사전답사 일정을 불러오지 못했습니다." },
       { status: 500, headers: NO_STORE_HEADERS },
     );
   }
@@ -43,6 +43,6 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     console.error("POST cleaning schedule error:", error);
-    return NextResponse.json({ error: "청소 일정을 저장하지 못했습니다." }, { status: 500 });
+    return NextResponse.json({ error: "일정을 저장하지 못했습니다." }, { status: 500 });
   }
 }

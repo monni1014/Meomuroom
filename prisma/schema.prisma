@@ -49,18 +49,22 @@ model Reservation {
 }
 
 model CleaningSchedule {
-  id          String   @id @default(cuid())
-  roomName    String   @default("전체")
-  cleanerName String
-  startTime   DateTime
-  endTime     DateTime
-  cost        Int      @default(0)
-  memo        String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  roomName     String   @default("전체")
+  cleanerName  String
+  scheduleType String   @default("CLEANING") // "CLEANING" | "SITE_VISIT"
+  contactPhone String?
+  source       String?  // 사전답사 유입 경로: "naver" | "spacecloud"
+  startTime    DateTime
+  endTime      DateTime
+  cost         Int      @default(0)
+  memo         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([startTime])
   @@index([roomName, startTime])
+  @@index([scheduleType, startTime])
 }
 
 model ProcessedEmail {

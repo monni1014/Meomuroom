@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star, SprayCan, MessageSquareText } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star, SprayCan, MessageSquareText, Binoculars } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
@@ -64,6 +64,9 @@ interface CleaningSchedule {
   roomName: string;
   roomNames: string[];
   cleanerName: string;
+  scheduleType: "CLEANING" | "SITE_VISIT";
+  contactPhone: string | null;
+  source: "naver" | "spacecloud" | null;
   startTime: string;
   endTime: string;
   cost: number;
@@ -190,6 +193,7 @@ export default function CalendarPage() {
   const [cleaningSchedules, setCleaningSchedules] = useState<CleaningSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isScheduleTypeModalOpen, setIsScheduleTypeModalOpen] = useState(false);
   const [isCleaningModalOpen, setIsCleaningModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -223,8 +227,11 @@ export default function CalendarPage() {
   const [showMultiPicker, setShowMultiPicker] = useState(false);
 
   const [cleaningEditId, setCleaningEditId] = useState<string | null>(null);
+  const [calendarScheduleType, setCalendarScheduleType] = useState<"CLEANING" | "SITE_VISIT">("CLEANING");
   const [cleaningRooms, setCleaningRooms] = useState<string[]>([]);
   const [cleanerName, setCleanerName] = useState("");
+  const [siteVisitPhone, setSiteVisitPhone] = useState("");
+  const [siteVisitSource, setSiteVisitSource] = useState<"naver" | "spacecloud" | "">("");
   const [cleaningDate, setCleaningDate] = useState(format(initialDate, "yyyy-MM-dd"));
   const [cleaningStartTime, setCleaningStartTime] = useState("09:00");
   const [cleaningEndTime, setCleaningEndTime] = useState("10:00");
@@ -537,10 +544,16 @@ export default function CalendarPage() {
     }
   };
 
-  const resetCleaningForm = (date = selectedDate) => {
+  const resetCleaningForm = (
+    date = selectedDate,
+    scheduleType: "CLEANING" | "SITE_VISIT" = "CLEANING",
+  ) => {
     setCleaningEditId(null);
+    setCalendarScheduleType(scheduleType);
     setCleaningRooms([]);
     setCleanerName("");
+    setSiteVisitPhone("");
+    setSiteVisitSource("");
     setCleaningDate(format(date, "yyyy-MM-dd"));
     setCleaningStartTime("09:00");
     setCleaningEndTime("10:00");
@@ -548,8 +561,9 @@ export default function CalendarPage() {
     setCleaningMemo("");
   };
 
-  const openCleaningCreateModal = () => {
-    resetCleaningForm(selectedDate);
+  const openCleaningCreateModal = (scheduleType: "CLEANING" | "SITE_VISIT") => {
+    resetCleaningForm(selectedDate, scheduleType);
+    setIsScheduleTypeModalOpen(false);
     setIsCleaningModalOpen(true);
   };
 
@@ -561,8 +575,11 @@ export default function CalendarPage() {
       `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
 
     setCleaningEditId(schedule.id);
+    setCalendarScheduleType(schedule.scheduleType || "CLEANING");
     setCleaningRooms(schedule.roomNames);
     setCleanerName(schedule.cleanerName);
+    setSiteVisitPhone(schedule.contactPhone || "");
+    setSiteVisitSource(schedule.source || "");
     setCleaningDate(format(start, "yyyy-MM-dd"));
     setCleaningStartTime(clock(startParts));
     setCleaningEndTime(extendedEndClock(start, end));
@@ -573,22 +590,30 @@ export default function CalendarPage() {
 
   const handleSaveCleaning = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!cleanerName.trim()) return alert("청소한 사람을 입력해 주세요.");
-    if (cleaningRooms.length === 0) return alert("청소할 공간을 하나 이상 선택해 주세요.");
+    const isSiteVisit = calendarScheduleType === "SITE_VISIT";
+    if (!cleanerName.trim()) return alert(`${isSiteVisit ? "방문자 이름" : "청소한 사람"}을 입력해 주세요.`);
+    if (cleaningRooms.length === 0) return alert(`${isSiteVisit ? "사전답사할" : "청소할"} 공간을 하나 이상 선택해 주세요.`);
+    if (isSiteVisit && !/^01[016789]-?\d{3,4}-?\d{4}$/.test(siteVisitPhone.trim())) {
+      return alert("사전답사 연락처를 올바르게 입력해 주세요.");
+    }
+    if (isSiteVisit && !siteVisitSource) return alert("사전답사 유입 경로를 선택해 주세요.");
 
     const normalizedEndTime = normalizeEndClock(cleaningStartTime, cleaningEndTime);
     const startMinutes = parseClockMinutes(cleaningStartTime);
     const endMinutes = parseClockMinutes(normalizedEndTime);
     if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || endMinutes <= startMinutes) {
-      return alert("청소 종료 시간은 시작 시간보다 늦어야 합니다.");
+      return alert(`${isSiteVisit ? "사전답사" : "청소"} 종료 시간은 시작 시간보다 늦어야 합니다.`);
     }
 
     const payload = {
       roomNames: cleaningRooms,
       cleanerName: cleanerName.trim(),
+      scheduleType: calendarScheduleType,
+      contactPhone: isSiteVisit ? siteVisitPhone.trim() : null,
+      source: isSiteVisit ? siteVisitSource : null,
       startTime: buildLocalDateTime(cleaningDate, cleaningStartTime).toISOString(),
       endTime: buildLocalDateTime(cleaningDate, normalizedEndTime).toISOString(),
-      cost: Number(cleaningCost.replace(/,/g, "")) || 0,
+      cost: isSiteVisit ? 0 : Number(cleaningCost.replace(/,/g, "")) || 0,
       memo: cleaningMemo.trim() || null,
     };
 
@@ -603,28 +628,29 @@ export default function CalendarPage() {
         },
       );
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || "청소 일정 저장 실패");
+      if (!response.ok) throw new Error(data?.error || `${isSiteVisit ? "사전답사" : "청소"} 일정 저장 실패`);
 
       setIsCleaningModalOpen(false);
       await fetchReservations();
     } catch (error) {
-      console.error("Save cleaning schedule error:", error);
-      alert(error instanceof Error ? error.message : "청소 일정 저장에 실패했습니다.");
+      console.error("Save calendar schedule error:", error);
+      alert(error instanceof Error ? error.message : "일정 저장에 실패했습니다.");
     } finally {
       setIsCleaningSubmitting(false);
     }
   };
 
-  const handleDeleteCleaning = async (id: string) => {
-    if (!confirm("이 청소 일정을 삭제할까요?")) return;
+  const handleDeleteCleaning = async (schedule: CleaningSchedule) => {
+    const label = schedule.scheduleType === "SITE_VISIT" ? "사전답사" : "청소";
+    if (!confirm(`이 ${label} 일정을 삭제할까요?`)) return;
 
     try {
-      const response = await fetch(`/api/cleaning-schedules/${id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("청소 일정 삭제 실패");
+      const response = await fetch(`/api/cleaning-schedules/${schedule.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(`${label} 일정 삭제 실패`);
       await fetchReservations();
     } catch (error) {
       console.error("Delete cleaning schedule error:", error);
-      alert("청소 일정을 삭제하지 못했습니다.");
+      alert(`${label} 일정을 삭제하지 못했습니다.`);
     }
   };
 
@@ -719,11 +745,11 @@ export default function CalendarPage() {
             수동 예약 추가
           </button>
           <button
-            onClick={openCleaningCreateModal}
+            onClick={() => setIsScheduleTypeModalOpen(true)}
             className="flex items-center gap-1.5 px-3.5 py-2.5 bg-amber-400 text-amber-950 text-sm font-bold rounded-xl shadow-md hover:bg-amber-500 active:scale-95 transition-all whitespace-nowrap"
           >
             <SprayCan className="w-4 h-4" />
-            청소 일정 추가
+            청소/사전답사 일정 추가
           </button>
         </div>
       </header>
@@ -877,13 +903,19 @@ export default function CalendarPage() {
                       ? String(startParts.hour)
                       : `${startParts.hour}:${String(startParts.minute).padStart(2, "0")}`;
                     if (agendaItem.kind === "cleaning") {
+                      const isSiteVisit = agendaItem.cleaning.scheduleType === "SITE_VISIT";
                       return (
                         <span
                           key={`cleaning-${agendaItem.id}`}
-                          className="block min-w-0 truncate rounded border border-dashed border-amber-400 bg-amber-100 px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight text-amber-950"
-                          title={`${clock} ${formatCleaningRooms(agendaItem.cleaning.roomNames)} 청소 · ${agendaItem.cleaning.cleanerName}`}
+                          className={cn(
+                            "block min-w-0 truncate rounded border border-dashed px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight",
+                            isSiteVisit
+                              ? "border-sky-400 bg-sky-100 text-sky-900"
+                              : "border-amber-400 bg-amber-100 text-amber-950",
+                          )}
+                          title={`${clock} ${formatCleaningRooms(agendaItem.cleaning.roomNames)} ${isSiteVisit ? "사전답사" : "청소"} · ${agendaItem.cleaning.cleanerName}`}
                         >
-                          {compactClock} 청소
+                          {compactClock} {isSiteVisit ? "답사" : "청소"}
                         </span>
                       );
                     }
@@ -929,8 +961,13 @@ export default function CalendarPage() {
                   {dayCleaningSchedules.map((schedule) => (
                     <span
                       key={`cleaning-${schedule.id}`}
-                      className="h-1.5 w-1.5 rounded-xs bg-amber-400 ring-1 ring-amber-600"
-                      title={`${schedule.cleanerName} 청소`}
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-xs ring-1",
+                        schedule.scheduleType === "SITE_VISIT"
+                          ? "bg-sky-400 ring-sky-600"
+                          : "bg-amber-400 ring-amber-600",
+                      )}
+                      title={`${schedule.cleanerName} ${schedule.scheduleType === "SITE_VISIT" ? "사전답사" : "청소"}`}
                     />
                   ))}
                 </div>
@@ -965,6 +1002,7 @@ export default function CalendarPage() {
             selectedAgendaItems.map((agendaItem) => {
               if (agendaItem.kind === "cleaning") {
                 const schedule = agendaItem.cleaning;
+                const isSiteVisit = schedule.scheduleType === "SITE_VISIT";
                 const start = new Date(schedule.startTime);
                 const end = new Date(schedule.endTime);
                 const startClock = `${String(getKstDateParts(start).hour).padStart(2, "0")}:${String(getKstDateParts(start).minute).padStart(2, "0")}`;
@@ -973,8 +1011,13 @@ export default function CalendarPage() {
                 return (
                   <div
                     key={`cleaning-${schedule.id}`}
-                    data-testid="cleaning-agenda-card"
-                    className="relative flex items-center gap-2 rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/90 p-3 md:gap-3 md:p-4"
+                    data-testid={isSiteVisit ? "site-visit-agenda-card" : "cleaning-agenda-card"}
+                    className={cn(
+                      "relative flex items-center gap-2 rounded-xl border-2 border-dashed p-3 md:gap-3 md:p-4",
+                      isSiteVisit
+                        ? "border-sky-400 bg-sky-50/90"
+                        : "border-amber-400 bg-amber-50/90",
+                    )}
                   >
                     <div className="flex min-w-0 flex-1 items-start gap-2 md:gap-3">
                       <div className="w-[58px] shrink-0 text-center">
@@ -983,11 +1026,24 @@ export default function CalendarPage() {
                       </div>
                       <div className="min-w-0 flex-1 space-y-1 md:space-y-1.5">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="inline-flex items-center gap-1 rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-amber-950">
-                            <SprayCan className="h-3 w-3" />
-                            <span className="md:hidden">청소</span>
-                            <span className="hidden md:inline">청소 일정</span>
+                          <span className={cn(
+                            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold",
+                            isSiteVisit ? "bg-sky-500 text-white" : "bg-amber-400 text-amber-950",
+                          )}>
+                            {isSiteVisit ? <Binoculars className="h-3 w-3" /> : <SprayCan className="h-3 w-3" />}
+                            <span className="md:hidden">{isSiteVisit ? "답사" : "청소"}</span>
+                            <span className="hidden md:inline">{isSiteVisit ? "사전답사" : "청소 일정"}</span>
                           </span>
+                          {isSiteVisit && schedule.source && (
+                            <span className={cn(
+                              "rounded border px-1.5 py-0.5 text-[10px] font-bold",
+                              schedule.source === "naver"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-indigo-200 bg-indigo-50 text-indigo-700",
+                            )}>
+                              {getSourceDisplay(schedule.source)}
+                            </span>
+                          )}
                           {(schedule.roomNames.length === CLEANING_ROOM_OPTIONS.length
                             ? ["전체 공간"]
                             : schedule.roomNames
@@ -1006,9 +1062,15 @@ export default function CalendarPage() {
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                           <strong className="min-w-0 truncate text-slate-900 md:hidden">{schedule.cleanerName}</strong>
-                          <span className="flex items-center gap-1">
-                            <Wallet className="h-3.5 w-3.5" /> 비용 <strong className="text-slate-800">{schedule.cost.toLocaleString("ko-KR")}원</strong>
-                          </span>
+                          {isSiteVisit ? (
+                            <span className="flex items-center gap-1">
+                              <Phone className="h-3.5 w-3.5" /> {schedule.contactPhone}
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1">
+                              <Wallet className="h-3.5 w-3.5" /> 비용 <strong className="text-slate-800">{schedule.cost.toLocaleString("ko-KR")}원</strong>
+                            </span>
+                          )}
                         </div>
                         {schedule.memo && (
                           <p className="truncate text-xs text-slate-500 md:whitespace-pre-wrap">{schedule.memo}</p>
@@ -1019,14 +1081,14 @@ export default function CalendarPage() {
                       <button
                         onClick={() => openCleaningEditModal(schedule)}
                         className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-teal-600 active:scale-95 md:p-2"
-                        title="청소 일정 수정"
+                        title={`${isSiteVisit ? "사전답사" : "청소"} 일정 수정`}
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => handleDeleteCleaning(schedule.id)}
+                        onClick={() => handleDeleteCleaning(schedule)}
                         className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-500 active:scale-95 md:p-2"
-                        title="청소 일정 삭제"
+                        title={`${isSiteVisit ? "사전답사" : "청소"} 일정 삭제`}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -1653,13 +1715,55 @@ export default function CalendarPage() {
         </div>
       )}
 
+      {isScheduleTypeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <h2 className="font-bold text-slate-800">추가할 일정 선택</h2>
+              <button
+                type="button"
+                onClick={() => setIsScheduleTypeModalOpen(false)}
+                className="rounded-full p-1 text-slate-400 transition hover:bg-slate-100 active:scale-90"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 p-4">
+              <button
+                type="button"
+                onClick={() => openCleaningCreateModal("CLEANING")}
+                className="flex flex-col items-center gap-2 rounded-2xl border-2 border-amber-200 bg-amber-50 p-5 font-bold text-amber-950 transition hover:border-amber-400 active:scale-95"
+              >
+                <SprayCan className="h-7 w-7 text-amber-600" />
+                청소
+              </button>
+              <button
+                type="button"
+                onClick={() => openCleaningCreateModal("SITE_VISIT")}
+                className="flex flex-col items-center gap-2 rounded-2xl border-2 border-sky-200 bg-sky-50 p-5 font-bold text-sky-900 transition hover:border-sky-400 active:scale-95"
+              >
+                <Binoculars className="h-7 w-7 text-sky-600" />
+                사전답사
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isCleaningModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-slate-100 bg-teal-50 p-4">
+            <div className={cn(
+              "flex items-center justify-between border-b border-slate-100 p-4",
+              calendarScheduleType === "SITE_VISIT" ? "bg-sky-50" : "bg-teal-50",
+            )}>
               <h2 className="flex items-center gap-2 font-bold text-slate-800">
-                <SprayCan className="h-5 w-5 text-teal-600" />
-                {cleaningEditId ? "청소 일정 수정" : "새 청소 일정 추가"}
+                {calendarScheduleType === "SITE_VISIT"
+                  ? <Binoculars className="h-5 w-5 text-sky-600" />
+                  : <SprayCan className="h-5 w-5 text-teal-600" />}
+                {cleaningEditId
+                  ? `${calendarScheduleType === "SITE_VISIT" ? "사전답사" : "청소"} 일정 수정`
+                  : `새 ${calendarScheduleType === "SITE_VISIT" ? "사전답사" : "청소"} 일정 추가`}
               </h2>
               <button
                 type="button"
@@ -1672,7 +1776,9 @@ export default function CalendarPage() {
 
             <form onSubmit={handleSaveCleaning} className="max-h-[75vh] space-y-4 overflow-y-auto p-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500">청소 공간 (중복 선택 가능)</label>
+                <label className="text-xs font-bold text-slate-500">
+                  {calendarScheduleType === "SITE_VISIT" ? "답사 공간" : "청소 공간"} (중복 선택 가능)
+                </label>
                 <div className="grid grid-cols-3 gap-2">
                   {CLEANING_ROOM_OPTIONS.map((roomName) => {
                     const isChecked = cleaningRooms.includes(roomName);
@@ -1682,8 +1788,12 @@ export default function CalendarPage() {
                         className={cn(
                           "flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2.5 text-xs font-bold transition",
                           isChecked
-                            ? "border-teal-500 bg-teal-50 text-teal-700"
-                            : "border-slate-200 bg-white text-slate-500 hover:border-teal-300",
+                            ? calendarScheduleType === "SITE_VISIT"
+                              ? "border-sky-500 bg-sky-50 text-sky-700"
+                              : "border-teal-500 bg-teal-50 text-teal-700"
+                            : calendarScheduleType === "SITE_VISIT"
+                              ? "border-slate-200 bg-white text-slate-500 hover:border-sky-300"
+                              : "border-slate-200 bg-white text-slate-500 hover:border-teal-300",
                         )}
                       >
                         <input
@@ -1696,7 +1806,7 @@ export default function CalendarPage() {
                                 : current.filter((room) => room !== roomName),
                             );
                           }}
-                          className="h-4 w-4 accent-teal-600"
+                          className={cn("h-4 w-4", calendarScheduleType === "SITE_VISIT" ? "accent-sky-600" : "accent-teal-600")}
                         />
                         {roomName}
                       </label>
@@ -1706,19 +1816,66 @@ export default function CalendarPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500">청소한 사람</label>
+                <label className="text-xs font-bold text-slate-500">
+                  {calendarScheduleType === "SITE_VISIT" ? "방문자 이름" : "청소한 사람"}
+                </label>
                 <input
                   type="text"
                   required
                   value={cleanerName}
                   onChange={(event) => setCleanerName(event.target.value)}
                   placeholder="이름 입력"
-                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden focus:border-teal-500"
+                  className={cn(
+                    "w-full rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden",
+                    calendarScheduleType === "SITE_VISIT" ? "focus:border-sky-500" : "focus:border-teal-500",
+                  )}
                 />
               </div>
 
+              {calendarScheduleType === "SITE_VISIT" && (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-500">연락처</label>
+                    <input
+                      type="tel"
+                      required
+                      inputMode="tel"
+                      value={siteVisitPhone}
+                      onChange={(event) => setSiteVisitPhone(event.target.value)}
+                      placeholder="010-0000-0000"
+                      className="w-full rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden focus:border-sky-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500">유입 경로</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["naver", "spacecloud"] as const).map((source) => (
+                        <button
+                          key={source}
+                          type="button"
+                          onClick={() => setSiteVisitSource(source)}
+                          className={cn(
+                            "rounded-xl border px-3 py-2.5 text-xs font-bold transition active:scale-95",
+                            siteVisitSource === source
+                              ? source === "naver"
+                                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                                : "border-indigo-500 bg-indigo-50 text-indigo-700"
+                              : "border-slate-200 bg-white text-slate-500",
+                          )}
+                        >
+                          {source === "naver" ? "네이버" : "스페이스클라우드"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500">청소 날짜</label>
+                <label className="text-xs font-bold text-slate-500">
+                  {calendarScheduleType === "SITE_VISIT" ? "답사 날짜" : "청소 날짜"}
+                </label>
                 <input
                   type="date"
                   required
@@ -1739,7 +1896,7 @@ export default function CalendarPage() {
                 </div>
               </div>
 
-              <div className="space-y-1">
+              {calendarScheduleType === "CLEANING" && <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500">청소 비용</label>
                 <div className="relative">
                   <input
@@ -1756,7 +1913,7 @@ export default function CalendarPage() {
                   />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
                 </div>
-              </div>
+              </div>}
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500">메모 (선택)</label>
@@ -1764,7 +1921,7 @@ export default function CalendarPage() {
                   value={cleaningMemo}
                   onChange={(event) => setCleaningMemo(event.target.value)}
                   rows={3}
-                  placeholder="청소 범위나 특이사항"
+                  placeholder={calendarScheduleType === "SITE_VISIT" ? "방문 목적이나 특이사항" : "청소 범위나 특이사항"}
                   className="w-full resize-y rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden focus:border-teal-500"
                 />
               </div>
@@ -1772,9 +1929,18 @@ export default function CalendarPage() {
               <button
                 type="submit"
                 disabled={isCleaningSubmitting}
-                className="w-full rounded-xl bg-teal-600 py-3 text-sm font-bold text-white transition-all hover:bg-teal-700 hover:shadow-lg active:scale-[0.98] disabled:opacity-50"
+                className={cn(
+                  "w-full rounded-xl py-3 text-sm font-bold text-white transition-all hover:shadow-lg active:scale-[0.98] disabled:opacity-50",
+                  calendarScheduleType === "SITE_VISIT"
+                    ? "bg-sky-600 hover:bg-sky-700"
+                    : "bg-teal-600 hover:bg-teal-700",
+                )}
               >
-                {isCleaningSubmitting ? "저장 중..." : cleaningEditId ? "수정 사항 저장" : "청소 일정 저장"}
+                {isCleaningSubmitting
+                  ? "저장 중..."
+                  : cleaningEditId
+                    ? "수정 사항 저장"
+                    : `${calendarScheduleType === "SITE_VISIT" ? "사전답사" : "청소"} 일정 저장`}
               </button>
             </form>
           </div>

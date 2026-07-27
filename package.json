@@ -24,6 +24,8 @@
     "test:competitor-booking-push": "node --experimental-strip-types scripts/test-competitor-booking-push.mjs",
     "test:spacecloud-booking-push": "node --experimental-strip-types scripts/test-spacecloud-booking-push.mjs",
     "test:review-events": "node --experimental-strip-types scripts/test-review-event-tracking.mjs",
+    "test:calendar-schedules": "node --experimental-strip-types scripts/test-calendar-schedule-validation.mjs",
+    "backfill:july-reviews": "node --experimental-strip-types scripts/backfill-july-review-requests.mjs",
     "test:naver-rpa-performance": "node scripts/test-naver-rpa-performance.mjs",
     "test:naver-booking-row": "node scripts/test-naver-booking-row.mjs",
     "test:naver-cancellation-times": "node --experimental-strip-types scripts/test-naver-cancellation-times.mjs",
