@@ -86,7 +86,7 @@ export function validateCleaningScheduleInput(body: unknown): ValidationResult {
   if (scheduleType === "CLEANING" && (!Number.isInteger(rawCost) || rawCost < 0 || rawCost > 100_000_000)) {
     return { ok: false, error: "청소 비용을 올바르게 입력해 주세요." };
   }
-  if (scheduleType === "SITE_VISIT" && !/^01[016789]-?\d{3,4}-?\d{4}$/.test(contactPhone)) {
+  if (scheduleType === "SITE_VISIT" && contactPhone && !/^01[016789]-?\d{3,4}-?\d{4}$/.test(contactPhone)) {
     return { ok: false, error: "사전답사 연락처를 올바르게 입력해 주세요." };
   }
   if (scheduleType === "SITE_VISIT" && !source) {
@@ -102,7 +102,7 @@ export function validateCleaningScheduleInput(body: unknown): ValidationResult {
       roomName: formatCleaningRoomNames(uniqueRoomNames),
       cleanerName,
       scheduleType,
-      contactPhone: scheduleType === "SITE_VISIT" ? contactPhone : null,
+      contactPhone: scheduleType === "SITE_VISIT" ? contactPhone || null : null,
       source: scheduleType === "SITE_VISIT" ? source : null,
       startTime,
       endTime,

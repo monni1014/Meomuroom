@@ -593,7 +593,7 @@ export default function CalendarPage() {
     const isSiteVisit = calendarScheduleType === "SITE_VISIT";
     if (!cleanerName.trim()) return alert(`${isSiteVisit ? "방문자 이름" : "청소한 사람"}을 입력해 주세요.`);
     if (cleaningRooms.length === 0) return alert(`${isSiteVisit ? "사전답사할" : "청소할"} 공간을 하나 이상 선택해 주세요.`);
-    if (isSiteVisit && !/^01[016789]-?\d{3,4}-?\d{4}$/.test(siteVisitPhone.trim())) {
+    if (isSiteVisit && siteVisitPhone.trim() && !/^01[016789]-?\d{3,4}-?\d{4}$/.test(siteVisitPhone.trim())) {
       return alert("사전답사 연락처를 올바르게 입력해 주세요.");
     }
     if (isSiteVisit && !siteVisitSource) return alert("사전답사 유입 경로를 선택해 주세요.");
@@ -609,7 +609,7 @@ export default function CalendarPage() {
       roomNames: cleaningRooms,
       cleanerName: cleanerName.trim(),
       scheduleType: calendarScheduleType,
-      contactPhone: isSiteVisit ? siteVisitPhone.trim() : null,
+      contactPhone: isSiteVisit ? siteVisitPhone.trim() || null : null,
       source: isSiteVisit ? siteVisitSource : null,
       startTime: buildLocalDateTime(cleaningDate, cleaningStartTime).toISOString(),
       endTime: buildLocalDateTime(cleaningDate, normalizedEndTime).toISOString(),
@@ -1835,10 +1835,9 @@ export default function CalendarPage() {
               {calendarScheduleType === "SITE_VISIT" && (
                 <>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500">연락처</label>
+                    <label className="text-xs font-bold text-slate-500">연락처 (선택)</label>
                     <input
                       type="tel"
-                      required
                       inputMode="tel"
                       value={siteVisitPhone}
                       onChange={(event) => setSiteVisitPhone(event.target.value)}

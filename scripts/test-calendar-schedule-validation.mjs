@@ -50,6 +50,20 @@ const missingSource = validateCleaningScheduleInput({
 });
 assert(!missingSource.ok, "site visit source must be required");
 
+const missingPhone = validateCleaningScheduleInput({
+  scheduleType: "SITE_VISIT",
+  roomNames: ["머무룸1"],
+  cleanerName: "연락처 없는 답사 방문자",
+  contactPhone: "",
+  source: "naver",
+  startTime: "2026-07-28T02:00:00.000Z",
+  endTime: "2026-07-28T03:00:00.000Z",
+});
+assert(missingPhone.ok, "site visit phone should be optional");
+if (missingPhone.ok) {
+  assert(missingPhone.data.contactPhone === null, "missing site visit phone should be stored as null");
+}
+
 const invalidPhone = validateCleaningScheduleInput({
   scheduleType: "SITE_VISIT",
   roomNames: ["머무룸1"],
