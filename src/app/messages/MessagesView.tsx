@@ -482,7 +482,11 @@ export default function MessagesView({
                           type="button"
                           onClick={() => void sendOnTimeExitMessage(entry)}
                           disabled={Boolean(sendingOnTimeExitId)}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-60"
+                          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-black ring-1 ring-inset transition disabled:cursor-wait sm:mr-16 lg:mr-24 ${
+                            sendingOnTimeExitId === entry.reservationId
+                              ? "bg-slate-800 text-white ring-slate-800"
+                              : "bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200"
+                          }`}
                         >
                           <Send className="h-3.5 w-3.5" />
                           {sendingOnTimeExitId === entry.reservationId
