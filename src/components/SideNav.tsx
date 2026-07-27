@@ -32,7 +32,11 @@ export function SideNav() {
       )}
     >
       {/* 로고 헤더 — 데스크톱 사이드바에서만 표시 */}
-      <div className="hidden md:flex items-center h-16 px-6 border-b border-slate-100">
+      <Link
+        href="/"
+        aria-label="머무룸 대시보드로 이동"
+        className="hidden md:flex items-center h-16 px-6 border-b border-slate-100 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
+      >
         <div className="flex items-center gap-3">
           <Image
             src="/memoroom-logo.png"
@@ -44,7 +48,7 @@ export function SideNav() {
           />
           <span className="font-bold text-xl text-slate-900 tracking-tight">머무룸 AX</span>
         </div>
-      </div>
+      </Link>
 
       <div className="flex-1 flex flex-row md:flex-col justify-around md:justify-start md:py-6 md:px-3 md:gap-2">
         {NAV_ITEMS.map((item) => {
