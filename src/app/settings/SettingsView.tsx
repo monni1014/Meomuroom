@@ -1047,9 +1047,6 @@ export default function SettingsView({
           <section className="space-y-3">
             <div>
               <h2 className="text-lg font-black text-slate-900">문자 템플릿</h2>
-              <p className="mt-1 text-sm font-semibold text-slate-500">
-                아래 내용이 예약 안내 문자 본문에 들어갑니다. 저장하면 다음 발송부터 바로 반영됩니다.
-              </p>
             </div>
 
             {selectedGuideTemplate && (
