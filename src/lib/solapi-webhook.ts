@@ -4,6 +4,7 @@ import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-aler
 import { mapSolapiDeliveryStatus, type SolapiDeliveryStatus } from "@/lib/solapi-delivery-status";
 import { reservationTestMessageDedupeKey } from "@/lib/customer-messages";
 import { buildReservationNotificationFailureAlert } from "@/lib/reservation-notification-failure-alert";
+import { siteVisitScheduleIdFromDedupeKey } from "@/lib/site-visit-notifications";
 
 type SolapiReport = {
   messageId?: string;
@@ -110,6 +111,40 @@ export async function processSolapiReport(report: SolapiReport) {
   });
 
   const reservation = message.reservation;
+  const siteVisitScheduleId = siteVisitScheduleIdFromDedupeKey(message.dedupeKey);
+  if (!reservation && siteVisitScheduleId && statusChanged) {
+    const schedule = await prisma.cleaningSchedule.findUnique({
+      where: { id: siteVisitScheduleId },
+      select: { id: true, roomName: true, cleanerName: true, startTime: true },
+    });
+    if (schedule) {
+      const alertKey = `site-visit-notification:${schedule.id}`;
+      if (status === "DELIVERED") {
+        after(async () => {
+          await resolveAdminAlertByDedupeKey(alertKey);
+        });
+      } else if (status === "FAILED") {
+        const dateLabel = new Intl.DateTimeFormat("ko-KR", {
+          timeZone: "Asia/Seoul",
+          month: "numeric",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(schedule.startTime);
+        after(async () => {
+          await createAdminAlert({
+            type: "SITE_VISIT_NOTIFICATION_FAILED",
+            severity: "CRITICAL",
+            title: "사전답사 안내 문자 수신 실패",
+            message: `${schedule.roomName} / ${schedule.cleanerName} / ${dateLabel} / 사유: ${errorMessage}`,
+            dedupeKey: alertKey,
+          });
+        });
+      }
+    }
+    return { processed: true, status, reservationId: null, siteVisitScheduleId };
+  }
   if (!reservation || !statusChanged) {
     return { processed: true, status, reservationId: message.reservationId };
   }

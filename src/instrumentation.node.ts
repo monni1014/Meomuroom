@@ -18,6 +18,7 @@ export async function registerNodeInstrumentation() {
   const { checkProxySellerStatusAndAlert } = await import("@/lib/proxy-seller");
   const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
   const { sendDueDawnBookingConfirmations } = await import("@/lib/dawn-booking-notifications");
+  const { sendDueSiteVisitGuides } = await import("@/lib/site-visit-notifications");
   const { sendDueOnTimeExitMessages } = await import("@/lib/on-time-exit-notifications");
   const { sendDueReservationEndReminders } = await import("@/lib/reservation-end-reminders");
   const { runReservationContactPreflight } = await import("@/lib/reservation-contact-preflight");
@@ -106,10 +107,11 @@ export async function registerNodeInstrumentation() {
     try {
       const dawnResult = await sendDueDawnBookingConfirmations();
       const result = await sendDueReservationReminders();
+      const siteVisitResult = await sendDueSiteVisitGuides();
       const exitResult = await sendDueOnTimeExitMessages();
-      if (result.checkedCount > 0 || dawnResult.checkedCount > 0 || exitResult.checkedCount > 0) {
+      if (result.checkedCount > 0 || dawnResult.checkedCount > 0 || siteVisitResult.checkedCount > 0 || exitResult.checkedCount > 0) {
         console.log(
-          `[Cron] Reservation notifications done (${label}): guide checked ${result.checkedCount}, sent ${result.sentCount}, recovered ${result.recoveredCount}, recovery-waiting ${result.recoveryWaitingCount}, dry-run ${result.dryRunCount}, waiting-contact ${result.waitingContactCount}, waiting-contact-sync ${result.waitingContactSyncCount}, failed ${result.failedCount}, google-sync ${result.contactSyncMs}ms, pipeline ${result.pipelineMs}ms; dawn checked ${dawnResult.checkedCount}, sent ${dawnResult.sentCount}, recovered ${dawnResult.recoveredCount}, recovery-waiting ${dawnResult.recoveryWaitingCount}, dry-run ${dawnResult.dryRunCount}, waiting-contact ${dawnResult.waitingContactCount}, failed ${dawnResult.failedCount}, skipped ${dawnResult.skippedCount}, pipeline ${dawnResult.pipelineMs}ms; on-time-exit checked ${exitResult.checkedCount}, sent ${exitResult.sentCount}, recovered ${exitResult.recoveredCount}, recovery-waiting ${exitResult.recoveryWaitingCount}, dry-run ${exitResult.dryRunCount}, failed ${exitResult.failedCount}, skipped ${exitResult.skippedCount}, template-ready ${exitResult.templateReady}`,
+          `[Cron] Reservation notifications done (${label}): guide checked ${result.checkedCount}, sent ${result.sentCount}, recovered ${result.recoveredCount}, recovery-waiting ${result.recoveryWaitingCount}, dry-run ${result.dryRunCount}, waiting-contact ${result.waitingContactCount}, waiting-contact-sync ${result.waitingContactSyncCount}, failed ${result.failedCount}, google-sync ${result.contactSyncMs}ms, pipeline ${result.pipelineMs}ms; dawn checked ${dawnResult.checkedCount}, sent ${dawnResult.sentCount}, recovered ${dawnResult.recoveredCount}, recovery-waiting ${dawnResult.recoveryWaitingCount}, dry-run ${dawnResult.dryRunCount}, waiting-contact ${dawnResult.waitingContactCount}, failed ${dawnResult.failedCount}, skipped ${dawnResult.skippedCount}, pipeline ${dawnResult.pipelineMs}ms; site-visit checked ${siteVisitResult.checkedCount}, sent ${siteVisitResult.sentCount}, recovered ${siteVisitResult.recoveredCount}, recovery-waiting ${siteVisitResult.recoveryWaitingCount}, dry-run ${siteVisitResult.dryRunCount}, waiting-contact ${siteVisitResult.waitingContactCount}, failed ${siteVisitResult.failedCount}, template-ready ${siteVisitResult.templateReady}, pipeline ${siteVisitResult.pipelineMs}ms; on-time-exit checked ${exitResult.checkedCount}, sent ${exitResult.sentCount}, recovered ${exitResult.recoveredCount}, recovery-waiting ${exitResult.recoveryWaitingCount}, dry-run ${exitResult.dryRunCount}, failed ${exitResult.failedCount}, skipped ${exitResult.skippedCount}, template-ready ${exitResult.templateReady}`,
         );
       }
     } catch (error) {

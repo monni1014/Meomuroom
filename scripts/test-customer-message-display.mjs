@@ -14,6 +14,10 @@ assert.deepEqual(
   { type: "ON_TIME_EXIT", label: "정시퇴실 안내" },
 );
 assert.deepEqual(
+  customerMessageDisplay("situation:site-visit:schedule-1"),
+  { type: "SITE_VISIT", label: "사전답사 안내" },
+);
+assert.deepEqual(
   customerMessageDisplay("situation:unpaid:reservation-1"),
   { type: "UNPAID", label: "미정산 안내" },
 );

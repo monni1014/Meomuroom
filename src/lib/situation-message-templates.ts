@@ -14,6 +14,12 @@ export const SITUATION_MESSAGE_TEMPLATE_DEFINITIONS = [
     automationDescription: "같은 고객의 연속 예약은 제외하고, 이용안내와 같은 시각에 별도 문자로 자동발송합니다.",
   },
   {
+    key: "SITE_VISIT_GUIDE",
+    name: "사전답사 안내",
+    triggerDescription: "캘린더에 등록된 사전답사 일정 시작 2시간 전",
+    automationDescription: "2시간 이내에 등록한 사전답사는 전화번호 확인 후 바로 자동발송합니다.",
+  },
+  {
     key: "UNPAID_RESERVATION",
     name: "미정산 안내",
     triggerDescription: "예약이 미정산 상태인 경우",

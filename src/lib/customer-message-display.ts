@@ -1,4 +1,4 @@
-export type CustomerMessageDisplayType = "GUIDE" | "DAWN_BOOKING" | "ON_TIME_EXIT" | "UNPAID" | "SITUATION";
+export type CustomerMessageDisplayType = "GUIDE" | "DAWN_BOOKING" | "ON_TIME_EXIT" | "SITE_VISIT" | "UNPAID" | "SITUATION";
 
 export type CustomerMessageDisplay = {
   type: CustomerMessageDisplayType;
@@ -11,6 +11,9 @@ export function customerMessageDisplay(dedupeKey: string): CustomerMessageDispla
   }
   if (dedupeKey.startsWith("situation:on-time-exit:")) {
     return { type: "ON_TIME_EXIT", label: "정시퇴실 안내" };
+  }
+  if (dedupeKey.startsWith("situation:site-visit:")) {
+    return { type: "SITE_VISIT", label: "사전답사 안내" };
   }
   if (dedupeKey.startsWith("situation:unpaid:")) {
     return { type: "UNPAID", label: "미정산 안내" };

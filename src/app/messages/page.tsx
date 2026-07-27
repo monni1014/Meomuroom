@@ -6,6 +6,11 @@ import { createKstDate, getKstDayRange } from "@/lib/kst-time";
 import { getSolapiDailyUsage } from "@/lib/solapi-daily-usage";
 import { buildReservationNotificationGroups } from "@/lib/reservation-notification-grouping";
 import { customerMessageDisplay } from "@/lib/customer-message-display";
+import {
+  SITE_VISIT_MESSAGE_PREFIX,
+  siteVisitMessageDedupeKey,
+  siteVisitScheduleIdFromDedupeKey,
+} from "@/lib/site-visit-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +79,7 @@ export default async function MessagesPage({
     });
   }
 
-  const [reservations, situationMessages, dailyUsage] = await Promise.all([prisma.reservation.findMany({
+  const [reservations, situationMessages, siteVisitData, dailyUsage] = await Promise.all([prisma.reservation.findMany({
     where: {
       OR: reservationFilters,
     },
@@ -109,7 +114,30 @@ export default async function MessagesPage({
     },
     include: { reservation: true },
     orderBy: { occurredAt: "desc" },
-  }), getSolapiDailyUsage(selectedDay.start, nextDayStart)]);
+  }), (async () => {
+    const messages = await prisma.customerMessage.findMany({
+      where: {
+        direction: "OUTBOUND",
+        dedupeKey: { startsWith: SITE_VISIT_MESSAGE_PREFIX },
+        occurredAt: { gte: selectedDay.start, lt: nextDayStart },
+      },
+      orderBy: { occurredAt: "desc" },
+    });
+    const sentScheduleIds = messages
+      .map((message) => siteVisitScheduleIdFromDedupeKey(message.dedupeKey))
+      .filter((scheduleId): scheduleId is string => Boolean(scheduleId));
+    const schedules = await prisma.cleaningSchedule.findMany({
+      where: {
+        scheduleType: "SITE_VISIT",
+        OR: [
+          { startTime: { gte: plannedReservationStart, lt: plannedReservationEnd } },
+          ...(sentScheduleIds.length > 0 ? [{ id: { in: sentScheduleIds } }] : []),
+        ],
+      },
+      orderBy: { startTime: "asc" },
+    });
+    return { messages, schedules };
+  })(), getSolapiDailyUsage(selectedDay.start, nextDayStart)]);
 
   const notificationGroups = buildReservationNotificationGroups(reservations);
   const groupLeaderByFollowerId = new Map<string, (typeof reservations)[number]>();
@@ -186,9 +214,42 @@ export default async function MessagesPage({
     }];
   });
 
+  const siteVisitMessageByDedupeKey = new Map(
+    siteVisitData.messages.map((message) => [message.dedupeKey, message]),
+  );
+  const siteVisitEntries = siteVisitData.schedules.map((schedule) => {
+    const dedupeKey = siteVisitMessageDedupeKey(schedule.id);
+    const message = siteVisitMessageByDedupeKey.get(dedupeKey) || null;
+    const scheduledAt = new Date(schedule.startTime.getTime() - twoHoursMs);
+    const phone = normalizeKoreanPhone(schedule.contactPhone);
+    let status = message?.status || "SCHEDULED";
+    if (!message && !isValidKoreanMobilePhone(phone)) status = "MISSING_PHONE";
+    else if (!message && scheduledAt.getTime() < now.getTime()) status = "OVERDUE";
+
+    return {
+      entryId: message?.id || `site-visit:${schedule.id}`,
+      reservationId: schedule.id,
+      customerName: schedule.cleanerName,
+      roomName: schedule.roomName,
+      phone,
+      startTime: schedule.startTime.toISOString(),
+      endTime: schedule.endTime.toISOString(),
+      scheduledAt: (message?.occurredAt || scheduledAt).toISOString(),
+      reservationStatus: "CONFIRMED",
+      status,
+      error: status === "FAILED" ? "사전답사 안내 문자 발송에 실패했습니다." : null,
+      sentAt: message?.occurredAt.toISOString() || null,
+      resultAt: message?.updatedAt.toISOString() || null,
+      providerMessageId: message?.providerMessageId || null,
+      isTest: false,
+      messageType: "SITE_VISIT" as const,
+      messageLabel: "사전답사 안내",
+    };
+  });
+
   return (
     <MessagesView
-      initialEntries={[...entries, ...situationEntries]}
+      initialEntries={[...entries, ...situationEntries, ...siteVisitEntries]}
       selectedDateKey={selectedDay.key}
       selectedDateLabel={`${selectedDay.parts.year}년 ${selectedDay.parts.month}월 ${selectedDay.parts.day}일`}
       isToday={isToday}
