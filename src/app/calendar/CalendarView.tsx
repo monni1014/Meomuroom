@@ -1093,7 +1093,7 @@ export default function CalendarPage() {
                           {hasReviewRequest && (
                             <MessageSquareText
                               data-testid="calendar-review-badge"
-                              className="absolute -right-0.5 -top-1 h-2.5 w-2.5 text-violet-600"
+                              className="absolute -right-0.5 -top-1 h-2.5 w-2.5 text-slate-700"
                               aria-label="리뷰 이벤트 신청"
                             />
                           )}
@@ -1177,7 +1177,7 @@ export default function CalendarPage() {
                         {hasReviewRequest && (
                           <MessageSquareText
                             data-testid="calendar-review-badge"
-                            className="absolute -right-0.5 -top-1 h-2.5 w-2.5 text-violet-600"
+                            className="absolute -right-0.5 -top-1 h-2.5 w-2.5 text-slate-700"
                             aria-label="리뷰 이벤트 신청"
                           />
                         )}
