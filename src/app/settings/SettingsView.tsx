@@ -401,6 +401,7 @@ export default function SettingsView({
   const [proxyPayments, setProxyPayments] = useState<ProxyPaymentRecord[]>(initialProxyPayments);
   const [proxyPaymentForm, setProxyPaymentForm] = useState<ProxyPaymentForm>(emptyProxyPaymentForm);
   const [templates, setTemplates] = useState<MessageTemplateState[]>(initialMessageTemplates);
+  const [selectedGuideRoom, setSelectedGuideRoom] = useState<CleaningRoomName>("머무룸1");
   const [situationTemplates, setSituationTemplates] = useState<SituationMessageTemplateState[]>(
     initialSituationMessageTemplates,
   );
@@ -429,6 +430,8 @@ export default function SettingsView({
   const [situationSaveMessage, setSituationSaveMessage] = useState<string | null>(null);
   const [isSyncingGooglePeople, setIsSyncingGooglePeople] = useState(false);
   const [googlePeopleMessage, setGooglePeopleMessage] = useState<string | null>(null);
+  const selectedGuideTemplate = templates.find((template) => template.roomName === selectedGuideRoom)
+    || templates[0];
 
   const loadSolapiStatus = useCallback(async () => {
     setIsLoadingSolapi(true);
@@ -1049,42 +1052,60 @@ export default function SettingsView({
               </p>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-3">
-              {templates.map((template) => (
-                <div key={template.roomName} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-black text-slate-900">{template.roomName}</p>
-                      <p className="mt-0.5 text-xs font-semibold text-slate-400">
-                        최근 수정 {formatDateTime(template.updatedAt)}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void saveTemplate(template)}
-                      disabled={savingRoom === template.roomName}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
-                    >
-                      {savingRoom === template.roomName ? (
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Save className="h-3.5 w-3.5" />
-                      )}
-                      저장
-                    </button>
-                  </div>
-                  <textarea
-                    value={template.content}
-                    onChange={(event) => updateTemplateContent(template.roomName, event.target.value)}
-                    className="mt-3 h-96 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-800 outline-hidden transition focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100"
-                    spellCheck={false}
-                  />
-                  <p className="mt-2 text-xs font-semibold text-slate-400">
-                    이 내용이 실제 문자 본문으로 그대로 발송됩니다.
+            {selectedGuideTemplate && (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold text-slate-400">
+                    최근 수정 {formatDateTime(selectedGuideTemplate.updatedAt)}
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => void saveTemplate(selectedGuideTemplate)}
+                    disabled={savingRoom === selectedGuideTemplate.roomName}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    {savingRoom === selectedGuideTemplate.roomName ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Save className="h-3.5 w-3.5" />
+                    )}
+                    저장
+                  </button>
                 </div>
-              ))}
-            </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {CLEANING_ROOM_NAMES.map((roomName) => {
+                    const selected = selectedGuideRoom === roomName;
+                    return (
+                      <button
+                        key={roomName}
+                        type="button"
+                        onClick={() => setSelectedGuideRoom(roomName)}
+                        className={cn(
+                          "rounded-lg border px-2 py-2.5 text-xs font-black transition",
+                          selected && roomName === "머무룸1" && "border-sky-400 bg-sky-50 text-sky-700 ring-2 ring-sky-100",
+                          selected && roomName === "머무룸2" && "border-violet-400 bg-violet-50 text-violet-700 ring-2 ring-violet-100",
+                          selected && roomName === "머무룸3" && "border-orange-400 bg-orange-50 text-orange-700 ring-2 ring-orange-100",
+                          !selected && "border-slate-200 bg-white text-slate-500 hover:border-slate-300",
+                        )}
+                      >
+                        {roomName}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <textarea
+                  value={selectedGuideTemplate.content}
+                  onChange={(event) => updateTemplateContent(selectedGuideTemplate.roomName, event.target.value)}
+                  className="mt-3 h-96 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-800 outline-hidden transition focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                  spellCheck={false}
+                />
+                <p className="mt-2 text-xs font-semibold text-slate-400">
+                  이 내용이 실제 문자 본문으로 그대로 발송됩니다.
+                </p>
+              </div>
+            )}
           </section>
 
           <section className="space-y-3">
