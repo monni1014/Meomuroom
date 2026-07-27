@@ -5,6 +5,10 @@ import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-aler
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { getKstDateKey, getKstDateParts } from "@/lib/kst-time";
 import { getSituationMessageTemplates } from "@/lib/situation-message-templates";
+import {
+  buildSiteVisitMessageContent,
+  hasAnySiteVisitMessageContent,
+} from "@/lib/site-visit-message-content";
 import { lookupReservationReminderDelivery, sendReservationSituationMessage } from "@/lib/solapi-sms";
 
 const SITUATION_TYPE = "SITE_VISIT_GUIDE";
@@ -137,13 +141,14 @@ export async function sendDueSiteVisitGuides(now = new Date()) {
   const pipelineStartedAt = Date.now();
   const recovery = await recoverInterruptedMessages(now);
   const template = (await getSituationMessageTemplates()).find((item) => item.key === SITUATION_TYPE);
-  if (!template?.content.trim()) {
+  if (!template || !hasAnySiteVisitMessageContent(template.roomContents, template.content)) {
     return {
       success: true,
       checkedCount: 0,
       sentCount: 0,
       dryRunCount: 0,
       waitingContactCount: 0,
+      waitingTemplateCount: 0,
       failedCount: 0,
       ...recovery,
       pipelineMs: Date.now() - pipelineStartedAt,
@@ -174,11 +179,26 @@ export async function sendDueSiteVisitGuides(now = new Date()) {
   let sentCount = 0;
   let dryRunCount = 0;
   let waitingContactCount = 0;
+  let waitingTemplateCount = 0;
   let failedCount = 0;
 
   for (const schedule of schedules) {
     const dedupeKey = siteVisitMessageDedupeKey(schedule.id);
     if (existingDedupeKeys.has(dedupeKey)) continue;
+
+    const messageContent = buildSiteVisitMessageContent({
+      roomName: schedule.roomName,
+      roomContents: template.roomContents,
+      legacyContent: template.content,
+    });
+    if (messageContent.missingRooms.length > 0 || !messageContent.content) {
+      waitingTemplateCount += 1;
+      await recordFailure(
+        schedule,
+        `${messageContent.missingRooms.join(" · ") || schedule.roomName} 사전답사 안내 문구가 비어 있습니다.`,
+      );
+      continue;
+    }
 
     const phone = normalizeKoreanPhone(schedule.contactPhone);
     if (!isValidKoreanMobilePhone(phone)) {
@@ -197,7 +217,7 @@ export async function sendDueSiteVisitGuides(now = new Date()) {
           senderNumber: "",
           recipientNumber: phone,
           customerPhone: phone,
-          body: template.content,
+          body: messageContent.content,
           providerMessageId: `${ATTEMPT_PREFIX}${attemptId}`,
           dedupeKey,
           reservationId: null,
@@ -216,7 +236,7 @@ export async function sendDueSiteVisitGuides(now = new Date()) {
       situationType: SITUATION_TYPE,
       phone: schedule.contactPhone,
       subject: template.subject,
-      text: template.content,
+      text: messageContent.content,
     });
     await prisma.customerMessage.update({
       where: { dedupeKey },
@@ -248,6 +268,7 @@ export async function sendDueSiteVisitGuides(now = new Date()) {
     sentCount,
     dryRunCount,
     waitingContactCount,
+    waitingTemplateCount,
     failedCount,
     ...recovery,
     pipelineMs: Date.now() - pipelineStartedAt,

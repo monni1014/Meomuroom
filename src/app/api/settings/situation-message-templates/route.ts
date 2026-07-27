@@ -26,12 +26,15 @@ export async function PATCH(request: NextRequest) {
     const key = typeof body.key === "string" ? body.key : "";
     const subject = typeof body.subject === "string" ? body.subject : "";
     const content = typeof body.content === "string" ? body.content : "";
+    const roomContents = body.roomContents && typeof body.roomContents === "object" && !Array.isArray(body.roomContents)
+      ? body.roomContents
+      : null;
 
     if (!isSituationMessageTemplateKey(key)) {
       return NextResponse.json({ success: false, error: "올바른 상황별 템플릿을 선택해주세요." }, { status: 400 });
     }
 
-    const template = await updateSituationMessageTemplate(key, subject, content);
+    const template = await updateSituationMessageTemplate(key, subject, content, roomContents);
     return NextResponse.json({ success: true, template });
   } catch (error) {
     console.error("Situation message templates PATCH error:", error);

@@ -32,6 +32,7 @@ import type { ProxyPaymentCurrency, ProxyPaymentRecord } from "@/lib/proxy-payme
 import type { GooglePeopleStatus } from "@/lib/google-people";
 import type { ServerStatusSnapshot } from "@/lib/server-status-types";
 import { solapiSenderDisplayName, solapiSenderDisplayOrder } from "@/lib/solapi-sender-display";
+import { CLEANING_ROOM_NAMES, type CleaningRoomName } from "@/lib/cleaning-schedule";
 
 type MessageTemplateState = {
   id: string;
@@ -48,6 +49,7 @@ type SituationMessageTemplateState = {
   automationDescription: string;
   subject: string;
   content: string;
+  roomContents: Record<CleaningRoomName, string> | null;
   updatedAt: string | null;
 };
 
@@ -402,6 +404,7 @@ export default function SettingsView({
   const [situationTemplates, setSituationTemplates] = useState<SituationMessageTemplateState[]>(
     initialSituationMessageTemplates,
   );
+  const [selectedSiteVisitRoom, setSelectedSiteVisitRoom] = useState<CleaningRoomName>("머무룸1");
   const [googlePeopleStatus, setGooglePeopleStatus] = useState<GooglePeopleStatus>(initialGooglePeopleStatus);
   const [serverStatus, setServerStatus] = useState<ServerStatusSnapshot | null>(null);
   const [showRamDetails, setShowRamDetails] = useState(false);
@@ -646,9 +649,24 @@ export default function SettingsView({
   const updateSituationTemplateContent = (
     key: SituationMessageTemplateState["key"],
     value: string,
+    roomName?: CleaningRoomName,
   ) => {
     setSituationTemplates((current) =>
-      current.map((template) => template.key === key ? { ...template, content: value } : template),
+      current.map((template) => {
+        if (template.key !== key) return template;
+        if (key !== "SITE_VISIT_GUIDE" || !roomName) return { ...template, content: value };
+
+        const roomContents = template.roomContents || {
+          머무룸1: template.content,
+          머무룸2: template.content,
+          머무룸3: template.content,
+        };
+        return {
+          ...template,
+          content: roomName === "머무룸1" ? value : template.content,
+          roomContents: { ...roomContents, [roomName]: value },
+        };
+      }),
     );
   };
 
@@ -663,6 +681,7 @@ export default function SettingsView({
           key: template.key,
           subject: "",
           content: template.content,
+          roomContents: template.key === "SITE_VISIT_GUIDE" ? template.roomContents : undefined,
         }),
       });
       const data = await response.json() as {
@@ -1123,20 +1142,62 @@ export default function SettingsView({
                     </button>
                   </div>
 
-                  <label className="mt-5 block">
-                    <span className="text-xs font-black text-slate-600">문자 본문</span>
-                    <textarea
-                      value={template.content}
-                      onChange={(event) => updateSituationTemplateContent(template.key, event.target.value)}
-                      placeholder="보낼 내용을 입력해주세요."
-                      className="mt-2 h-56 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-800 outline-hidden transition placeholder:text-slate-300 focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100"
-                      spellCheck={false}
-                    />
-                  </label>
+                  {template.key === "SITE_VISIT_GUIDE" ? (
+                    <div className="mt-5">
+                      <span className="text-xs font-black text-slate-600">공간별 문자 본문</span>
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        {CLEANING_ROOM_NAMES.map((roomName) => {
+                          const selected = selectedSiteVisitRoom === roomName;
+                          return (
+                            <button
+                              key={roomName}
+                              type="button"
+                              onClick={() => setSelectedSiteVisitRoom(roomName)}
+                              className={cn(
+                                "rounded-lg border px-2 py-2.5 text-xs font-black transition",
+                                selected && roomName === "머무룸1" && "border-sky-400 bg-sky-50 text-sky-700 ring-2 ring-sky-100",
+                                selected && roomName === "머무룸2" && "border-violet-400 bg-violet-50 text-violet-700 ring-2 ring-violet-100",
+                                selected && roomName === "머무룸3" && "border-orange-400 bg-orange-50 text-orange-700 ring-2 ring-orange-100",
+                                !selected && "border-slate-200 bg-white text-slate-500 hover:border-slate-300",
+                              )}
+                            >
+                              {roomName}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <textarea
+                        value={template.roomContents?.[selectedSiteVisitRoom] ?? template.content}
+                        onChange={(event) => updateSituationTemplateContent(
+                          template.key,
+                          event.target.value,
+                          selectedSiteVisitRoom,
+                        )}
+                        placeholder={`${selectedSiteVisitRoom} 사전답사 안내 내용을 입력해주세요.`}
+                        className="mt-3 h-56 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-800 outline-hidden transition placeholder:text-slate-300 focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                        spellCheck={false}
+                      />
+                    </div>
+                  ) : (
+                    <label className="mt-5 block">
+                      <span className="text-xs font-black text-slate-600">문자 본문</span>
+                      <textarea
+                        value={template.content}
+                        onChange={(event) => updateSituationTemplateContent(template.key, event.target.value)}
+                        placeholder="보낼 내용을 입력해주세요."
+                        className="mt-2 h-56 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-800 outline-hidden transition placeholder:text-slate-300 focus:border-indigo-300 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                        spellCheck={false}
+                      />
+                    </label>
+                  )}
 
                   <div className="mt-2 flex items-center justify-between gap-3 text-xs font-semibold text-slate-400">
                     <span>최근 수정 {formatDateTime(template.updatedAt)}</span>
-                    <span>본문 {template.content.length.toLocaleString()}자</span>
+                    <span>
+                      본문 {(template.key === "SITE_VISIT_GUIDE"
+                        ? (template.roomContents?.[selectedSiteVisitRoom] ?? template.content).length
+                        : template.content.length).toLocaleString()}자
+                    </span>
                   </div>
                 </div>
               ))}

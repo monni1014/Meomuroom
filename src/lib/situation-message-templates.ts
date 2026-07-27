@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { CLEANING_ROOM_NAMES, type CleaningRoomName } from "@/lib/cleaning-schedule";
 
 export const SITUATION_MESSAGE_TEMPLATE_DEFINITIONS = [
   {
@@ -37,12 +38,16 @@ export type SituationMessageTemplate = {
   automationDescription: string;
   subject: string;
   content: string;
+  roomContents: SiteVisitRoomContents | null;
   updatedAt: Date | null;
 };
+
+export type SiteVisitRoomContents = Record<CleaningRoomName, string>;
 
 type StoredSituationMessageTemplate = {
   subject?: unknown;
   content?: unknown;
+  roomContents?: unknown;
 };
 
 const SETTING_PREFIX = "messageTemplate.situation.";
@@ -57,17 +62,43 @@ export function isSituationMessageTemplateKey(
   return SITUATION_MESSAGE_TEMPLATE_DEFINITIONS.some((definition) => definition.key === value);
 }
 
-function parseStoredTemplate(value: string | undefined) {
-  if (!value) return { subject: "", content: "" };
+function siteVisitRoomContents(value: unknown, fallbackContent = ""): SiteVisitRoomContents {
+  const stored = value && typeof value === "object"
+    ? value as Record<string, unknown>
+    : {};
+
+  return {
+    머무룸1: typeof stored.머무룸1 === "string" ? stored.머무룸1 : fallbackContent,
+    머무룸2: typeof stored.머무룸2 === "string" ? stored.머무룸2 : fallbackContent,
+    머무룸3: typeof stored.머무룸3 === "string" ? stored.머무룸3 : fallbackContent,
+  };
+}
+
+function parseStoredTemplate(key: SituationMessageTemplateKey, value: string | undefined) {
+  if (!value) {
+    return {
+      subject: "",
+      content: "",
+      roomContents: key === "SITE_VISIT_GUIDE" ? siteVisitRoomContents(null) : null,
+    };
+  }
 
   try {
     const parsed = JSON.parse(value) as StoredSituationMessageTemplate;
+    const content = typeof parsed.content === "string" ? parsed.content : "";
     return {
       subject: typeof parsed.subject === "string" ? parsed.subject : "",
-      content: typeof parsed.content === "string" ? parsed.content : "",
+      content,
+      roomContents: key === "SITE_VISIT_GUIDE"
+        ? siteVisitRoomContents(parsed.roomContents, content)
+        : null,
     };
   } catch {
-    return { subject: "", content: "" };
+    return {
+      subject: "",
+      content: "",
+      roomContents: key === "SITE_VISIT_GUIDE" ? siteVisitRoomContents(null) : null,
+    };
   }
 }
 
@@ -80,7 +111,7 @@ export async function getSituationMessageTemplates(): Promise<SituationMessageTe
 
   return SITUATION_MESSAGE_TEMPLATE_DEFINITIONS.map((definition) => {
     const setting = settingsByKey.get(settingKey(definition.key));
-    const stored = parseStoredTemplate(setting?.value);
+    const stored = parseStoredTemplate(definition.key, setting?.value);
     return {
       ...definition,
       ...stored,
@@ -93,22 +124,41 @@ export async function updateSituationMessageTemplate(
   key: SituationMessageTemplateKey,
   subject: string,
   content: string,
+  roomContents?: Partial<Record<CleaningRoomName, string>> | null,
 ): Promise<SituationMessageTemplate> {
   const definition = SITUATION_MESSAGE_TEMPLATE_DEFINITIONS.find((item) => item.key === key);
   if (!definition) throw new Error(`Unknown situation message template: ${key}`);
+
+  const normalizedRoomContents = key === "SITE_VISIT_GUIDE"
+    ? siteVisitRoomContents(roomContents, content)
+    : null;
+  const normalizedContent = key === "SITE_VISIT_GUIDE"
+    ? normalizedRoomContents?.머무룸1 || ""
+    : content.trim();
+  const storedValue = {
+    subject: subject.trim(),
+    content: normalizedContent,
+    ...(normalizedRoomContents
+      ? {
+          roomContents: Object.fromEntries(
+            CLEANING_ROOM_NAMES.map((roomName) => [roomName, normalizedRoomContents[roomName].trim()]),
+          ),
+        }
+      : {}),
+  };
 
   const stored = await prisma.appSetting.upsert({
     where: { key: settingKey(key) },
     create: {
       key: settingKey(key),
-      value: JSON.stringify({ subject: subject.trim(), content: content.trim() }),
+      value: JSON.stringify(storedValue),
     },
     update: {
-      value: JSON.stringify({ subject: subject.trim(), content: content.trim() }),
+      value: JSON.stringify(storedValue),
     },
     select: { value: true, updatedAt: true },
   });
-  const template = parseStoredTemplate(stored.value);
+  const template = parseStoredTemplate(key, stored.value);
 
   return {
     ...definition,
