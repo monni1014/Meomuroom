@@ -22,6 +22,7 @@
     "test:competitor-cancellations": "node --experimental-strip-types scripts/test-competitor-cancellations.mjs",
     "test:competitor-booking-discovery": "node --experimental-strip-types scripts/test-competitor-booking-discovery.mjs",
     "test:competitor-booking-push": "node --experimental-strip-types scripts/test-competitor-booking-push.mjs",
+    "test:spacecloud-booking-push": "node --experimental-strip-types scripts/test-spacecloud-booking-push.mjs",
     "test:naver-rpa-performance": "node scripts/test-naver-rpa-performance.mjs",
     "test:naver-booking-row": "node scripts/test-naver-booking-row.mjs",
     "test:naver-cancellation-times": "node --experimental-strip-types scripts/test-naver-cancellation-times.mjs",

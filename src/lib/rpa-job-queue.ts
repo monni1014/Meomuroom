@@ -7,6 +7,7 @@ import {
 import { markEmailProcessed } from "./processed-email";
 import { markRpaJobCheckRequired } from "./rpa-reservation-state";
 import { processSpaceCloudEmailWithRpa } from "./spacecloud-rpa-sync";
+import { sendSpaceCloudBookingPush } from "./spacecloud-booking-push";
 import {
   CANCELLATION_MAX_QUEUE_WAIT_MS,
   MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION,
@@ -324,6 +325,12 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
           result = await processNaverEmailWithRpa(job);
         } else {
           result = await processSpaceCloudEmailWithRpa(job);
+        }
+        if (job.source === "spacecloud" && !isCancellationJob(job) && result?.reservationId) {
+          const push = await sendSpaceCloudBookingPush(result.reservationId);
+          console.log(
+            `[RPAQueue] SpaceCloud booking push: reservation=${result.reservationId}, skipped=${push.skipped}, sent=${push.sent}, failed=${push.failed}, reason=${push.reason || "-"}, apple-excluded=true`,
+          );
         }
         await markEmailProcessed(job.messageId, job.source, result?.reservationId);
         for (const supersededJob of job.supersededConfirmationJobs ?? []) {
