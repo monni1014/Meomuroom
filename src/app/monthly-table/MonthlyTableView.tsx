@@ -25,6 +25,7 @@ import {
   reconcileDirtyKey,
 } from "@/lib/manual-table-colors";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
+import { shouldDisplayReservationInMonthlyTable } from "@/lib/monthly-table-reservations";
 
 interface UsageLog {
   id: string;
@@ -577,6 +578,7 @@ export default function MonthlyTableView() {
           {visibleRooms.map((room) => {
             const roomReservations = reservations
               .filter((reservation) => reservation.roomName === room)
+              .filter(shouldDisplayReservationInMonthlyTable)
               .filter((reservation) => isSameMonth(new Date(reservation.startTime), currentDate));
             const monthHours = roomReservations
               .filter(countsAsTime)

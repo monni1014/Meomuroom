@@ -17,6 +17,7 @@
     "test:end-reminder": "node --experimental-strip-types scripts/test-reservation-end-reminders.mjs",
     "test:manual-reservation-push": "node --experimental-strip-types scripts/test-manual-reservation-push.mjs",
     "test:extra-people-push": "node --experimental-strip-types scripts/test-extra-people-push.mjs",
+    "test:monthly-table-cancellations": "node --experimental-strip-types scripts/test-monthly-table-cancellations.mjs",
     "test:customer-message-display": "node --experimental-strip-types scripts/test-customer-message-display.mjs",
     "test:rpa-queue": "node --experimental-strip-types scripts/test-rpa-job-priority.mjs",
     "test:competitor-ranges": "node --experimental-strip-types scripts/test-competitor-scan-ranges.mjs",
