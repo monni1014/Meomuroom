@@ -14,6 +14,7 @@ import { buildSynergyBookingPushes } from "@/lib/competitor-booking-push-policy"
 import { competitorCancellationFeeRate } from "@/lib/competitor-cancellation";
 import { prisma } from "@/lib/prisma";
 import { sendPushNotification } from "@/lib/push-notifications";
+import { getRpaProxyCircuitState, isRpaPausedForProxy } from "@/lib/rpa-proxy-circuit";
 
 const execFileAsync = promisify(execFile);
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
@@ -73,6 +74,7 @@ export type CompetitorScanResult = {
   startKey?: string;
   endKey?: string;
   errors?: ScannerResult["errors"];
+  reason?: string;
 };
 
 function kstDateKey(date = new Date()) {
@@ -958,6 +960,15 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
 }
 
 export function runCompetitorScan(options: RunOptions): Promise<CompetitorScanResult> {
+  if (isRpaPausedForProxy()) {
+    const circuit = getRpaProxyCircuitState();
+    return Promise.resolve({
+      skipped: true,
+      status: "PROXY_PAUSED",
+      reason: circuit.reason,
+    });
+  }
+
   const globalState = globalThis as MonitorGlobal;
   if (globalState.__competitorScanPromise) return globalState.__competitorScanPromise;
 

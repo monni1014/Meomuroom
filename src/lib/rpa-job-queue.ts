@@ -9,6 +9,10 @@ import { markRpaJobCheckRequired } from "./rpa-reservation-state";
 import { processSpaceCloudEmailWithRpa } from "./spacecloud-rpa-sync";
 import { sendSpaceCloudBookingPush } from "./spacecloud-booking-push";
 import {
+  getRpaProxyCircuitState,
+  isRpaPausedForProxy,
+} from "./rpa-proxy-circuit";
+import {
   CANCELLATION_MAX_QUEUE_WAIT_MS,
   MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION,
   cancellationQueueWaitMs,
@@ -40,9 +44,12 @@ type RpaQueueState = {
   runningSources: Set<RpaEmailJob["source"]>;
   currentJobs: Partial<Record<RpaEmailJob["source"], RpaEmailJob>>;
   slotRecheckRunning: boolean;
+  slotRecheckPending: boolean;
   lastSlotRecheckAt: number;
   naverStatusReconcileRunning: boolean;
+  naverStatusReconcilePending: boolean;
   lastNaverStatusReconcileAt: number;
+  proxyPauseLogged: boolean;
   confirmationRunsWhileCancellationWaiting: Record<RpaEmailJob["source"], number>;
 };
 
@@ -218,14 +225,20 @@ function getState() {
     runningSources: new Set<RpaEmailJob["source"]>(),
     currentJobs: {},
     slotRecheckRunning: false,
+    slotRecheckPending: false,
     lastSlotRecheckAt: 0,
     naverStatusReconcileRunning: false,
+    naverStatusReconcilePending: false,
     lastNaverStatusReconcileAt: 0,
+    proxyPauseLogged: false,
     confirmationRunsWhileCancellationWaiting: { naver: 0, spacecloud: 0 },
   };
   const state = g.__memoroomRpaQueue;
   state.runningSources ??= new Set<RpaEmailJob["source"]>();
   state.currentJobs ??= {};
+  state.slotRecheckPending ??= false;
+  state.naverStatusReconcilePending ??= false;
+  state.proxyPauseLogged ??= false;
   state.confirmationRunsWhileCancellationWaiting ??= { naver: 0, spacecloud: 0 };
   return state;
 }
@@ -297,6 +310,18 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
   state.runningSources.add(source);
   try {
     while (true) {
+      if (isRpaPausedForProxy()) {
+        if (!state.proxyPauseLogged) {
+          const circuit = getRpaProxyCircuitState();
+          console.warn(
+            `[RPAQueue] Proxy circuit ${circuit.mode}. Keep queued RPA jobs waiting: ${circuit.reason}`,
+          );
+          state.proxyPauseLogged = true;
+        }
+        break;
+      }
+      state.proxyPauseLogged = false;
+
       const now = Date.now();
       const firstSourceJobIndex = state.queue.findIndex((queuedJob) => queuedJob.source === source);
       const confirmationRunCount = state.confirmationRunsWhileCancellationWaiting[source];
@@ -317,6 +342,7 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
         );
       }
       state.currentJobs[source] = job;
+      let deferredForProxy = false;
 
       try {
         console.log(`[RPAQueue] Start ${job.source} job: ${job.messageId}`);
@@ -348,6 +374,15 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
         console.log(`[RPAQueue] Done ${job.source} job: ${job.messageId}`);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
+        if (isRpaPausedForProxy() || reason.includes("[RPA_PROXY_PAUSED]")) {
+          pushJobByPriority(state, job);
+          deferredForProxy = true;
+          console.warn(
+            `[RPAQueue] Proxy became unavailable. Returned job to waiting queue without counting a failure: ${job.messageId}`,
+          );
+          continue;
+        }
+
         const failureCount = (state.failureCounts.get(job.messageId) || 0) + 1;
         state.failureCounts.set(job.messageId, failureCount);
 
@@ -375,7 +410,7 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
           );
         }
       } finally {
-        state.activeIds.delete(job.messageId);
+        if (!deferredForProxy) state.activeIds.delete(job.messageId);
         delete state.currentJobs[source];
 
         if (isCancellationJob(job)) {
@@ -392,14 +427,16 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
   }
 }
 
-export function enqueueRpaSlotRecheck() {
-  const state = getState();
-  const now = Date.now();
+function startSlotRecheck(state: RpaQueueState) {
   if (state.slotRecheckRunning) return false;
-  if (now - state.lastSlotRecheckAt < SLOT_RECHECK_COOLDOWN_MS) return false;
+  if (isRpaPausedForProxy()) {
+    state.slotRecheckPending = true;
+    return true;
+  }
 
+  state.slotRecheckPending = false;
   state.slotRecheckRunning = true;
-  state.lastSlotRecheckAt = now;
+  state.lastSlotRecheckAt = Date.now();
   void (async () => {
     try {
       const result = await recheckNaverSlotRpaIssues(1);
@@ -407,24 +444,33 @@ export function enqueueRpaSlotRecheck() {
         console.log(`[RPAQueue] Slot recheck done: checked ${result.checked}, resolved ${result.resolved}`);
       }
     } catch (error) {
+      if (isRpaPausedForProxy()) state.slotRecheckPending = true;
       console.error("[RPAQueue] Slot recheck failed:", error);
     } finally {
       state.slotRecheckRunning = false;
     }
   })();
-
   return true;
 }
 
-export function enqueueNaverStatusReconcile() {
+export function enqueueRpaSlotRecheck() {
   const state = getState();
   const now = Date.now();
-  const cooldownMs = 12 * 60 * 60 * 1000;
-  if (state.naverStatusReconcileRunning) return false;
-  if (now - state.lastNaverStatusReconcileAt < cooldownMs) return false;
+  if (state.slotRecheckRunning || state.slotRecheckPending) return false;
+  if (now - state.lastSlotRecheckAt < SLOT_RECHECK_COOLDOWN_MS) return false;
+  return startSlotRecheck(state);
+}
 
+function startNaverStatusReconcile(state: RpaQueueState) {
+  if (state.naverStatusReconcileRunning) return false;
+  if (isRpaPausedForProxy()) {
+    state.naverStatusReconcilePending = true;
+    return true;
+  }
+
+  state.naverStatusReconcilePending = false;
   state.naverStatusReconcileRunning = true;
-  state.lastNaverStatusReconcileAt = now;
+  state.lastNaverStatusReconcileAt = Date.now();
   void (async () => {
     try {
       const result = await reconcileNaverReservationsWithoutCancelEmail(10);
@@ -434,12 +480,33 @@ export function enqueueNaverStatusReconcile() {
         );
       }
     } catch (error) {
+      if (isRpaPausedForProxy()) state.naverStatusReconcilePending = true;
       console.error("[RPAQueue] Naver status reconcile failed:", error);
     } finally {
       state.naverStatusReconcileRunning = false;
     }
   })();
+  return true;
+}
 
+export function enqueueNaverStatusReconcile() {
+  const state = getState();
+  const now = Date.now();
+  const cooldownMs = 12 * 60 * 60 * 1000;
+  if (state.naverStatusReconcileRunning || state.naverStatusReconcilePending) return false;
+  if (now - state.lastNaverStatusReconcileAt < cooldownMs) return false;
+  return startNaverStatusReconcile(state);
+}
+
+export function resumeRpaWorkAfterProxyRecovery() {
+  const state = getState();
+  if (isRpaPausedForProxy()) return false;
+
+  state.proxyPauseLogged = false;
+  const queuedSources = new Set(state.queue.map((job) => job.source));
+  for (const source of queuedSources) void drainRpaEmailQueue(source);
+  if (state.slotRecheckPending) startSlotRecheck(state);
+  if (state.naverStatusReconcilePending) startNaverStatusReconcile(state);
   return true;
 }
 
@@ -469,7 +536,10 @@ export function getRpaQueueStatus() {
       spacecloud: state.runningSources.has("spacecloud"),
     },
     slotRecheckRunning: state.slotRecheckRunning,
+    slotRecheckPending: state.slotRecheckPending,
     naverStatusReconcileRunning: state.naverStatusReconcileRunning,
+    naverStatusReconcilePending: state.naverStatusReconcilePending,
+    proxyCircuit: getRpaProxyCircuitState(),
     oldestCancellationWaitMs,
     cancellationMaxWaitMs: CANCELLATION_MAX_QUEUE_WAIT_MS,
     maxConfirmationRunsBeforeCancellation: MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION,

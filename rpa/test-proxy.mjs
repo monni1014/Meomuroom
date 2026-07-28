@@ -55,7 +55,11 @@ async function main() {
   console.log(`Proxy endpoint: ${proxy.protocol}://${proxy.host}:${proxy.port}`);
   console.log(`Headless: ${headless ? "yes" : "no"}`);
 
-  const browser = await launchRpaBrowser({ headless, forceProxy: true });
+  const browser = await launchRpaBrowser({
+    headless,
+    forceProxy: true,
+    allowProxyCircuitOpen: true,
+  });
 
   try {
     const context = await newRpaContext(browser, {

@@ -13,6 +13,7 @@ const PROXYSELLER_API_BASE = "https://proxy-seller.com/personal/api/v1";
 const IP_CHECK_URL = "https://ipinfo.io/json";
 const CACHE_MS = 5 * 60 * 1000;
 const ALERT_TYPE = "ISP_PROXY_STATUS";
+const OUTAGE_ALERT_REPEAT_MS = 30 * 60 * 1000;
 
 type ProxySellerItem = Record<string, unknown>;
 
@@ -385,7 +386,7 @@ export async function checkProxySellerStatusAndAlert() {
 
   await createAdminAlert({
     type: ALERT_TYPE,
-    severity: status.severity === "ERROR" ? "CRITICAL" : "WARNING",
+    severity: status.severity === "WARNING" ? "WARNING" : "CRITICAL",
     title: status.summary,
     message: status.error || (
       status.daysRemaining === null
@@ -393,6 +394,9 @@ export async function checkProxySellerStatusAndAlert() {
         : `ISP 프록시가 ${status.daysRemaining}일 후 만료됩니다.`
     ),
     dedupeKey: `isp-proxy-${status.severity.toLowerCase()}`,
+    repeatAfterMs: status.severity === "ERROR" || status.severity === "NOT_CONFIGURED"
+      ? OUTAGE_ALERT_REPEAT_MS
+      : undefined,
   });
 
   return status;

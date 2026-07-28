@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { classifyRpaFailure } from "@/lib/rpa-failure-classifier";
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "@/lib/rpa-ui-alerts";
+import { getRpaProxyCircuitState, isRpaPausedForProxy } from "@/lib/rpa-proxy-circuit";
 
 const execFileAsync = promisify(execFile);
 
@@ -93,6 +94,14 @@ async function executeHealthScript(platform: RpaHealthPlatform) {
 }
 
 export async function runRpaUiHealthChecks() {
+  if (isRpaPausedForProxy()) {
+    return {
+      skipped: true,
+      reason: `proxy-paused: ${getRpaProxyCircuitState().reason}`,
+      results: [],
+    };
+  }
+
   const g = globalThis as RpaUiMonitorGlobal;
   if (g.__memoroomRpaUiMonitorRunning) {
     return { skipped: true, reason: "already-running", results: [] };

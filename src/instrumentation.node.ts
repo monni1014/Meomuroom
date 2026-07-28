@@ -14,8 +14,13 @@ export async function registerNodeInstrumentation() {
 
   const { schedule } = await import("node-cron");
   const { syncEmails } = await import("@/lib/email-sync");
-  const { enqueueNaverStatusReconcile } = await import("@/lib/rpa-job-queue");
+  const { enqueueNaverStatusReconcile, resumeRpaWorkAfterProxyRecovery } = await import("@/lib/rpa-job-queue");
   const { checkProxySellerStatusAndAlert } = await import("@/lib/proxy-seller");
+  const {
+    initializeRpaProxyCircuitCheck,
+    isRpaPausedForProxy,
+    updateRpaProxyCircuit,
+  } = await import("@/lib/rpa-proxy-circuit");
   const { sendDueReservationReminders } = await import("@/lib/reservation-notifications");
   const { sendDueDawnBookingConfirmations } = await import("@/lib/dawn-booking-notifications");
   const { sendDueSiteVisitGuides } = await import("@/lib/site-visit-notifications");
@@ -40,6 +45,14 @@ export async function registerNodeInstrumentation() {
   let rpaUiHealthRunning = false;
   let tailscaleDeviceMonitorRunning = false;
   let rpaSessionExpiryRunning = false;
+  const pendingCompetitorScans: Array<{
+    label: string;
+    mode: "today" | "today-next" | "today-plus-seven" | "night-month-horizon" | "next-week" | "daily" | "weekly" | "monthly";
+    skipIfRecentMinutes?: number;
+  }> = [];
+  let rpaUiHealthPending = false;
+
+  initializeRpaProxyCircuitCheck();
 
   async function runEmailSync(label: string) {
     if (running) {
@@ -72,7 +85,15 @@ export async function registerNodeInstrumentation() {
     proxyStatusRunning = true;
     try {
       const result = await checkProxySellerStatusAndAlert();
+      const circuit = updateRpaProxyCircuit(result);
       console.log(`[Cron] ISP proxy status check done (${label}): ${result.summary}`);
+      if (circuit.transition === "PAUSED") {
+        console.warn(`[Cron] Proxy circuit opened. RPA work is paused; email sync remains active: ${circuit.state.reason}`);
+      } else if (circuit.transition === "RESUMED") {
+        console.log("[Cron] Proxy circuit recovered. Resuming queued RPA work.");
+        resumeRpaWorkAfterProxyRecovery();
+        void resumeProxyPausedCronWork();
+      }
     } catch (error) {
       console.error(`[Cron] ISP proxy status check failed (${label}):`, error);
     } finally {
@@ -177,6 +198,15 @@ export async function registerNodeInstrumentation() {
     mode: "today" | "today-next" | "today-plus-seven" | "night-month-horizon" | "next-week" | "daily" | "weekly" | "monthly",
     skipIfRecentMinutes?: number,
   ) {
+    if (isRpaPausedForProxy()) {
+      const exists = pendingCompetitorScans.some((item) => (
+        item.mode === mode && item.skipIfRecentMinutes === skipIfRecentMinutes
+      ));
+      if (!exists) pendingCompetitorScans.push({ label, mode, skipIfRecentMinutes });
+      console.warn(`[Cron] Competitor scan held until proxy recovery (${label}).`);
+      return;
+    }
+
     if (competitorScanRunning) {
       console.log(`[Cron] Previous competitor scan is still running. Skipping ${label}.`);
       return;
@@ -196,6 +226,12 @@ export async function registerNodeInstrumentation() {
   }
 
   async function runRpaUiHealthMonitor(label: string) {
+    if (isRpaPausedForProxy()) {
+      rpaUiHealthPending = true;
+      console.warn(`[Cron] RPA UI health check held until proxy recovery (${label}).`);
+      return;
+    }
+
     if (rpaUiHealthRunning) {
       console.log(`[Cron] Previous RPA UI health check is still running. Skipping ${label}.`);
       return;
@@ -253,13 +289,31 @@ export async function registerNodeInstrumentation() {
     }
   }
 
-  setTimeout(() => {
-    void runEmailSync("startup");
-  }, 0);
+  async function resumeProxyPausedCronWork() {
+    if (isRpaPausedForProxy()) return;
+
+    const scans = pendingCompetitorScans.splice(0);
+    for (const scan of scans) {
+      await runCompetitorMonitor(
+        `${scan.label} (proxy recovery)`,
+        scan.mode,
+        scan.skipIfRecentMinutes,
+      );
+    }
+
+    if (rpaUiHealthPending) {
+      rpaUiHealthPending = false;
+      await runRpaUiHealthMonitor("proxy recovery");
+    }
+  }
 
   setTimeout(() => {
     void runProxyStatusCheck("startup");
-  }, 10_000);
+  }, 0);
+
+  setTimeout(() => {
+    void runEmailSync("startup");
+  }, 250);
 
   setTimeout(() => {
     void runReservationEndReminders("startup recovery");

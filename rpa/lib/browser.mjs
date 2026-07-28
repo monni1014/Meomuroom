@@ -255,8 +255,9 @@ export async function launchRpaBrowser({
   forceProxy = false,
   reuse = false,
   sharedBrowserRole,
+  allowProxyCircuitOpen = false,
 } = {}) {
-  assertRpaExecutionAllowed();
+  assertRpaExecutionAllowed({ allowProxyCircuitOpen });
 
   if (reuse) {
     const role = normalizeSharedBrowserRole(sharedBrowserRole);

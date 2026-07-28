@@ -1,5 +1,8 @@
 import "dotenv/config";
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 const ENABLED_VALUES = new Set(["1", "true", "yes", "on"]);
 
 export function isRpaExecutionAllowed() {
@@ -8,11 +11,42 @@ export function isRpaExecutionAllowed() {
   );
 }
 
-export function assertRpaExecutionAllowed() {
-  if (isRpaExecutionAllowed()) return;
+function proxyCircuitIsRequired() {
+  return String(process.env.RPA_USE_PROXY || "").trim().toLowerCase() === "true"
+    && String(process.env.RPA_PROXY_DIRECT_FALLBACK || "").trim().toLowerCase() !== "true";
+}
+
+function readProxyCircuitState() {
+  if (!proxyCircuitIsRequired()) return { mode: "READY", reason: "proxy-not-required" };
+
+  const path = resolve(
+    process.env.RPA_PROXY_CIRCUIT_STATE_PATH || "rpa/.runtime/proxy-circuit.json",
+  );
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    return {
+      mode: typeof value.mode === "string" ? value.mode : "CHECKING",
+      reason: typeof value.reason === "string" ? value.reason : "프록시 상태 확인 전",
+    };
+  } catch {
+    return { mode: "CHECKING", reason: "프록시 상태 확인 전" };
+  }
+}
+
+export function assertRpaExecutionAllowed({ allowProxyCircuitOpen = false } = {}) {
+  if (!isRpaExecutionAllowed()) {
+    throw new Error(
+      "RPA execution is disabled on this host. Memoroom RPA may run only on the authorized Linux server.",
+    );
+  }
+
+  if (allowProxyCircuitOpen) return;
+
+  const circuit = readProxyCircuitState();
+  if (circuit.mode === "READY") return;
 
   throw new Error(
-    "RPA execution is disabled on this host. Memoroom RPA may run only on the authorized Linux server.",
+    `[RPA_PROXY_PAUSED] Proxy circuit is ${circuit.mode}: ${circuit.reason}`,
   );
 }
 

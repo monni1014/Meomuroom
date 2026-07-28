@@ -32,6 +32,12 @@ Set `RPA_USE_PROXY="false"` to run every RPA job through the machine's current I
 Keep `RPA_PROXY_DIRECT_FALLBACK="false"` on a cloud server so a proxy outage stops
 the job instead of silently exposing the data-center IP.
 
+The server verifies the proxy every five minutes. A confirmed proxy failure opens
+the RPA circuit: email collection and database ingestion continue, but booking,
+slot, UI-health, and competitor RPA stay queued. The queue resumes automatically
+after a verified recovery. The initial outage alert is repeated every 30 minutes
+until recovery, and proxy diagnostics can still be run with `npm run rpa:test-proxy`.
+
 Run:
 
 ```bash

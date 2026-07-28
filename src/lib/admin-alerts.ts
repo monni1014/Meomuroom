@@ -8,6 +8,7 @@ export interface AdminAlertInput {
   title: string;
   message: string;
   dedupeKey?: string;
+  repeatAfterMs?: number;
 }
 
 async function sendWebhookAlert(input: AdminAlertInput) {
@@ -57,7 +58,13 @@ export async function createAdminAlert(input: AdminAlertInput) {
       where: { dedupeKey: input.dedupeKey },
     });
 
-    if (existing && !existing.resolved) return existing;
+    if (existing && !existing.resolved) {
+      const repeatAfterMs = input.repeatAfterMs;
+      const shouldRepeat = typeof repeatAfterMs === "number"
+        && repeatAfterMs > 0
+        && Date.now() - existing.updatedAt.getTime() >= repeatAfterMs;
+      if (!shouldRepeat) return existing;
+    }
   }
 
   const alert = input.dedupeKey
