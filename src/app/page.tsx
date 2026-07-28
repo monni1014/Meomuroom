@@ -9,6 +9,7 @@ import WeekFilter from "@/components/WeekFilter";
 import MonthFilter from "@/components/MonthFilter";
 import DismissibleAdminAlerts from "@/components/DismissibleAdminAlerts";
 import { addKstMonths, createKstDate, getKstDateParts, getKstDayRange, startOfKstMonth } from "@/lib/kst-time";
+import { MobileAppLaunchRedirect } from "@/components/MobileAppLaunchRedirect";
 
 export const dynamic = "force-dynamic";
 
@@ -249,6 +250,7 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 pb-20 md:p-8">
+      <MobileAppLaunchRedirect />
       <AutoRefresh />
       <header className="flex items-start justify-between gap-3 pb-4 pt-8 sm:items-center">
         <div className="min-w-0 flex-1">

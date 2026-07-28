@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { ProxyStatusIndicator } from "@/components/ProxyStatusIndicator";
 
 const NAV_ITEMS = [
-  { name: "대시보드", href: "/", icon: Home, mobileHidden: false },
+  { name: "대시보드", href: "/?view=dashboard", activePath: "/", icon: Home, mobileHidden: false },
   { name: "캘린더", href: "/calendar", icon: Calendar, mobileHidden: false },
   { name: "이용현황", href: "/usage", icon: ClipboardList, mobileHidden: false },
   { name: "문자 현황", href: "/messages", icon: MessageSquareText, mobileHidden: false },
@@ -33,7 +33,7 @@ export function SideNav() {
     >
       {/* 로고 헤더 — 데스크톱 사이드바에서만 표시 */}
       <Link
-        href="/"
+        href="/?view=dashboard"
         aria-label="머무룸 대시보드로 이동"
         className="hidden md:flex items-center h-16 px-6 border-b border-slate-100 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
       >
@@ -52,7 +52,7 @@ export function SideNav() {
 
       <div className="flex-1 flex flex-row md:flex-col justify-around md:justify-start md:py-6 md:px-3 md:gap-2">
         {NAV_ITEMS.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = pathname === ("activePath" in item ? item.activePath : item.href);
           return (
             <Link
               key={item.href}
