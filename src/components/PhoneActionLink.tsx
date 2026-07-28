@@ -166,7 +166,7 @@ export default function PhoneActionLink({
 
       {isOpen && (
         <div
-          className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/40 p-3 sm:items-center"
+          className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-900/30 p-3 dark:bg-slate-950/55 sm:items-center"
           onClick={(event) => {
             event.stopPropagation();
             closeMenu();
@@ -177,18 +177,18 @@ export default function PhoneActionLink({
             role="dialog"
             aria-modal="true"
             aria-label={`${displayName} 연락 방법 선택`}
-            className="relative z-10 w-full max-w-sm overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 text-white shadow-2xl"
+            className="relative z-10 w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-white"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-start justify-between border-b border-white/10 px-5 py-4">
+            <div className="flex items-start justify-between border-b border-slate-200 px-5 py-4 dark:border-white/10">
               <div className="min-w-0">
                 <strong className="block truncate text-base">{displayName}</strong>
-                <span className="mt-0.5 block text-sm text-emerald-400">{phone}</span>
+                <span className="mt-0.5 block text-sm text-emerald-600 dark:text-emerald-400">{phone}</span>
               </div>
               <button
                 type="button"
                 onClick={closeMenu}
-                className="rounded-full p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-white/10 dark:hover:text-white"
                 aria-label="연락 메뉴 닫기"
               >
                 <X className="h-5 w-5" />
@@ -198,11 +198,11 @@ export default function PhoneActionLink({
             <a
               href={`tel:${digits}`}
               onClick={closeMenu}
-              className="flex items-center justify-between border-b border-white/10 px-5 py-4 transition hover:bg-white/5 active:bg-white/10"
+              className="flex items-center justify-between border-b border-slate-200 px-5 py-4 transition hover:bg-slate-50 active:bg-slate-100 dark:border-white/10 dark:hover:bg-white/5 dark:active:bg-white/10"
             >
               <span>
                 <strong className="block text-sm">통화하기</strong>
-                <span className="text-xs text-slate-400">전화 앱 열기</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">전화 앱 열기</span>
               </span>
               <Phone className="h-5 w-5" />
             </a>
@@ -210,11 +210,11 @@ export default function PhoneActionLink({
             <a
               href={`sms:${digits}`}
               onClick={closeMenu}
-              className="flex items-center justify-between border-b border-white/10 px-5 py-4 transition hover:bg-white/5 active:bg-white/10"
+              className="flex items-center justify-between border-b border-slate-200 px-5 py-4 transition hover:bg-slate-50 active:bg-slate-100 dark:border-white/10 dark:hover:bg-white/5 dark:active:bg-white/10"
             >
               <span>
                 <strong className="block text-sm">메시지 보내기</strong>
-                <span className="text-xs text-slate-400">기본 문자 앱 열기</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">기본 문자 앱 열기</span>
               </span>
               <MessageSquareText className="h-5 w-5" />
             </a>
@@ -223,11 +223,11 @@ export default function PhoneActionLink({
               href={contactFileHref}
               download={`${displayName.replace(/[\\/:*?"<>|]/g, "_")}.vcf`}
               onClick={closeMenu}
-              className="flex items-center justify-between border-b border-white/10 px-5 py-4 transition hover:bg-white/5 active:bg-white/10"
+              className="flex items-center justify-between border-b border-slate-200 px-5 py-4 transition hover:bg-slate-50 active:bg-slate-100 dark:border-white/10 dark:hover:bg-white/5 dark:active:bg-white/10"
             >
               <span>
                 <strong className="block text-sm">연락처에 추가</strong>
-                <span className="text-xs text-slate-400">이름과 번호 저장</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">이름과 번호 저장</span>
               </span>
               <UserPlus className="h-5 w-5" />
             </a>
@@ -235,13 +235,13 @@ export default function PhoneActionLink({
             <button
               type="button"
               onClick={handleCopy}
-              className="flex w-full items-center justify-between px-5 py-4 text-left transition hover:bg-white/5 active:bg-white/10"
+              className="flex w-full items-center justify-between px-5 py-4 text-left transition hover:bg-slate-50 active:bg-slate-100 dark:hover:bg-white/5 dark:active:bg-white/10"
             >
               <span>
                 <strong className="block text-sm">{copied ? "복사 완료" : "번호 복사"}</strong>
-                <span className="text-xs text-slate-400">{copied ? "클립보드에 저장했습니다." : phone}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{copied ? "클립보드에 저장했습니다." : phone}</span>
               </span>
-              {copied ? <Check className="h-5 w-5 text-emerald-400" /> : <Copy className="h-5 w-5" />}
+              {copied ? <Check className="h-5 w-5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="h-5 w-5" />}
             </button>
           </section>
         </div>
