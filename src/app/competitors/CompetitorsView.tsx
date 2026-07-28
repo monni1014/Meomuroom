@@ -67,9 +67,11 @@ interface UnreadEventSnapshot {
   eventIds: string[];
   competitorId: string;
   dateKey: string;
-  eventType: "BOOKED" | "CANCELLED";
+  eventType: "BOOKED" | "CANCELLED" | "RESCHEDULED";
   startHour: number;
   endHour: number;
+  previousStartHour: number | null;
+  previousEndHour: number | null;
   occurredAt: string;
 }
 
@@ -416,6 +418,7 @@ export default function CompetitorsView({
   const unreadEvents = snapshots.unreadEvents || [];
   const unreadBookings = unreadEvents.filter((event) => event.eventType === "BOOKED");
   const unreadCancellations = unreadEvents.filter((event) => event.eventType === "CANCELLED");
+  const unreadReschedules = unreadEvents.filter((event) => event.eventType === "RESCHEDULED");
   const evidence = snapshots.evidence || [];
   const layoutStyle = {
     "--competitor-header-top": competitorFilter === "all" ? "0px" : `${controlsHeight + 8}px`,
@@ -842,6 +845,16 @@ export default function CompetitorsView({
                 신규 취소 {unreadCancellations.length}건
               </button>
             )}
+            {unreadReschedules.length > 0 && (
+              <button
+                type="button"
+                title="가장 먼저 확인하지 않은 시간 변경으로 이동"
+                onClick={() => moveToUnreadEvent(unreadReschedules[0])}
+                className="rounded-full bg-amber-500 px-2 py-1 text-slate-950"
+              >
+                시간 변경 {unreadReschedules.length}건
+              </button>
+            )}
           </div>
           <button
             type="button"
@@ -1185,8 +1198,10 @@ export default function CompetitorsView({
                                 {unreadEvent && (
                                   <button
                                     type="button"
-                                    title={`${unreadEvent.eventType === "BOOKED" ? "신규 예약" : "신규 취소"} · 눌러서 확인`}
-                                    aria-label={`${competitor.displayName} ${format(day, "MM월 dd일")} 신규 ${unreadEvent.eventType === "BOOKED" ? "예약" : "취소"} 확인`}
+                                    title={unreadEvent.eventType === "RESCHEDULED"
+                                      ? `시간 변경 추정 ${unreadEvent.previousStartHour}~${unreadEvent.previousEndHour}시 → ${unreadEvent.startHour}~${unreadEvent.endHour}시 · 눌러서 확인`
+                                      : `${unreadEvent.eventType === "BOOKED" ? "신규 예약" : "신규 취소"} · 눌러서 확인`}
+                                    aria-label={`${competitor.displayName} ${format(day, "MM월 dd일")} ${unreadEvent.eventType === "RESCHEDULED" ? "시간 변경" : `신규 ${unreadEvent.eventType === "BOOKED" ? "예약" : "취소"}`} 확인`}
                                     disabled={isAcknowledging}
                                     onMouseDown={(event) => {
                                       event.preventDefault();
@@ -1198,10 +1213,14 @@ export default function CompetitorsView({
                                     }}
                                     className={cn(
                                       "absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[9px] font-black leading-none text-white shadow-sm disabled:opacity-60",
-                                      unreadEvent.eventType === "BOOKED" ? "bg-emerald-600" : "bg-rose-600",
+                                      unreadEvent.eventType === "BOOKED"
+                                        ? "bg-emerald-600"
+                                        : unreadEvent.eventType === "CANCELLED"
+                                          ? "bg-rose-600"
+                                          : "bg-amber-500 text-slate-950",
                                     )}
                                   >
-                                    신규
+                                    {unreadEvent.eventType === "RESCHEDULED" ? "변경" : "신규"}
                                   </button>
                                 )}
                                 {showFirstDetectedMemo && (

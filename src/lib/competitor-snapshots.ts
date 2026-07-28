@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { shouldDisplayZeroFeeCancellationAsNew } from "@/lib/competitor-cancellation";
+import { detectSynergyOneHourReschedules } from "@/lib/competitor-booking-push-policy";
 
 const COMPETITOR_IDS = ["synergy", "triground-a", "triground-b"] as const;
 
@@ -34,20 +35,24 @@ type SlotEvent = {
   acknowledgedAt: Date | null;
 };
 
+type GroupedSlotEvent = {
+  id: string;
+  eventIds: string[];
+  scanId: string;
+  competitorId: string;
+  dateKey: string;
+  eventType: "BOOKED" | "CANCELLED" | "RESCHEDULED";
+  startHour: number;
+  endHour: number;
+  previousStartHour?: number;
+  previousEndHour?: number;
+  feeRate: number | null;
+  occurredAt: string;
+  acknowledged: boolean;
+};
+
 function groupSlotEvents(events: SlotEvent[]) {
-  const groups: Array<{
-    id: string;
-    eventIds: string[];
-    scanId: string;
-    competitorId: string;
-    dateKey: string;
-    eventType: string;
-    startHour: number;
-    endHour: number;
-    feeRate: number | null;
-    occurredAt: string;
-    acknowledged: boolean;
-  }> = [];
+  const groups: GroupedSlotEvent[] = [];
 
   for (const event of events) {
     const previous = groups.at(-1);
@@ -71,7 +76,7 @@ function groupSlotEvents(events: SlotEvent[]) {
       scanId: event.scanId,
       competitorId: event.competitorId,
       dateKey: event.dateKey,
-      eventType: event.eventType === "CANCELLED" ? "CANCELLED" as const : "BOOKED" as const,
+      eventType: event.eventType === "CANCELLED" ? "CANCELLED" : "BOOKED",
       startHour: event.hour,
       endHour: event.hour + 1,
       feeRate: event.cancellationFeeRate,
@@ -263,7 +268,42 @@ export async function getCompetitorSnapshots(year: number, month: number) {
   }
 
   const groupedEvents = groupSlotEvents(slotEvents);
-  const unreadGroups = groupedEvents.filter((event) => !event.acknowledged);
+  const rescheduleMatches = detectSynergyOneHourReschedules(groupedEvents.map((event) => ({
+    key: event.id,
+    scanId: event.scanId,
+    competitorId: event.competitorId,
+    dateKey: event.dateKey,
+    eventType: event.eventType === "CANCELLED" ? "CANCELLED" : "BOOKED",
+    startHour: event.startHour,
+    endHour: event.endHour,
+  })));
+  const matchedGroupIds = new Set(rescheduleMatches.flatMap((match) => [match.bookedKey, match.cancelledKey]));
+  const groupById = new Map(groupedEvents.map((event) => [event.id, event]));
+  const rescheduleEvents: GroupedSlotEvent[] = rescheduleMatches.flatMap((match) => {
+    const booking = groupById.get(match.bookedKey);
+    const cancellation = groupById.get(match.cancelledKey);
+    if (!booking || !cancellation) return [];
+    return [{
+      id: booking.id,
+      eventIds: [...booking.eventIds, ...cancellation.eventIds],
+      scanId: match.scanId,
+      competitorId: match.competitorId,
+      dateKey: match.dateKey,
+      eventType: "RESCHEDULED",
+      startHour: match.newStartHour,
+      endHour: match.newEndHour,
+      previousStartHour: match.oldStartHour,
+      previousEndHour: match.oldEndHour,
+      feeRate: null,
+      occurredAt: booking.occurredAt > cancellation.occurredAt ? booking.occurredAt : cancellation.occurredAt,
+      acknowledged: booking.acknowledged && cancellation.acknowledged,
+    }];
+  });
+  const displayEvents = [
+    ...groupedEvents.filter((event) => !matchedGroupIds.has(event.id)),
+    ...rescheduleEvents,
+  ].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  const unreadGroups = displayEvents.filter((event) => !event.acknowledged);
   const supersededBookingIds = new Set<string>();
   const unreadEvents = unreadGroups.map((event) => {
     if (event.eventType !== "CANCELLED") return event;
@@ -295,7 +335,7 @@ export async function getCompetitorSnapshots(year: number, month: number) {
 
   return {
     days,
-    cancellations: groupedEvents.filter((event) => (
+    cancellations: displayEvents.filter((event) => (
       event.eventType === "CANCELLED"
       && event.dateKey >= startKey
       && event.dateKey <= endKey
@@ -312,9 +352,11 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       eventIds: event.eventIds,
       competitorId: event.competitorId,
       dateKey: event.dateKey,
-      eventType: event.eventType === "CANCELLED" ? "CANCELLED" as const : "BOOKED" as const,
+      eventType: event.eventType,
       startHour: event.startHour,
       endHour: event.endHour,
+      previousStartHour: event.previousStartHour ?? null,
+      previousEndHour: event.previousEndHour ?? null,
       occurredAt: event.occurredAt,
     })),
     evidence: evidence.map((item) => ({

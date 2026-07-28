@@ -794,9 +794,10 @@ async function sendSynergyBookingDiscoveryPushes(scanId: string) {
     where: {
       scanId,
       competitorId: "synergy",
-      eventType: "BOOKED",
+      eventType: { in: ["BOOKED", "CANCELLED"] },
     },
     select: {
+      scanId: true,
       competitorId: true,
       dateKey: true,
       hour: true,
