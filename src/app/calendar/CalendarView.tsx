@@ -13,6 +13,7 @@ import RpaStatusBadge from "@/components/RpaStatusBadge";
 import { createKstDate, getKstDateParts } from "@/lib/kst-time";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 import { patchReservationWithNotificationConfirmation } from "@/lib/reservation-notification-resend-client";
+import { getReviewProgressStage, type ReviewProgressStage } from "@/lib/review-event-policy";
 import {
   buildContactSuggestions,
   findContactSuggestions,
@@ -59,7 +60,11 @@ interface Reservation {
   complaints: string | null;
   isCleanUpBad: boolean;
   visitorReviewRequested: boolean;
+  visitorReviewCompleted: boolean;
+  visitorReviewRefunded: boolean;
   blogReviewRequested: boolean;
+  blogReviewCompleted: boolean;
+  blogReviewRefunded: boolean;
   emailId: string | null; // null = 수기 입력 (메일 자동연동 아님)
   usageLog: UsageLog | null;
 }
@@ -195,6 +200,16 @@ function getCleaningRoomTextStyle(roomName: string) {
 
 function getPaymentMethodDisplay(paymentMethod: string) {
   return paymentMethod === "현장카드" ? "카드" : paymentMethod;
+}
+
+function getReviewBadgePresentation(stage: Exclude<ReviewProgressStage, null>) {
+  if (stage === "REFUNDED") {
+    return { className: "text-emerald-600", label: "리뷰 환급 완료" };
+  }
+  if (stage === "COMPLETED") {
+    return { className: "text-red-600", label: "리뷰 작성 완료" };
+  }
+  return { className: "text-slate-900", label: "리뷰 이벤트 신청" };
 }
 
 function ContactSuggestionMenu({
@@ -1218,8 +1233,8 @@ export default function CalendarPage() {
               const hasUnpaidExtra = !isCancelled
                 && (res.usageLog?.extraPrice ?? 0) > 0
                 && !res.usageLog?.isExtraPaid;
-              const hasReviewRequest = !isCancelled
-                && (res.visitorReviewRequested || res.blogReviewRequested);
+              const reviewStage = !isCancelled ? getReviewProgressStage(res) : null;
+              const reviewBadge = reviewStage ? getReviewBadgePresentation(reviewStage) : null;
 
               return (
                 <div
@@ -1261,11 +1276,11 @@ export default function CalendarPage() {
                           <strong className={cn("block min-w-0 truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
                             {res.customerName ?? "이름 미확인"}
                           </strong>
-                          {hasReviewRequest && (
+                          {reviewBadge && (
                             <MessageSquareText
                               data-testid="calendar-review-badge"
-                              className="absolute -right-0.5 -top-1 h-2.5 w-2.5 text-slate-700"
-                              aria-label="리뷰 이벤트 신청"
+                              className={cn("absolute -right-0.5 -top-1 h-2.5 w-2.5", reviewBadge.className)}
+                              aria-label={reviewBadge.label}
                             />
                           )}
                         </span>
@@ -1345,11 +1360,11 @@ export default function CalendarPage() {
                         <strong className={cn("text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
                           {res.customerName}
                         </strong>
-                        {hasReviewRequest && (
+                        {reviewBadge && (
                           <MessageSquareText
                             data-testid="calendar-review-badge"
-                            className="absolute -right-0.5 -top-1 h-2.5 w-2.5 text-slate-700"
-                            aria-label="리뷰 이벤트 신청"
+                            className={cn("absolute -right-0.5 -top-1 h-2.5 w-2.5", reviewBadge.className)}
+                            aria-label={reviewBadge.label}
                           />
                         )}
                       </span>

@@ -22,3 +22,12 @@ export function validateReviewProgress(progress: ReviewProgress) {
 export function calculateReviewRefund(progress: Pick<ReviewProgress, "visitorReviewRefunded" | "blogReviewRefunded">) {
   return (progress.visitorReviewRefunded ? 3000 : 0) + (progress.blogReviewRefunded ? 5000 : 0);
 }
+
+export type ReviewProgressStage = "REQUESTED" | "COMPLETED" | "REFUNDED" | null;
+
+export function getReviewProgressStage(progress: ReviewProgress): ReviewProgressStage {
+  if (progress.visitorReviewRefunded || progress.blogReviewRefunded) return "REFUNDED";
+  if (progress.visitorReviewCompleted || progress.blogReviewCompleted) return "COMPLETED";
+  if (progress.visitorReviewRequested || progress.blogReviewRequested) return "REQUESTED";
+  return null;
+}
