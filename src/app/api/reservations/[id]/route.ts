@@ -5,7 +5,11 @@ import { reservationNotificationEditPolicy } from "@/lib/reservation-notificatio
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { shouldLockManuallyEditedPhone } from "@/lib/reservation-phone-lock";
 import { shouldLockManuallyEditedTime } from "@/lib/reservation-time-lock";
-import { validateReviewProgress } from "@/lib/review-event-policy";
+import { hasNewlyCompletedReview, validateReviewProgress } from "@/lib/review-event-policy";
+import {
+  getReviewRefundAccountMessageReadiness,
+  sendReviewRefundAccountRequest,
+} from "@/lib/review-refund-account-notifications";
 
 const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
 
@@ -73,6 +77,28 @@ export async function PATCH(
         error: reviewProgressError,
         code: "INVALID_REVIEW_PROGRESS",
       }, { status: 400 });
+    }
+
+    const shouldSendReviewRefundAccountRequest = hasNewlyCompletedReview(
+      {
+        visitorReviewCompleted: existing.visitorReviewCompleted,
+        blogReviewCompleted: existing.blogReviewCompleted,
+      },
+      {
+        visitorReviewCompleted: nextVisitorReviewCompleted,
+        blogReviewCompleted: nextBlogReviewCompleted,
+      },
+    );
+    if (shouldSendReviewRefundAccountRequest) {
+      const readiness = await getReviewRefundAccountMessageReadiness(
+        typeof phone === "string" ? phone : existing.phone,
+      );
+      if (!readiness.ready) {
+        return NextResponse.json({
+          error: readiness.error,
+          code: "REVIEW_REFUND_ACCOUNT_MESSAGE_NOT_READY",
+        }, { status: 400 });
+      }
     }
 
     if (nextBlogReviewRefunded && !existing.blogReviewRefunded) {
@@ -248,7 +274,11 @@ export async function PATCH(
       });
     }
 
-    return NextResponse.json(updated);
+    const reviewRefundAccountMessage = shouldSendReviewRefundAccountRequest
+      ? await sendReviewRefundAccountRequest(updated.id)
+      : null;
+
+    return NextResponse.json({ ...updated, reviewRefundAccountMessage });
   } catch (error) {
     console.error("PATCH reservation error:", error);
     return NextResponse.json({ error: "Failed to update reservation" }, { status: 500 });

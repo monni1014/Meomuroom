@@ -38,7 +38,7 @@ type DeliveryEntry = {
   resultAt: string | null;
   providerMessageId: string | null;
   isTest: boolean;
-  messageType: "GUIDE" | "DAWN_BOOKING" | "ON_TIME_EXIT" | "SITE_VISIT" | "UNPAID" | "SITUATION";
+  messageType: "GUIDE" | "DAWN_BOOKING" | "ON_TIME_EXIT" | "SITE_VISIT" | "UNPAID" | "REVIEW_REFUND_ACCOUNT" | "SITUATION";
   messageLabel: string;
   onTimeExitAction?: {
     eligible: boolean;
@@ -113,6 +113,8 @@ function messageTypeBadgeStyle(messageType: DeliveryEntry["messageType"]) {
       return "bg-indigo-50 text-indigo-700 ring-indigo-200";
     case "SITE_VISIT":
       return "bg-sky-50 text-sky-700 ring-sky-200";
+    case "REVIEW_REFUND_ACCOUNT":
+      return "bg-rose-50 text-rose-700 ring-rose-200";
     case "UNPAID":
       return "bg-rose-50 text-rose-700 ring-rose-200";
     case "SITUATION":

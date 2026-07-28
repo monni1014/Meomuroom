@@ -43,7 +43,7 @@ type MessageTemplateState = {
 };
 
 type SituationMessageTemplateState = {
-  key: "DAWN_BOOKING_CONFIRMATION" | "UNPAID_RESERVATION" | "ON_TIME_EXIT_REMINDER" | "SITE_VISIT_GUIDE";
+  key: "DAWN_BOOKING_CONFIRMATION" | "UNPAID_RESERVATION" | "ON_TIME_EXIT_REMINDER" | "SITE_VISIT_GUIDE" | "REVIEW_REFUND_ACCOUNT_REQUEST";
   name: string;
   triggerDescription: string;
   automationDescription: string;
@@ -1124,6 +1124,8 @@ export default function SettingsView({
                               ? "bg-emerald-50 text-emerald-600"
                               : template.key === "SITE_VISIT_GUIDE"
                                 ? "bg-sky-50 text-sky-600"
+                                : template.key === "REVIEW_REFUND_ACCOUNT_REQUEST"
+                                  ? "bg-rose-50 text-rose-600"
                               : "bg-amber-50 text-amber-600",
                         )}>
                           {template.key === "DAWN_BOOKING_CONFIRMATION" ? (
@@ -1132,6 +1134,8 @@ export default function SettingsView({
                             <Clock3 className="h-4 w-4" />
                           ) : template.key === "SITE_VISIT_GUIDE" ? (
                             <Binoculars className="h-4 w-4" />
+                          ) : template.key === "REVIEW_REFUND_ACCOUNT_REQUEST" ? (
+                            <WalletCards className="h-4 w-4" />
                           ) : (
                             <CircleDollarSign className="h-4 w-4" />
                           )}

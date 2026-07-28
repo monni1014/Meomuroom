@@ -491,9 +491,28 @@ export default function UsagePage() {
       );
 
       if (response.ok) {
+        const responseBody = await response.json().catch(() => null) as {
+          reviewRefundAccountMessage?: {
+            success?: boolean;
+            dryRun?: boolean;
+            alreadyProcessed?: boolean;
+            error?: string;
+          } | null;
+        } | null;
+        const reviewMessage = responseBody?.reviewRefundAccountMessage;
         setSuccessMsg("이용 기록이 안전하게 저장되었습니다.");
         setTimeout(() => setSuccessMsg(""), 3000);
-        alert("저장되었습니다.");
+        if (reviewMessage?.success && !reviewMessage.alreadyProcessed && !reviewMessage.dryRun) {
+          alert("저장되었습니다. 리뷰 환급 계좌 요청 문자도 발송했습니다.");
+        } else if (reviewMessage?.success && reviewMessage.dryRun) {
+          alert("저장되었습니다. 리뷰 환급 계좌 요청 문자는 테스트 상태로 기록했습니다.");
+        } else if (reviewMessage?.alreadyProcessed) {
+          alert("저장되었습니다. 이 예약의 리뷰 환급 계좌 요청 문자는 이미 처리되어 다시 보내지 않았습니다.");
+        } else if (reviewMessage && !reviewMessage.success) {
+          alert(`리뷰 작성 상태는 저장했지만 계좌 요청 문자를 보내지 못했습니다.\n${reviewMessage.error || "문자현황을 확인해 주세요."}`);
+        } else {
+          alert("저장되었습니다.");
+        }
         // Refresh (선택 유지)
         fetchReservations(selectedResId);
         

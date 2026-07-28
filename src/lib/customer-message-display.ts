@@ -1,4 +1,4 @@
-export type CustomerMessageDisplayType = "GUIDE" | "DAWN_BOOKING" | "ON_TIME_EXIT" | "SITE_VISIT" | "UNPAID" | "SITUATION";
+export type CustomerMessageDisplayType = "GUIDE" | "DAWN_BOOKING" | "ON_TIME_EXIT" | "SITE_VISIT" | "UNPAID" | "REVIEW_REFUND_ACCOUNT" | "SITUATION";
 
 export type CustomerMessageDisplay = {
   type: CustomerMessageDisplayType;
@@ -17,6 +17,9 @@ export function customerMessageDisplay(dedupeKey: string): CustomerMessageDispla
   }
   if (dedupeKey.startsWith("situation:unpaid:")) {
     return { type: "UNPAID", label: "미정산 안내" };
+  }
+  if (dedupeKey.startsWith("situation:review-refund-account:")) {
+    return { type: "REVIEW_REFUND_ACCOUNT", label: "리뷰 계좌 요청" };
   }
   if (dedupeKey.startsWith("situation:")) {
     return { type: "SITUATION", label: "상황별 안내" };

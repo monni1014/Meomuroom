@@ -31,3 +31,12 @@ export function getReviewProgressStage(progress: ReviewProgress): ReviewProgress
   if (progress.visitorReviewRequested || progress.blogReviewRequested) return "REQUESTED";
   return null;
 }
+
+export function hasNewlyCompletedReview(
+  previous: Pick<ReviewProgress, "visitorReviewCompleted" | "blogReviewCompleted">,
+  next: Pick<ReviewProgress, "visitorReviewCompleted" | "blogReviewCompleted">,
+) {
+  const previouslyCompleted = previous.visitorReviewCompleted || previous.blogReviewCompleted;
+  const nowCompleted = next.visitorReviewCompleted || next.blogReviewCompleted;
+  return !previouslyCompleted && nowCompleted;
+}

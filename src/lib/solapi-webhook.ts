@@ -4,6 +4,7 @@ import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-aler
 import { mapSolapiDeliveryStatus, type SolapiDeliveryStatus } from "@/lib/solapi-delivery-status";
 import { reservationTestMessageDedupeKey } from "@/lib/customer-messages";
 import { buildReservationNotificationFailureAlert } from "@/lib/reservation-notification-failure-alert";
+import { reviewRefundAccountAlertDedupeKey } from "@/lib/review-refund-account-notifications";
 import { siteVisitScheduleIdFromDedupeKey } from "@/lib/site-visit-notifications";
 
 type SolapiReport = {
@@ -151,10 +152,13 @@ export async function processSolapiReport(report: SolapiReport) {
 
   const isDawnConfirmation = message.dedupeKey.startsWith("situation:dawn-booking:");
   const isOnTimeExit = message.dedupeKey.startsWith("situation:on-time-exit:");
+  const isReviewRefundAccount = message.dedupeKey.startsWith("situation:review-refund-account:");
   const alertKey = isDawnConfirmation
     ? `dawn-booking-notification:${reservation.id}`
     : isOnTimeExit
       ? `on-time-exit-notification:${reservation.id}`
+      : isReviewRefundAccount
+        ? reviewRefundAccountAlertDedupeKey(reservation.id)
       : notificationAlertKey(reservation.id);
 
   if (status === "DELIVERED") {
@@ -175,12 +179,16 @@ export async function processSolapiReport(report: SolapiReport) {
           ? "DAWN_BOOKING_NOTIFICATION_FAILED"
           : isOnTimeExit
             ? "ON_TIME_EXIT_NOTIFICATION_FAILED"
+            : isReviewRefundAccount
+              ? "REVIEW_REFUND_ACCOUNT_NOTIFICATION_FAILED"
             : "NOTIFICATION_DELIVERY",
         severity: "CRITICAL",
         title: isDawnConfirmation
           ? "새벽 예약 확인 문자 수신 실패"
           : isOnTimeExit
             ? "정시퇴실 문자 수신 실패"
+            : isReviewRefundAccount
+              ? "리뷰 계좌 요청 문자 수신 실패"
             : failureAlert.title,
         message: failureAlert.message,
         dedupeKey: alertKey,

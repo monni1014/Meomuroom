@@ -1,5 +1,5 @@
 import { parseNaverReviewRequests } from "../src/lib/email-parser.ts";
-import { calculateReviewRefund, getReviewProgressStage, validateReviewProgress } from "../src/lib/review-event-policy.ts";
+import { calculateReviewRefund, getReviewProgressStage, hasNewlyCompletedReview, validateReviewProgress } from "../src/lib/review-event-policy.ts";
 
 function assertEqual(label, actual, expected) {
   if (actual !== expected) {
@@ -94,6 +94,31 @@ assertEqual(
     visitorReviewRefunded: true,
   }),
   "REFUNDED",
+);
+
+assertEqual(
+  "first completed review triggers account request",
+  hasNewlyCompletedReview(
+    { visitorReviewCompleted: false, blogReviewCompleted: false },
+    { visitorReviewCompleted: true, blogReviewCompleted: false },
+  ),
+  true,
+);
+assertEqual(
+  "unchanged completed review does not trigger",
+  hasNewlyCompletedReview(
+    { visitorReviewCompleted: true, blogReviewCompleted: false },
+    { visitorReviewCompleted: true, blogReviewCompleted: false },
+  ),
+  false,
+);
+assertEqual(
+  "later second review completion does not trigger another account request",
+  hasNewlyCompletedReview(
+    { visitorReviewCompleted: true, blogReviewCompleted: false },
+    { visitorReviewCompleted: true, blogReviewCompleted: true },
+  ),
+  false,
 );
 
 console.log("Review event tracking tests passed.");
