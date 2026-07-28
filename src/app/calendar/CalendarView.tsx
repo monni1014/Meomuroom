@@ -1383,17 +1383,17 @@ export default function CalendarPage() {
                           추가금 {res.usageLog.extraPaymentMethod ? `(${res.usageLog.extraPaymentMethod})` : ""}{!res.usageLog.isExtraPaid && " 미결제★"}
                         </span>
                       )}
+                      {res.timeLocked && (
+                        <span className="whitespace-nowrap rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 ring-1 ring-orange-200">
+                          수동시간 고정
+                        </span>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 gap-2 text-xs text-slate-500 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-1">
-                      <p className="flex min-w-0 items-center gap-1.5">
+                      <p className="flex min-w-0 items-center gap-1">
                         <Clock className="h-3.5 w-3.5 shrink-0" />
-                        <span className="whitespace-nowrap">{formatTime(start)} - {displayEndTime} ({formatDuration(start, end)})</span>
-                        {res.timeLocked && (
-                          <span className="shrink-0 whitespace-nowrap rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 ring-1 ring-orange-200">
-                            수동시간 고정
-                          </span>
-                        )}
+                        <span>{formatTime(start)} - {displayEndTime} ({formatDuration(start, end)})</span>
                       </p>
                       <p className="flex min-w-0 items-start gap-1">
                         <User className="mt-0.5 h-3.5 w-3.5 shrink-0" />
