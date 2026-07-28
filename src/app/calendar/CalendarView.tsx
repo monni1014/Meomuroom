@@ -2061,11 +2061,21 @@ export default function CalendarPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500">시작 시간</label>
-                  <TimeSelect value={cleaningStartTime} onChange={setCleaningStartTime} maxHour={23} />
+                  <TimeSelect
+                    value={cleaningStartTime}
+                    onChange={setCleaningStartTime}
+                    maxHour={23}
+                    minuteStep={calendarScheduleType === "SITE_VISIT" ? 10 : 30}
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500">종료 시간</label>
-                  <TimeSelect value={cleaningEndTime} onChange={setCleaningEndTime} maxHour={24} />
+                  <TimeSelect
+                    value={cleaningEndTime}
+                    onChange={setCleaningEndTime}
+                    maxHour={24}
+                    minuteStep={calendarScheduleType === "SITE_VISIT" ? 10 : 30}
+                  />
                 </div>
               </div>
 
