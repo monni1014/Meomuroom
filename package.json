@@ -26,6 +26,7 @@
     "test:review-events": "node --experimental-strip-types scripts/test-review-event-tracking.mjs",
     "test:calendar-schedules": "node --experimental-strip-types scripts/test-calendar-schedule-validation.mjs",
     "test:site-visit-messages": "node --experimental-strip-types scripts/test-site-visit-message-content.mjs",
+    "test:contact-suggestions": "node --experimental-strip-types scripts/test-contact-suggestions.mjs",
     "backfill:july-reviews": "node --experimental-strip-types scripts/backfill-july-review-requests.mjs",
     "test:naver-rpa-performance": "node scripts/test-naver-rpa-performance.mjs",
     "test:naver-booking-row": "node scripts/test-naver-booking-row.mjs",

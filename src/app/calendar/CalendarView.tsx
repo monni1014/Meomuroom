@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star, SprayCan, MessageSquareText, Binoculars } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
@@ -13,6 +13,11 @@ import RpaStatusBadge from "@/components/RpaStatusBadge";
 import { createKstDate, getKstDateParts } from "@/lib/kst-time";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 import { patchReservationWithNotificationConfirmation } from "@/lib/reservation-notification-resend-client";
+import {
+  buildContactSuggestions,
+  findContactSuggestions,
+  type ContactSuggestion,
+} from "@/lib/contact-suggestions";
 
 interface UsageLog {
   id: string;
@@ -192,6 +197,57 @@ function getPaymentMethodDisplay(paymentMethod: string) {
   return paymentMethod === "현장카드" ? "카드" : paymentMethod;
 }
 
+function ContactSuggestionMenu({
+  suggestions,
+  onSelect,
+  accent,
+}: {
+  suggestions: ContactSuggestion[];
+  onSelect: (suggestion: ContactSuggestion) => void;
+  accent: "indigo" | "sky" | "teal";
+}) {
+  if (suggestions.length === 0) return null;
+
+  const hoverStyle = accent === "sky"
+    ? "hover:bg-sky-50"
+    : accent === "teal"
+      ? "hover:bg-teal-50"
+      : "hover:bg-indigo-50";
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" role="listbox" aria-label="저장된 연락처 추천">
+      <div className="border-b border-slate-100 px-3 py-2 text-[11px] font-bold text-slate-400">
+        저장된 연락처
+      </div>
+      {suggestions.map((suggestion) => (
+        <button
+          key={`${suggestion.name}-${suggestion.phone}`}
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => onSelect(suggestion)}
+          className={cn(
+            "flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2.5 text-left transition last:border-b-0",
+            hoverStyle,
+          )}
+          role="option"
+          aria-selected={false}
+          aria-label={`${suggestion.name} ${suggestion.phone}`}
+        >
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-bold text-slate-800">{suggestion.name}</span>
+            {suggestion.contexts.length > 0 && (
+              <span className="block truncate text-[11px] text-slate-400">
+                {suggestion.contexts.slice(0, 3).join(" · ")}
+              </span>
+            )}
+          </span>
+          <span className="shrink-0 text-sm font-semibold text-slate-600">{suggestion.phone}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function CalendarPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -237,6 +293,7 @@ export default function CalendarPage() {
   const [formDetail, setFormDetail] = useState(""); // 세부내용
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showMultiPicker, setShowMultiPicker] = useState(false);
+  const [isReservationContactMenuOpen, setIsReservationContactMenuOpen] = useState(false);
 
   const [cleaningEditId, setCleaningEditId] = useState<string | null>(null);
   const [calendarScheduleType, setCalendarScheduleType] = useState<"CLEANING" | "SITE_VISIT">("CLEANING");
@@ -250,6 +307,31 @@ export default function CalendarPage() {
   const [cleaningCost, setCleaningCost] = useState("0");
   const [cleaningMemo, setCleaningMemo] = useState("");
   const [isCleaningSubmitting, setIsCleaningSubmitting] = useState(false);
+  const [isScheduleContactMenuOpen, setIsScheduleContactMenuOpen] = useState(false);
+
+  const savedContacts = useMemo(() => buildContactSuggestions([
+    ...reservations.map((reservation) => ({
+      name: reservation.customerName,
+      phone: reservation.phone,
+      usedAt: reservation.startTime,
+      context: `${reservation.roomName} 예약`,
+    })),
+    ...cleaningSchedules.map((schedule) => ({
+      name: schedule.cleanerName,
+      phone: schedule.contactPhone,
+      usedAt: schedule.startTime,
+      context: schedule.scheduleType === "SITE_VISIT" ? "사전답사" : "청소",
+    })),
+  ]), [reservations, cleaningSchedules]);
+
+  const reservationContactSuggestions = useMemo(
+    () => findContactSuggestions(savedContacts, formName),
+    [savedContacts, formName],
+  );
+  const scheduleContactSuggestions = useMemo(
+    () => findContactSuggestions(savedContacts, cleanerName),
+    [savedContacts, cleanerName],
+  );
 
   const fetchReservations = useCallback(async () => {
     try {
@@ -422,6 +504,7 @@ export default function CalendarPage() {
 
       setFormName("");
       setFormPhone("");
+      setIsReservationContactMenuOpen(false);
       setCustomerType("UNSPECIFIED");
       setFormPurpose("");
       setFormDetail("");
@@ -466,6 +549,7 @@ export default function CalendarPage() {
     setFormPurpose(res.usageLog?.purpose || "");
     setFormDetail(res.usageLog?.detail || "");
     setShowMultiPicker(false);
+    setIsReservationContactMenuOpen(false);
   };
 
   const openEditModal = (res: Reservation) => {
@@ -565,6 +649,7 @@ export default function CalendarPage() {
     setCleaningRooms([]);
     setCleanerName("");
     setScheduleContactPhone("");
+    setIsScheduleContactMenuOpen(false);
     setSiteVisitSource("");
     setCleaningDate(format(date, "yyyy-MM-dd"));
     setCleaningStartTime("09:00");
@@ -591,6 +676,7 @@ export default function CalendarPage() {
     setCleaningRooms(schedule.roomNames);
     setCleanerName(schedule.cleanerName);
     setScheduleContactPhone(formatPhoneNumberInput(schedule.contactPhone || ""));
+    setIsScheduleContactMenuOpen(false);
     setSiteVisitSource(schedule.source || "");
     setCleaningDate(format(start, "yyyy-MM-dd"));
     setCleaningStartTime(clock(startParts));
@@ -750,6 +836,7 @@ export default function CalendarPage() {
               setModalMode("create");
               setEditId(null);
               setFormDates([format(selectedDate, "yyyy-MM-dd")]);
+              setIsReservationContactMenuOpen(false);
               setIsModalOpen(true);
             }}
             className="flex min-w-0 items-center justify-center gap-1 rounded-xl bg-indigo-600 px-2 py-2 text-[11px] font-bold text-white shadow-md transition-all hover:bg-indigo-700 active:scale-95 whitespace-nowrap sm:gap-1.5 sm:px-3.5 sm:py-2.5 sm:text-sm"
@@ -1465,7 +1552,12 @@ export default function CalendarPage() {
                     spellCheck={false}
                     placeholder="김철수"
                     value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
+                    onFocus={() => setIsReservationContactMenuOpen(true)}
+                    onBlur={() => window.setTimeout(() => setIsReservationContactMenuOpen(false), 150)}
+                    onChange={(e) => {
+                      setFormName(e.target.value);
+                      setIsReservationContactMenuOpen(true);
+                    }}
                     className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium"
                   />
                 </div>
@@ -1480,6 +1572,20 @@ export default function CalendarPage() {
                     className="w-full text-sm p-2.5 rounded-xl border border-slate-200 outline-hidden focus:border-indigo-500 font-medium"
                   />
                 </div>
+
+                {isReservationContactMenuOpen && reservationContactSuggestions.length > 0 && (
+                  <div className="col-span-2">
+                    <ContactSuggestionMenu
+                      suggestions={reservationContactSuggestions}
+                      accent="indigo"
+                      onSelect={(suggestion) => {
+                        setFormName(suggestion.name);
+                        setFormPhone(suggestion.phone);
+                        setIsReservationContactMenuOpen(false);
+                      }}
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500">고객구분</label>
@@ -1836,7 +1942,12 @@ export default function CalendarPage() {
                   type="text"
                   required
                   value={cleanerName}
-                  onChange={(event) => setCleanerName(event.target.value)}
+                  onFocus={() => setIsScheduleContactMenuOpen(true)}
+                  onBlur={() => window.setTimeout(() => setIsScheduleContactMenuOpen(false), 150)}
+                  onChange={(event) => {
+                    setCleanerName(event.target.value);
+                    setIsScheduleContactMenuOpen(true);
+                  }}
                   placeholder="이름 입력"
                   className={cn(
                     "w-full rounded-xl border border-slate-200 p-2.5 text-sm font-medium outline-hidden",
@@ -1844,6 +1955,18 @@ export default function CalendarPage() {
                   )}
                 />
               </div>
+
+              {isScheduleContactMenuOpen && scheduleContactSuggestions.length > 0 && (
+                <ContactSuggestionMenu
+                  suggestions={scheduleContactSuggestions}
+                  accent={calendarScheduleType === "SITE_VISIT" ? "sky" : "teal"}
+                  onSelect={(suggestion) => {
+                    setCleanerName(suggestion.name);
+                    setScheduleContactPhone(suggestion.phone);
+                    setIsScheduleContactMenuOpen(false);
+                  }}
+                />
+              )}
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500">연락처 (선택)</label>
