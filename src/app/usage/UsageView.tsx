@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Check, Search, Users, Coffee, Tag, AlertCircle, Pencil, ChevronDown, Wallet, Clock, MessageSquareText, BadgeCheck, CircleDollarSign } from "lucide-react";
+import { Check, Search, Users, Tag, AlertCircle, Pencil, ChevronDown, Wallet, Clock, MessageSquareText, BadgeCheck, CircleDollarSign } from "lucide-react";
 import { MAJOR_CATEGORIES, SUB_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
 import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "@/lib/customer-types";
 import TimeSelect from "@/components/TimeSelect";
@@ -815,7 +816,14 @@ export default function UsagePage() {
           {/* 구매한 커피 */}
           <div className="space-y-3">
             <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 sm:text-sm">
-              <Coffee className="w-4 h-4 text-amber-500" />
+              <Image
+                src="/brim-badger-icon.png"
+                alt=""
+                width={22}
+                height={16}
+                aria-hidden="true"
+                className="h-4 w-[22px] shrink-0 object-contain"
+              />
               구매한 커피
             </label>
             <div className="flex min-w-0 items-center justify-between gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1.5 sm:p-2">
