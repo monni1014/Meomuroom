@@ -21,16 +21,16 @@ export const SITUATION_MESSAGE_TEMPLATE_DEFINITIONS = [
     automationDescription: "2시간 이내에 등록한 사전답사는 전화번호 확인 후 바로 자동발송합니다.",
   },
   {
-    key: "UNPAID_RESERVATION",
-    name: "미정산 안내",
-    triggerDescription: "예약이 미정산 상태인 경우",
-    automationDescription: "발송 시점을 확정한 뒤 미정산 자동발송에 연결합니다.",
-  },
-  {
     key: "REVIEW_REFUND_ACCOUNT_REQUEST",
     name: "리뷰 환급 계좌 요청",
     triggerDescription: "방문자·블로그 리뷰의 작성 완료를 처음 체크하고 이용현황을 저장한 경우",
     automationDescription: "고객에게 리뷰 환급을 받을 계좌정보를 요청하는 문자를 한 번만 자동 발송합니다.",
+  },
+  {
+    key: "UNPAID_RESERVATION",
+    name: "미정산 안내",
+    triggerDescription: "예약이 미정산 상태인 경우",
+    automationDescription: "발송 시점을 확정한 뒤 미정산 자동발송에 연결합니다.",
   },
 ] as const;
 
