@@ -10,6 +10,11 @@ import {
   getReviewRefundAccountMessageReadiness,
   sendReviewRefundAccountRequest,
 } from "@/lib/review-refund-account-notifications";
+import {
+  buildExtraPeoplePush,
+  resolveAdditionalPeople,
+} from "@/lib/reservation-extra-people-push";
+import { sendPushNotification } from "@/lib/push-notifications";
 
 const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
 
@@ -25,7 +30,7 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, visitorReviewRequested, visitorReviewCompleted, visitorReviewRefunded, blogReviewRequested, blogReviewCompleted, blogReviewRefunded, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow, resendNotification } = body;
+    const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, visitorReviewRequested, visitorReviewCompleted, visitorReviewRefunded, blogReviewRequested, blogReviewCompleted, blogReviewRefunded, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow, resendNotification, pushSubscriptionEndpoint } = body;
 
     if (typeof phone === "string" && phone.trim() && !isValidKoreanMobilePhone(phone)) {
       return NextResponse.json({ error: "Invalid phone number" }, { status: 400 });
@@ -277,6 +282,52 @@ export async function PATCH(
     const reviewRefundAccountMessage = shouldSendReviewRefundAccountRequest
       ? await sendReviewRefundAccountRequest(updated.id)
       : null;
+
+    const previousAdditionalPeople = resolveAdditionalPeople({
+      headCount: existing.usageLog?.headCount,
+      reservedHeadCount: existing.usageLog?.reservedHeadCount,
+    });
+    const nextAdditionalPeople = resolveAdditionalPeople({
+      headCount: updated.usageLog?.headCount,
+      reservedHeadCount: updated.usageLog?.reservedHeadCount,
+    });
+    if (
+      headCount !== undefined
+      && nextAdditionalPeople > previousAdditionalPeople
+      && updated.status === "CONFIRMED"
+      && !updated.isNoShow
+    ) {
+      try {
+        const excludedEndpoint = typeof pushSubscriptionEndpoint === "string"
+          && pushSubscriptionEndpoint.startsWith("https://")
+          ? pushSubscriptionEndpoint
+          : null;
+        const previousHeadCount = existing.usageLog?.headCount
+          || existing.usageLog?.reservedHeadCount
+          || 0;
+        const pushResult = await sendPushNotification(
+          buildExtraPeoplePush({
+            id: updated.id,
+            roomName: updated.roomName,
+            customerName: updated.customerName,
+            startTime: updated.startTime,
+            endTime: updated.endTime,
+            previousHeadCount,
+            headCount: updated.usageLog?.headCount || 0,
+            additionalPeople: nextAdditionalPeople,
+            unpaidExtraAmount: updated.usageLog?.isExtraPaid
+              ? 0
+              : Math.max(0, updated.usageLog?.extraPrice || 0),
+          }),
+          { excludeEndpoints: excludedEndpoint ? [excludedEndpoint] : [] },
+        );
+        console.info(
+          `[ExtraPeople] Push sent ${pushResult.sent}, failed ${pushResult.failed}, origin excluded ${Boolean(excludedEndpoint)}`,
+        );
+      } catch (pushError) {
+        console.error("Extra people push failed:", pushError);
+      }
+    }
 
     return NextResponse.json({ ...updated, reviewRefundAccountMessage });
   } catch (error) {

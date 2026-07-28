@@ -18,6 +18,8 @@ type ReminderContentInput = {
   roomName: string;
   customerName: string | null;
   headCount: number;
+  additionalPeople?: number;
+  unpaidExtraAmount?: number;
 };
 
 export function resolveReservationEndReminderHeadCount(input: {
@@ -28,6 +30,10 @@ export function resolveReservationEndReminderHeadCount(input: {
 }
 
 export function buildReservationEndReminderContent(input: ReminderContentInput) {
+  const additionalPeople = Math.max(0, input.additionalPeople || 0);
+  const unpaidExtraAmount = Math.max(0, input.unpaidExtraAmount || 0);
+  const needsExtraPayment = additionalPeople > 0 || unpaidExtraAmount > 0;
+
   return {
     title: "예약 종료 알림",
     body: [
@@ -35,6 +41,13 @@ export function buildReservationEndReminderContent(input: ReminderContentInput) 
       input.customerName?.trim() || "이름 미입력",
       input.headCount > 0 ? `${input.headCount}명` : "인원 미입력",
       "종료 10분 전",
+      ...(needsExtraPayment
+        ? [
+            unpaidExtraAmount > 0
+              ? `추가금 결제 필요 · ${additionalPeople > 0 ? `추가 인원 ${additionalPeople}명 · ` : ""}${unpaidExtraAmount.toLocaleString("ko-KR")}원`
+              : `추가금 확인 필요 · 추가 인원 ${additionalPeople}명`,
+          ]
+        : []),
     ].join("\n"),
   };
 }

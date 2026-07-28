@@ -86,7 +86,12 @@ export async function sendDueReservationEndReminders(now = new Date()) {
     orderBy: [{ endTime: "asc" }, { id: "asc" }],
     include: {
       usageLog: {
-        select: { reservedHeadCount: true, headCount: true },
+        select: {
+          reservedHeadCount: true,
+          headCount: true,
+          extraPrice: true,
+          isExtraPaid: true,
+        },
       },
     },
   });
@@ -105,7 +110,12 @@ export async function sendDueReservationEndReminders(now = new Date()) {
         orderBy: [{ startTime: "asc" }, { id: "asc" }],
         include: {
           usageLog: {
-            select: { reservedHeadCount: true, headCount: true },
+            select: {
+              reservedHeadCount: true,
+              headCount: true,
+              extraPrice: true,
+              isExtraPaid: true,
+            },
           },
         },
       })
@@ -149,10 +159,31 @@ export async function sendDueReservationEndReminders(now = new Date()) {
         reservedHeadCount: item.usageLog?.reservedHeadCount,
       })),
     );
+    const unpaidExtraMembers = group.filter((item) => {
+      if (!item.usageLog || item.usageLog.isExtraPaid) return false;
+      const additionalPeople = Math.max(
+        0,
+        item.usageLog.headCount - item.usageLog.reservedHeadCount,
+      );
+      return additionalPeople > 0 || (item.usageLog.extraPrice || 0) > 0;
+    });
+    const additionalPeople = Math.max(
+      0,
+      ...unpaidExtraMembers.map((item) => Math.max(
+        0,
+        (item.usageLog?.headCount || 0) - (item.usageLog?.reservedHeadCount || 0),
+      )),
+    );
+    const unpaidExtraAmount = unpaidExtraMembers.reduce(
+      (total, item) => total + Math.max(0, item.usageLog?.extraPrice || 0),
+      0,
+    );
     const content = buildReservationEndReminderContent({
       roomName: reservation.roomName,
       customerName: reservation.customerName,
       headCount,
+      additionalPeople,
+      unpaidExtraAmount,
     });
     const result = await sendPushNotification({
       ...content,

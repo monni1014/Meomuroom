@@ -12,15 +12,35 @@ type ResendConfirmationResponse = {
   changedFields?: NotificationResendField[];
 };
 
+async function getCurrentPushSubscriptionEndpoint() {
+  if (
+    typeof navigator === "undefined"
+    || typeof window === "undefined"
+    || !("serviceWorker" in navigator)
+    || !("PushManager" in window)
+  ) return null;
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration("/");
+    const subscription = await registration?.pushManager.getSubscription();
+    return subscription?.endpoint || null;
+  } catch (error) {
+    console.warn("Current push subscription lookup failed:", error);
+    return null;
+  }
+}
+
 export async function patchReservationWithNotificationConfirmation(
   reservationId: string,
   payload: Record<string, unknown>,
 ) {
+  const pushSubscriptionEndpoint = await getCurrentPushSubscriptionEndpoint();
   const sendPatch = (resendNotification?: boolean) => fetch(`/api/reservations/${reservationId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...payload,
+      ...(pushSubscriptionEndpoint ? { pushSubscriptionEndpoint } : {}),
       ...(typeof resendNotification === "boolean" ? { resendNotification } : {}),
     }),
   });

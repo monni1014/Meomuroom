@@ -15,6 +15,24 @@ const content = buildReservationEndReminderContent({
 });
 assert.equal(content.title, "예약 종료 알림");
 assert.equal(content.body, "머무룸1\n김영광\n4명\n종료 10분 전");
+const unpaidExtraContent = buildReservationEndReminderContent({
+  roomName: "머무룸2",
+  customerName: "추가금 고객",
+  headCount: 18,
+  additionalPeople: 1,
+  unpaidExtraAmount: 12_000,
+});
+assert.equal(
+  unpaidExtraContent.body,
+  "머무룸2\n추가금 고객\n18명\n종료 10분 전\n추가금 결제 필요 · 추가 인원 1명 · 12,000원",
+);
+const missingExtraAmountContent = buildReservationEndReminderContent({
+  roomName: "머무룸3",
+  customerName: "금액 미입력 고객",
+  headCount: 6,
+  additionalPeople: 2,
+});
+assert.match(missingExtraAmountContent.body, /추가금 확인 필요 · 추가 인원 2명/);
 assert.equal(resolveReservationEndReminderHeadCount({ headCount: 9, reservedHeadCount: 8 }), 9);
 assert.equal(resolveReservationEndReminderHeadCount({ headCount: 0, reservedHeadCount: 8 }), 8);
 assert.equal(resolveReservationEndReminderHeadCount({ headCount: 0, reservedHeadCount: 0 }), 0);
@@ -51,5 +69,7 @@ assert.match(reminderSource, /buildReservationNotificationGroups\(groupCandidate
 assert.match(reminderSource, /reservationNotificationGroupKey\(reservation\)/);
 assert.match(reminderSource, /resolvedGroup\.reminder\?\.id !== reservation\.id/);
 assert.match(reminderSource, /groupAlreadySent\(group\.map\(\(member\) => member\.id\)\)/);
+assert.match(reminderSource, /item\.usageLog\.isExtraPaid/);
+assert.match(reminderSource, /unpaidExtraMembers/);
 
 console.log("Reservation end reminder tests passed.");
