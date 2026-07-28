@@ -5,6 +5,7 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import { createAdminAlert, resolveAdminAlertsByType } from "@/lib/admin-alerts";
 import {
   PROXY_CONNECTION_CONFIRM_DELAYS_MS,
+  PROXY_OUTAGE_ALERT_REPEAT_MS,
   shouldConfirmProxyConnectionFailure,
 } from "@/lib/proxy-health-alert-policy";
 import type { IspProxyStatus, ProxyHealthSeverity } from "@/lib/proxy-status-types";
@@ -13,7 +14,6 @@ const PROXYSELLER_API_BASE = "https://proxy-seller.com/personal/api/v1";
 const IP_CHECK_URL = "https://ipinfo.io/json";
 const CACHE_MS = 5 * 60 * 1000;
 const ALERT_TYPE = "ISP_PROXY_STATUS";
-const OUTAGE_ALERT_REPEAT_MS = 30 * 60 * 1000;
 
 type ProxySellerItem = Record<string, unknown>;
 
@@ -395,7 +395,7 @@ export async function checkProxySellerStatusAndAlert() {
     ),
     dedupeKey: `isp-proxy-${status.severity.toLowerCase()}`,
     repeatAfterMs: status.severity === "ERROR" || status.severity === "NOT_CONFIGURED"
-      ? OUTAGE_ALERT_REPEAT_MS
+      ? PROXY_OUTAGE_ALERT_REPEAT_MS
       : undefined,
   });
 
