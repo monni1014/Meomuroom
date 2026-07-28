@@ -8,6 +8,7 @@ import { markEmailProcessed } from "./processed-email";
 import { markRpaJobCheckRequired } from "./rpa-reservation-state";
 import { processSpaceCloudEmailWithRpa } from "./spacecloud-rpa-sync";
 import { sendSpaceCloudBookingPush } from "./spacecloud-booking-push";
+import { sendSpaceCloudCancellationPush } from "./spacecloud-cancellation-push";
 import {
   getRpaProxyCircuitState,
   isRpaPausedForProxy,
@@ -346,7 +347,10 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
 
       try {
         console.log(`[RPAQueue] Start ${job.source} job: ${job.messageId}`);
-        let result: { reservationId?: string | null } | undefined;
+        let result: {
+          reservationId?: string | null;
+          cancellationFeeVerified?: boolean;
+        } | undefined;
         if (job.source === "naver") {
           result = await processNaverEmailWithRpa(job);
         } else {
@@ -356,6 +360,14 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
           const push = await sendSpaceCloudBookingPush(result.reservationId);
           console.log(
             `[RPAQueue] SpaceCloud booking push: reservation=${result.reservationId}, skipped=${push.skipped}, sent=${push.sent}, failed=${push.failed}, reason=${push.reason || "-"}, apple-excluded=true`,
+          );
+        }
+        if (job.source === "spacecloud" && isCancellationJob(job) && result?.reservationId) {
+          const push = await sendSpaceCloudCancellationPush(result.reservationId, {
+            cancellationFeeVerified: result.cancellationFeeVerified === true,
+          });
+          console.log(
+            `[RPAQueue] SpaceCloud cancellation push: reservation=${result.reservationId}, fee-verified=${result.cancellationFeeVerified === true}, skipped=${push.skipped}, sent=${push.sent}, failed=${push.failed}, reason=${push.reason || "-"}, apple-excluded=true`,
           );
         }
         await markEmailProcessed(job.messageId, job.source, result?.reservationId);

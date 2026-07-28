@@ -443,7 +443,13 @@ export async function processSpaceCloudEmailWithRpa({
     await clearRpaPendingForReservation(updated.id);
     await deleteDetachedPendingReservation(messageId, updated.id);
 
-    return { changed: true, skipped: false, created: false, reservationId: updated.id };
+    return {
+      changed: true,
+      skipped: false,
+      created: false,
+      reservationId: updated.id,
+      cancellationFeeVerified: item.status === "CANCELLED" && Boolean(detail?.refundFeeFound),
+    };
   }
 
   const created = await prisma.reservation.create({
@@ -493,5 +499,11 @@ export async function processSpaceCloudEmailWithRpa({
   await clearRpaPendingForReservation(created.id);
   await deleteDetachedPendingReservation(messageId, created.id);
 
-  return { changed: true, skipped: false, created: true, reservationId: created.id };
+  return {
+    changed: true,
+    skipped: false,
+    created: true,
+    reservationId: created.id,
+    cancellationFeeVerified: item.status === "CANCELLED" && Boolean(detail?.refundFeeFound),
+  };
 }

@@ -25,6 +25,7 @@
     "test:competitor-booking-discovery": "node --experimental-strip-types scripts/test-competitor-booking-discovery.mjs",
     "test:competitor-booking-push": "node --experimental-strip-types scripts/test-competitor-booking-push.mjs",
     "test:spacecloud-booking-push": "node --experimental-strip-types scripts/test-spacecloud-booking-push.mjs",
+    "test:spacecloud-cancellation-push": "node --experimental-strip-types scripts/test-spacecloud-cancellation-push.mjs",
     "test:review-events": "node --experimental-strip-types scripts/test-review-event-tracking.mjs",
     "test:calendar-schedules": "node --experimental-strip-types scripts/test-calendar-schedule-validation.mjs",
     "test:site-visit-messages": "node --experimental-strip-types scripts/test-site-visit-message-content.mjs",
