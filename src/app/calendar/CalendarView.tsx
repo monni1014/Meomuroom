@@ -166,6 +166,10 @@ function formatPhoneNumberInput(value: string) {
   return digits;
 }
 
+function phoneDialHref(value: string) {
+  return `tel:${value.replace(/\D/g, "")}`;
+}
+
 function extendedEndClock(start: Date, end: Date) {
   const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
   const startParts = getKstDateParts(start);
@@ -1180,18 +1184,30 @@ export default function CalendarPage() {
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                           <strong className="min-w-0 truncate text-slate-900 md:hidden">{schedule.cleanerName}</strong>
                           {isSiteVisit ? schedule.contactPhone && (
-                            <span className="flex items-center gap-1">
+                            <a
+                              href={phoneDialHref(schedule.contactPhone)}
+                              onClick={(event) => event.stopPropagation()}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                              className="flex items-center gap-1 underline decoration-slate-300 underline-offset-2 transition hover:text-emerald-600"
+                              aria-label={`${schedule.contactPhone} 전화 걸기`}
+                            >
                               <Phone className="h-3.5 w-3.5" /> {schedule.contactPhone}
-                            </span>
+                            </a>
                           ) : (
                             <>
                               <span className="flex items-center gap-1">
                                 <Wallet className="h-3.5 w-3.5" /> 비용 <strong className="text-slate-800">{schedule.cost.toLocaleString("ko-KR")}원</strong>
                               </span>
                               {schedule.contactPhone && (
-                                <span className="flex items-center gap-1">
+                                <a
+                                  href={phoneDialHref(schedule.contactPhone)}
+                                  onClick={(event) => event.stopPropagation()}
+                                  onDoubleClick={(event) => event.stopPropagation()}
+                                  className="flex items-center gap-1 underline decoration-slate-300 underline-offset-2 transition hover:text-emerald-600"
+                                  aria-label={`${schedule.contactPhone} 전화 걸기`}
+                                >
                                   <Phone className="h-3.5 w-3.5" /> {schedule.contactPhone}
-                                </span>
+                                </a>
                               )}
                             </>
                           )}
@@ -1423,7 +1439,18 @@ export default function CalendarPage() {
                       {res.phone && (
                         <p className="flex min-w-0 items-center gap-1">
                           <Phone className="h-3.5 w-3.5 shrink-0" />
-                          <span className={cn(isCancelled ? "line-through text-slate-400" : "")}>{res.phone}</span>
+                          <a
+                            href={phoneDialHref(res.phone)}
+                            onClick={(event) => event.stopPropagation()}
+                            onDoubleClick={(event) => event.stopPropagation()}
+                            className={cn(
+                              "underline decoration-slate-300 underline-offset-2 transition hover:text-emerald-600",
+                              isCancelled && "line-through text-slate-400",
+                            )}
+                            aria-label={`${res.phone} 전화 걸기`}
+                          >
+                            {res.phone}
+                          </a>
                           {res.phoneLocked && (
                             <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 ring-1 ring-amber-200">
                               수동번호 고정

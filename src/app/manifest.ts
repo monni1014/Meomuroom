@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "머무룸 AX",
     short_name: "머무룸 AX",
     description: "머무룸 예약 및 운영 관리",
-    start_url: "/",
+    start_url: "/calendar",
     display: "standalone",
     background_color: "#f8fafc",
     theme_color: "#4f46e5",
