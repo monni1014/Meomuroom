@@ -60,6 +60,12 @@ export async function sendSpaceCloudBookingPush(reservationId: string, now = new
       startTime: true,
       endTime: true,
       price: true,
+      usageLog: {
+        select: {
+          reservedHeadCount: true,
+          headCount: true,
+        },
+      },
     },
   });
   if (!reservation || reservation.source !== "spacecloud" || reservation.status !== "CONFIRMED" || reservation.isNoShow) {
@@ -75,6 +81,7 @@ export async function sendSpaceCloudBookingPush(reservationId: string, now = new
     customerName: reservation.customerName,
     startTime: reservation.startTime,
     endTime: reservation.endTime,
+    headCount: reservation.usageLog?.reservedHeadCount || reservation.usageLog?.headCount || 0,
     price: reservation.price,
   });
   let result: Awaited<ReturnType<typeof sendPushNotification>>;

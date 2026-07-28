@@ -10,6 +10,7 @@ import {
   type RpaEmailJob,
 } from "./rpa-job-queue";
 import { ensureRpaPendingReservation, RPA_PENDING_MARKER } from "./rpa-reservation-state";
+import { sendSpaceCloudBookingPush } from "./spacecloud-booking-push";
 
 type CollectedMail = {
   messageId: string;
@@ -345,6 +346,22 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
           messageId,
           parsedMail.date || new Date(),
         );
+
+        if (reservationData.source === "spacecloud" && !reservationData.isCancelled) {
+          try {
+            const push = await sendSpaceCloudBookingPush(pending.id);
+            console.log(
+              `[EmailSync] Immediate SpaceCloud booking push: reservation=${pending.id}, skipped=${push.skipped}, sent=${push.sent}, failed=${push.failed}, reason=${push.reason || "-"}, apple-excluded=true`,
+            );
+          } catch (error) {
+            // Push delivery must never hold up reservation detail/slot RPA. The
+            // post-RPA call retries safely using the same reservation claim.
+            console.error(
+              `[EmailSync] Immediate SpaceCloud booking push failed; continue with RPA: reservation=${pending.id}`,
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
 
         rpaJobs.push({
           messageId,

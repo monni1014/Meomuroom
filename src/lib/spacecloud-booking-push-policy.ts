@@ -4,6 +4,7 @@ type SpaceCloudBookingPushInput = {
   customerName: string | null;
   startTime: Date;
   endTime: Date;
+  headCount: number;
   price: number;
 };
 
@@ -30,7 +31,7 @@ export function buildSpaceCloudBookingPush(input: SpaceCloudBookingPushInput) {
 
   return {
     title: "스클 신규 예약",
-    body: `${input.roomName}\n${input.customerName?.trim() || "이름 없음"}\n${Number(start.month)}월 ${Number(start.day)}일 / ${formatHourMinute(start)}~${formatHourMinute(end)}\n매출액 ${input.price.toLocaleString("ko-KR")}원`,
+    body: `${input.roomName}\n${input.customerName?.trim() || "이름 없음"}\n${Number(start.month)}월 ${Number(start.day)}일 / ${formatHourMinute(start)}~${formatHourMinute(end)}\n인원 ${input.headCount}명 · 매출액 ${input.price.toLocaleString("ko-KR")}원`,
     url: `/calendar?date=${dateKey}`,
     tag: `spacecloud-booking-${input.reservationId}`,
   };
