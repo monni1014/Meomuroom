@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Phone, Star, SprayCan, MessageSquareText, Binoculars } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Star, SprayCan, MessageSquareText, Binoculars } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
@@ -10,6 +10,7 @@ import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "
 import TimeSelect from "@/components/TimeSelect";
 import MultiDatePicker from "@/components/MultiDatePicker";
 import RpaStatusBadge from "@/components/RpaStatusBadge";
+import PhoneActionLink from "@/components/PhoneActionLink";
 import { createKstDate, getKstDateParts } from "@/lib/kst-time";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 import { patchReservationWithNotificationConfirmation } from "@/lib/reservation-notification-resend-client";
@@ -164,10 +165,6 @@ function formatPhoneNumberInput(value: string) {
     return `${digits.slice(0, 3)}-${digits.slice(3)}`;
   }
   return digits;
-}
-
-function phoneDialHref(value: string) {
-  return `tel:${value.replace(/\D/g, "")}`;
 }
 
 function extendedEndClock(start: Date, end: Date) {
@@ -1184,30 +1181,20 @@ export default function CalendarPage() {
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                           <strong className="min-w-0 truncate text-slate-900 md:hidden">{schedule.cleanerName}</strong>
                           {isSiteVisit ? schedule.contactPhone && (
-                            <a
-                              href={phoneDialHref(schedule.contactPhone)}
-                              onClick={(event) => event.stopPropagation()}
-                              onDoubleClick={(event) => event.stopPropagation()}
-                              className="flex items-center gap-1 underline decoration-slate-300 underline-offset-2 transition hover:text-emerald-600"
-                              aria-label={`${schedule.contactPhone} 전화 걸기`}
-                            >
-                              <Phone className="h-3.5 w-3.5" /> {schedule.contactPhone}
-                            </a>
+                            <PhoneActionLink
+                              phone={schedule.contactPhone}
+                              contactName={schedule.cleanerName}
+                            />
                           ) : (
                             <>
                               <span className="flex items-center gap-1">
                                 <Wallet className="h-3.5 w-3.5" /> 비용 <strong className="text-slate-800">{schedule.cost.toLocaleString("ko-KR")}원</strong>
                               </span>
                               {schedule.contactPhone && (
-                                <a
-                                  href={phoneDialHref(schedule.contactPhone)}
-                                  onClick={(event) => event.stopPropagation()}
-                                  onDoubleClick={(event) => event.stopPropagation()}
-                                  className="flex items-center gap-1 underline decoration-slate-300 underline-offset-2 transition hover:text-emerald-600"
-                                  aria-label={`${schedule.contactPhone} 전화 걸기`}
-                                >
-                                  <Phone className="h-3.5 w-3.5" /> {schedule.contactPhone}
-                                </a>
+                                <PhoneActionLink
+                                  phone={schedule.contactPhone}
+                                  contactName={schedule.cleanerName}
+                                />
                               )}
                             </>
                           )}
@@ -1335,19 +1322,13 @@ export default function CalendarPage() {
                       </div>
                       {res.phone && (
                         <div className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-slate-500">
-                          <Phone className="h-3 w-3 shrink-0 text-slate-400" />
-                          <a
-                            href={phoneDialHref(res.phone)}
-                            onClick={(event) => event.stopPropagation()}
-                            onDoubleClick={(event) => event.stopPropagation()}
-                            className={cn(
-                              "truncate underline decoration-slate-300 underline-offset-2 transition hover:text-emerald-600",
-                              isCancelled && "line-through text-slate-400",
-                            )}
-                            aria-label={`${res.phone} 전화 걸기`}
-                          >
-                            {res.phone}
-                          </a>
+                          <PhoneActionLink
+                            phone={res.phone}
+                            contactName={res.customerName}
+                            cancelled={isCancelled}
+                            className="truncate"
+                            iconClassName="h-3 w-3 text-slate-400"
+                          />
                           {res.phoneLocked && (
                             <span className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[9px] font-bold text-amber-700 ring-1 ring-amber-200">
                               수동고정
@@ -1460,19 +1441,11 @@ export default function CalendarPage() {
                       )}
                       {res.phone && (
                         <p className="flex min-w-0 items-center gap-1">
-                          <Phone className="h-3.5 w-3.5 shrink-0" />
-                          <a
-                            href={phoneDialHref(res.phone)}
-                            onClick={(event) => event.stopPropagation()}
-                            onDoubleClick={(event) => event.stopPropagation()}
-                            className={cn(
-                              "underline decoration-slate-300 underline-offset-2 transition hover:text-emerald-600",
-                              isCancelled && "line-through text-slate-400",
-                            )}
-                            aria-label={`${res.phone} 전화 걸기`}
-                          >
-                            {res.phone}
-                          </a>
+                          <PhoneActionLink
+                            phone={res.phone}
+                            contactName={res.customerName}
+                            cancelled={isCancelled}
+                          />
                           {res.phoneLocked && (
                             <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 ring-1 ring-amber-200">
                               수동번호 고정
