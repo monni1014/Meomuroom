@@ -1333,6 +1333,28 @@ export default function CalendarPage() {
                         {res.price > 0 && <><span>·</span><span>{res.price.toLocaleString()}원</span></>}
                         {isCancelled && <span className="font-bold text-slate-500">· 취소</span>}
                       </div>
+                      {res.phone && (
+                        <div className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-slate-500">
+                          <Phone className="h-3 w-3 shrink-0 text-slate-400" />
+                          <a
+                            href={phoneDialHref(res.phone)}
+                            onClick={(event) => event.stopPropagation()}
+                            onDoubleClick={(event) => event.stopPropagation()}
+                            className={cn(
+                              "truncate underline decoration-slate-300 underline-offset-2 transition hover:text-emerald-600",
+                              isCancelled && "line-through text-slate-400",
+                            )}
+                            aria-label={`${res.phone} 전화 걸기`}
+                          >
+                            {res.phone}
+                          </a>
+                          {res.phoneLocked && (
+                            <span className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[9px] font-bold text-amber-700 ring-1 ring-amber-200">
+                              수동고정
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex shrink-0 items-center">
                       <ChevronDown className={cn("h-4 w-4 text-slate-400 transition-transform", isExpanded && "rotate-180")} />
