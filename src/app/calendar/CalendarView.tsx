@@ -289,7 +289,11 @@ export default function CalendarPage() {
   const [calendarSlideDirection, setCalendarSlideDirection] = useState<"next" | "previous" | null>(null);
   const agendaGestureStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const agendaTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const agendaTouchOffsetYRef = useRef(0);
   const mobileAgendaCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mobileAgendaDragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mobileAgendaOpenFrameRef = useRef<number | null>(null);
+  const mobileAgendaVisibleFrameRef = useRef<number | null>(null);
   const [agendaSlideDirection, setAgendaSlideDirection] = useState<"next" | "previous" | null>(null);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
@@ -393,19 +397,62 @@ export default function CalendarPage() {
       clearTimeout(mobileAgendaCloseTimerRef.current);
       mobileAgendaCloseTimerRef.current = null;
     }
+    if (mobileAgendaOpenFrameRef.current !== null) {
+      window.cancelAnimationFrame(mobileAgendaOpenFrameRef.current);
+      mobileAgendaOpenFrameRef.current = null;
+    }
+    if (mobileAgendaVisibleFrameRef.current !== null) {
+      window.cancelAnimationFrame(mobileAgendaVisibleFrameRef.current);
+      mobileAgendaVisibleFrameRef.current = null;
+    }
+    if (mobileAgendaDragResetTimerRef.current) {
+      clearTimeout(mobileAgendaDragResetTimerRef.current);
+      mobileAgendaDragResetTimerRef.current = null;
+    }
+    agendaTouchOffsetYRef.current = 0;
+    if (selectedDaySectionRef.current) {
+      selectedDaySectionRef.current.style.removeProperty("transition-duration");
+      selectedDaySectionRef.current.style.removeProperty("transform");
+    }
     setIsMobileAgendaOpen(true);
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => setIsMobileAgendaVisible(true));
+    mobileAgendaOpenFrameRef.current = window.requestAnimationFrame(() => {
+      mobileAgendaOpenFrameRef.current = null;
+      mobileAgendaVisibleFrameRef.current = window.requestAnimationFrame(() => {
+        mobileAgendaVisibleFrameRef.current = null;
+        setIsMobileAgendaVisible(true);
+      });
     });
   }, []);
 
   const closeMobileAgenda = useCallback(() => {
+    if (mobileAgendaOpenFrameRef.current !== null) {
+      window.cancelAnimationFrame(mobileAgendaOpenFrameRef.current);
+      mobileAgendaOpenFrameRef.current = null;
+    }
+    if (mobileAgendaVisibleFrameRef.current !== null) {
+      window.cancelAnimationFrame(mobileAgendaVisibleFrameRef.current);
+      mobileAgendaVisibleFrameRef.current = null;
+    }
+    if (mobileAgendaDragResetTimerRef.current) {
+      clearTimeout(mobileAgendaDragResetTimerRef.current);
+      mobileAgendaDragResetTimerRef.current = null;
+    }
+    const agendaPanel = selectedDaySectionRef.current;
+    if (agendaPanel && agendaTouchOffsetYRef.current > 0) {
+      agendaPanel.style.transitionDuration = "360ms";
+      agendaPanel.style.transform = "translate3d(0, calc(100dvh + 1rem), 0)";
+    }
     setIsMobileAgendaVisible(false);
     setIsMobileAddMenuOpen(false);
     if (mobileAgendaCloseTimerRef.current) clearTimeout(mobileAgendaCloseTimerRef.current);
     mobileAgendaCloseTimerRef.current = setTimeout(() => {
       setIsMobileAgendaOpen(false);
       setExpandedReservationId(null);
+      agendaTouchOffsetYRef.current = 0;
+      if (agendaPanel) {
+        agendaPanel.style.removeProperty("transition-duration");
+        agendaPanel.style.removeProperty("transform");
+      }
       mobileAgendaCloseTimerRef.current = null;
     }, 420);
   }, []);
@@ -489,6 +536,7 @@ export default function CalendarPage() {
     }
     const touch = event.touches[0];
     agendaTouchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    agendaTouchOffsetYRef.current = 0;
   };
 
   const handleAgendaTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
@@ -503,8 +551,33 @@ export default function CalendarPage() {
       moveSelectedDay(deltaX < 0 ? 1 : -1);
       return;
     }
-    if (deltaY >= 75 && Math.abs(deltaY) > Math.abs(deltaX) * 1.2) {
+    if (agendaTouchOffsetYRef.current >= 60 && deltaY > Math.abs(deltaX) * 1.1) {
       closeMobileAgenda();
+      return;
+    }
+
+    if (agendaTouchOffsetYRef.current > 0) {
+      const agendaPanel = selectedDaySectionRef.current;
+      agendaTouchOffsetYRef.current = 0;
+      if (agendaPanel) {
+        agendaPanel.style.transitionDuration = "180ms";
+        agendaPanel.style.transform = "translate3d(0, 0, 0)";
+        mobileAgendaDragResetTimerRef.current = setTimeout(() => {
+          agendaPanel.style.removeProperty("transition-duration");
+          agendaPanel.style.removeProperty("transform");
+          mobileAgendaDragResetTimerRef.current = null;
+        }, 190);
+      }
+    }
+  };
+
+  const handleAgendaTouchCancel = () => {
+    agendaTouchStartRef.current = null;
+    const agendaPanel = selectedDaySectionRef.current;
+    agendaTouchOffsetYRef.current = 0;
+    if (agendaPanel) {
+      agendaPanel.style.removeProperty("transition-duration");
+      agendaPanel.style.removeProperty("transform");
     }
   };
 
@@ -613,6 +686,9 @@ export default function CalendarPage() {
 
   useEffect(() => () => {
     if (mobileAgendaCloseTimerRef.current) clearTimeout(mobileAgendaCloseTimerRef.current);
+    if (mobileAgendaDragResetTimerRef.current) clearTimeout(mobileAgendaDragResetTimerRef.current);
+    if (mobileAgendaOpenFrameRef.current !== null) window.cancelAnimationFrame(mobileAgendaOpenFrameRef.current);
+    if (mobileAgendaVisibleFrameRef.current !== null) window.cancelAnimationFrame(mobileAgendaVisibleFrameRef.current);
   }, []);
 
   useEffect(() => {
@@ -623,6 +699,33 @@ export default function CalendarPage() {
       document.body.style.overflow = previousOverflow;
     };
   }, [isMobileAgendaOpen, isMobileAddMenuOpen]);
+
+  useEffect(() => {
+    if (!isMobileAgendaOpen) return;
+    const agendaPanel = selectedDaySectionRef.current;
+    if (!agendaPanel) return;
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const start = agendaTouchStartRef.current;
+      const touch = event.touches[0];
+      if (!start || !touch) return;
+
+      const deltaX = touch.clientX - start.x;
+      const deltaY = touch.clientY - start.y;
+      if (deltaY <= 0 || Math.abs(deltaY) <= Math.abs(deltaX) * 1.1) return;
+
+      if (event.cancelable) event.preventDefault();
+      const dragOffset = Math.min(deltaY, window.innerHeight);
+      agendaTouchOffsetYRef.current = dragOffset;
+      agendaPanel.style.transitionDuration = "0ms";
+      agendaPanel.style.transform = `translate3d(0, ${dragOffset}px, 0)`;
+    };
+
+    agendaPanel.addEventListener("touchmove", handleTouchMove, { passive: false, capture: true });
+    return () => {
+      agendaPanel.removeEventListener("touchmove", handleTouchMove, { capture: true });
+    };
+  }, [isMobileAgendaOpen]);
 
   const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1239,23 +1342,28 @@ export default function CalendarPage() {
       {/* Selected Day Reservations List */}
       <section
         ref={selectedDaySectionRef}
+        data-mobile-agenda-sheet
         onPointerDown={handleAgendaGestureStart}
         onPointerMove={handleAgendaGestureMove}
         onPointerUp={handleAgendaGestureEnd}
         onPointerCancel={() => { agendaGestureStartRef.current = null; }}
         onTouchStart={handleAgendaTouchStart}
         onTouchEnd={handleAgendaTouchEnd}
-        onTouchCancel={() => { agendaTouchStartRef.current = null; }}
+        onTouchCancel={handleAgendaTouchCancel}
         className={cn(
-          "scroll-mt-4 space-y-4 border border-slate-100 bg-white p-4",
+          "scroll-mt-4 overflow-hidden border border-slate-100 bg-white",
           isMobileAgendaOpen
             ? cn(
-                "fixed inset-x-0 bottom-0 z-[70] block max-h-[90dvh] touch-pan-y overflow-y-auto rounded-t-[28px] shadow-2xl transform-gpu will-change-transform [backface-visibility:hidden] transition-transform duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:static sm:z-auto sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:shadow-sm sm:transition-none",
+                "fixed inset-x-0 bottom-0 z-[70] block max-h-[90dvh] touch-pan-y rounded-t-[28px] shadow-2xl transform-gpu will-change-transform [backface-visibility:hidden] transition-transform duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:static sm:z-auto sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:shadow-sm sm:transition-none",
                 isMobileAgendaVisible ? "translate-y-0" : "translate-y-[calc(100%+1rem)]",
               )
             : "hidden rounded-2xl shadow-sm sm:block",
         )}
       >
+        <div
+          data-mobile-agenda-scroll
+          className="max-h-[90dvh] space-y-4 overflow-y-auto overscroll-y-contain p-4 [scrollbar-gutter:stable] sm:max-h-none sm:overflow-visible sm:overscroll-auto"
+        >
         <div
           className="sticky -top-4 z-10 -mx-4 -mt-4 border-b border-slate-100 bg-white px-4 pb-3 pt-2 sm:static sm:mx-0 sm:mt-0 sm:border-slate-50 sm:p-0 sm:pb-2"
         >
@@ -1719,6 +1827,7 @@ export default function CalendarPage() {
               );
             })
           )}
+        </div>
         </div>
       </section>
       </div>
