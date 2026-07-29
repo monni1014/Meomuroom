@@ -1886,11 +1886,11 @@ export default function CalendarPage() {
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => openReservationCreateModal(selectedDate)}
-                className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-indigo-100 bg-indigo-50 p-3 text-xs font-bold text-indigo-800 active:scale-95"
+                onClick={() => openCleaningCreateModal("SITE_VISIT", selectedDate)}
+                className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-sky-100 bg-sky-50 p-3 text-xs font-bold text-sky-800 active:scale-95"
               >
-                <Plus className="h-6 w-6" />
-                예약 추가
+                <Binoculars className="h-6 w-6" />
+                사전답사
               </button>
               <button
                 type="button"
@@ -1902,11 +1902,11 @@ export default function CalendarPage() {
               </button>
               <button
                 type="button"
-                onClick={() => openCleaningCreateModal("SITE_VISIT", selectedDate)}
-                className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-sky-100 bg-sky-50 p-3 text-xs font-bold text-sky-800 active:scale-95"
+                onClick={() => openReservationCreateModal(selectedDate)}
+                className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-indigo-100 bg-indigo-50 p-3 text-xs font-bold text-indigo-800 active:scale-95"
               >
-                <Binoculars className="h-6 w-6" />
-                사전답사
+                <Plus className="h-6 w-6" />
+                예약 추가
               </button>
             </div>
           </section>
