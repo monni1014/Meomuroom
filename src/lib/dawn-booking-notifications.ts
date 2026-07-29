@@ -9,6 +9,7 @@ import { getSituationMessageTemplates } from "@/lib/situation-message-templates"
 import { lookupReservationReminderDelivery, sendReservationSituationMessage } from "@/lib/solapi-sms";
 import { dawnBookingAutoSendStartsAt, isDawnBookingStart } from "@/lib/dawn-booking-policy";
 import { buildReservationNotificationGroups } from "@/lib/reservation-notification-grouping";
+import { syncReservationContactImmediately } from "@/lib/google-people";
 
 const SITUATION_TYPE = "DAWN_BOOKING_CONFIRMATION";
 const MESSAGE_PREFIX = "situation:dawn-booking:";
@@ -151,7 +152,10 @@ async function createSkippedFollower(input: {
   }
 }
 
-export async function sendDueDawnBookingConfirmations(now = new Date()) {
+export async function sendDueDawnBookingConfirmations(
+  now = new Date(),
+  options: { contactSyncAlreadyAttempted?: boolean } = {},
+) {
   const pipelineStartedAt = Date.now();
   const startsAt = dawnBookingAutoSendStartsAt();
   if (!startsAt || now < startsAt) {
@@ -161,6 +165,8 @@ export async function sendDueDawnBookingConfirmations(now = new Date()) {
       sentCount: 0,
       dryRunCount: 0,
       waitingContactCount: 0,
+      contactSyncFailureCount: 0,
+      contactSyncTimeoutCount: 0,
       failedCount: 0,
       skippedCount: 0,
       recoveredCount: 0,
@@ -179,6 +185,8 @@ export async function sendDueDawnBookingConfirmations(now = new Date()) {
       sentCount: 0,
       dryRunCount: 0,
       waitingContactCount: 0,
+      contactSyncFailureCount: 0,
+      contactSyncTimeoutCount: 0,
       failedCount: 1,
       skippedCount: 0,
       ...recovery,
@@ -211,6 +219,8 @@ export async function sendDueDawnBookingConfirmations(now = new Date()) {
   let sentCount = 0;
   let dryRunCount = 0;
   let waitingContactCount = 0;
+  let contactSyncFailureCount = 0;
+  let contactSyncTimeoutCount = 0;
   let failedCount = 0;
   let skippedCount = 0;
 
@@ -240,6 +250,17 @@ export async function sendDueDawnBookingConfirmations(now = new Date()) {
     if (!isValidKoreanMobilePhone(phone)) {
       waitingContactCount += 1;
       continue;
+    }
+
+    if (!options.contactSyncAlreadyAttempted) {
+      const contactSync = await syncReservationContactImmediately(reservation.id, now);
+      if (!contactSync.success) {
+        contactSyncFailureCount += 1;
+        if (contactSync.timedOut) contactSyncTimeoutCount += 1;
+        console.warn(
+          `[DawnBookingNotification] Google contact pre-send sync did not complete: reservation=${reservation.id}, timed-out=${contactSync.timedOut}, reason=${contactSync.reason || "unknown"}. SMS will continue.`,
+        );
+      }
     }
 
     const dedupeKey = messageDedupeKey(reservation.id);
@@ -304,6 +325,8 @@ export async function sendDueDawnBookingConfirmations(now = new Date()) {
     sentCount,
     dryRunCount,
     waitingContactCount,
+    contactSyncFailureCount,
+    contactSyncTimeoutCount,
     failedCount,
     skippedCount,
     ...recovery,

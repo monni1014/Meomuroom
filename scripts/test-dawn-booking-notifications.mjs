@@ -30,15 +30,32 @@ const messagesPageSource = await readFile(
   new URL("../src/app/messages/page.tsx", import.meta.url),
   "utf8",
 );
+const rpaQueueSource = await readFile(
+  new URL("../src/lib/rpa-job-queue.ts", import.meta.url),
+  "utf8",
+);
+const googlePeopleSource = await readFile(
+  new URL("../src/lib/google-people.ts", import.meta.url),
+  "utf8",
+);
 
 assert.match(notificationSource, /createdAt: \{ gte: startsAt \}/);
 assert.match(notificationSource, /startTime: \{ gte: now \}/);
 assert.match(notificationSource, /isDawnBookingStart\(reservation\.startTime\)/);
 assert.match(notificationSource, /situation:dawn-booking:/);
 assert.match(notificationSource, /status: "SENDING"[\s\S]*?sendReservationSituationMessage/);
+assert.match(
+  notificationSource,
+  /syncReservationContactImmediately\(reservation\.id, now\)[\s\S]*?status: "SENDING"[\s\S]*?sendReservationSituationMessage/,
+);
 assert.match(notificationSource, /lookupReservationReminderDelivery[\s\S]*?중복 방지/);
 assert.match(webhookSource, /isStandardReservationReminder[\s\S]*?if \(message\.reservationId && isStandardReservationReminder\)/);
 assert.match(messagesPageSource, /reservation-reminder:[\s\S]*?reservation-test:/);
+assert.match(
+  rpaQueueSource,
+  /syncReservationContactImmediately\(reservationId, notificationNow\)[\s\S]*?sendDueDawnBookingConfirmations/,
+);
+assert.match(googlePeopleSource, /reservationId[\s\S]*?id: reservationId[\s\S]*?status: "CONFIRMED"/);
+assert.match(googlePeopleSource, /if \(!reservationId\) \{[\s\S]*?activeMappingKeys/);
 
 console.log("Dawn booking notification tests passed.");
-

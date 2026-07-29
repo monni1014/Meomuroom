@@ -103,6 +103,14 @@ export type GooglePeopleSyncResult = {
   restoredCount: number;
 };
 
+export type GooglePeopleImmediateSyncResult = {
+  success: boolean;
+  skipped: boolean;
+  timedOut: boolean;
+  reason?: string;
+  syncResult?: GooglePeopleSyncResult;
+};
+
 class PeopleApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -405,23 +413,93 @@ export async function getGooglePeopleStatus(): Promise<GooglePeopleStatus> {
 
 let syncQueue: Promise<GooglePeopleSyncResult> | null = null;
 let syncQueueStartedAt = 0;
+let syncQueueReservationId: string | null = null;
+
+type GooglePeopleSyncOptions = {
+  freshAfter?: Date;
+  reservationId?: string;
+};
 
 export function syncUpcomingReservationContacts(
   now = new Date(),
-  options: { freshAfter?: Date } = {},
+  options: GooglePeopleSyncOptions = {},
 ): Promise<GooglePeopleSyncResult> {
   if (syncQueue) {
-    if (!options.freshAfter || syncQueueStartedAt >= options.freshAfter.getTime()) return syncQueue;
+    const runningSyncCoversRequest = syncQueueReservationId === null
+      || syncQueueReservationId === (options.reservationId || null);
+    if (runningSyncCoversRequest && (!options.freshAfter || syncQueueStartedAt >= options.freshAfter.getTime())) {
+      return syncQueue;
+    }
     return syncQueue.then(() => syncUpcomingReservationContacts(now, options));
   }
   syncQueueStartedAt = Date.now();
-  syncQueue = runSyncUpcomingReservationContacts(now).finally(() => {
+  syncQueueReservationId = options.reservationId || null;
+  syncQueue = runSyncUpcomingReservationContacts(now, options.reservationId).finally(() => {
     syncQueue = null;
+    syncQueueReservationId = null;
   });
   return syncQueue;
 }
 
-async function runSyncUpcomingReservationContacts(now: Date): Promise<GooglePeopleSyncResult> {
+export async function syncReservationContactImmediately(
+  reservationId: string,
+  now = new Date(),
+  timeoutMs = 8_000,
+): Promise<GooglePeopleImmediateSyncResult> {
+  const requiredAfter = new Date();
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timeoutToken = Symbol("google-people-timeout");
+
+  try {
+    const result = await Promise.race([
+      syncUpcomingReservationContacts(now, {
+        freshAfter: requiredAfter,
+        reservationId,
+      }),
+      new Promise<typeof timeoutToken>((resolve) => {
+        timeout = setTimeout(() => resolve(timeoutToken), Math.max(1_000, timeoutMs));
+      }),
+    ]);
+
+    if (result === timeoutToken) {
+      return {
+        success: false,
+        skipped: false,
+        timedOut: true,
+        reason: `Google 연락처 저장이 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않아 문자를 먼저 발송합니다.`,
+      };
+    }
+    if (result.skipped) {
+      return {
+        success: false,
+        skipped: true,
+        timedOut: false,
+        reason: result.reason || "Google 연락처 계정이 연결되지 않았습니다.",
+        syncResult: result,
+      };
+    }
+    return {
+      success: true,
+      skipped: false,
+      timedOut: false,
+      syncResult: result,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      skipped: false,
+      timedOut: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function runSyncUpcomingReservationContacts(
+  now: Date,
+  reservationId?: string,
+): Promise<GooglePeopleSyncResult> {
   const status = await getGooglePeopleStatus();
   if (!status.configured || !status.connected) {
     return {
@@ -439,12 +517,18 @@ async function runSyncUpcomingReservationContacts(now: Date): Promise<GooglePeop
   const syncStartedAt = new Date();
   try {
     const reservations = await prisma.reservation.findMany({
-      where: {
-        status: "CONFIRMED",
-        isNoShow: false,
-        endTime: { gte: new Date(now.getTime() - CONTACT_RETENTION_HOURS * 60 * 60 * 1000) },
-        startTime: { lte: new Date(now.getTime() + CONTACT_LOOKAHEAD_DAYS * DAY_MS) },
-      },
+      where: reservationId
+        ? {
+            id: reservationId,
+            status: "CONFIRMED",
+            isNoShow: false,
+          }
+        : {
+            status: "CONFIRMED",
+            isNoShow: false,
+            endTime: { gte: new Date(now.getTime() - CONTACT_RETENTION_HOURS * 60 * 60 * 1000) },
+            startTime: { lte: new Date(now.getTime() + CONTACT_LOOKAHEAD_DAYS * DAY_MS) },
+          },
       select: {
         id: true,
         roomName: true,
@@ -529,24 +613,26 @@ async function runSyncUpcomingReservationContacts(now: Date): Promise<GooglePeop
       updatedCount += 1;
     }
 
-    const activeMappingKeys = new Set([...targets.keys()].map(contactSettingKey));
-    for (const mappingRecord of mappings) {
-      if (activeMappingKeys.has(mappingRecord.key)) continue;
-      const mapping = contactMappings.get(mappingRecord.key);
-      if (!mapping) {
-        await prisma.appSetting.delete({ where: { key: mappingRecord.key } });
-        continue;
-      }
+    if (!reservationId) {
+      const activeMappingKeys = new Set([...targets.keys()].map(contactSettingKey));
+      for (const mappingRecord of mappings) {
+        if (activeMappingKeys.has(mappingRecord.key)) continue;
+        const mapping = contactMappings.get(mappingRecord.key);
+        if (!mapping) {
+          await prisma.appSetting.delete({ where: { key: mappingRecord.key } });
+          continue;
+        }
 
-      if (mapping.ownership === "CREATED") {
-        await deletePerson(mapping.resourceName);
-        deletedCount += 1;
-      } else {
-        const person = await getPerson(mapping.resourceName);
-        if (person) await restorePerson(person, mapping);
-        restoredCount += 1;
+        if (mapping.ownership === "CREATED") {
+          await deletePerson(mapping.resourceName);
+          deletedCount += 1;
+        } else {
+          const person = await getPerson(mapping.resourceName);
+          if (person) await restorePerson(person, mapping);
+          restoredCount += 1;
+        }
+        await prisma.appSetting.delete({ where: { key: mappingRecord.key } });
       }
-      await prisma.appSetting.delete({ where: { key: mappingRecord.key } });
     }
 
     const result = {

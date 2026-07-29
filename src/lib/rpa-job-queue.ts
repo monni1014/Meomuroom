@@ -72,15 +72,25 @@ function triggerPostRpaReservationCommunication(job: RpaEmailJob, reservationId?
   void import("./reservation-notifications")
     .then(async ({ sendDueReservationReminders }) => {
       const { sendDueDawnBookingConfirmations } = await import("./dawn-booking-notifications");
+      const { syncReservationContactImmediately } = await import("./google-people");
       const { sendDueOnTimeExitMessages } = await import("./on-time-exit-notifications");
-      const dawnResult = await sendDueDawnBookingConfirmations();
+      const notificationNow = new Date();
+      const contactSync = await syncReservationContactImmediately(reservationId, notificationNow);
+      if (!contactSync.success) {
+        console.warn(
+          `[RPAQueue] Immediate Google contact sync did not complete: reservation=${reservationId}, timed-out=${contactSync.timedOut}, reason=${contactSync.reason || "unknown"}. Customer SMS will continue.`,
+        );
+      }
+      const dawnResult = await sendDueDawnBookingConfirmations(notificationNow, {
+        contactSyncAlreadyAttempted: true,
+      });
       const result = await sendDueReservationReminders();
       const exitResult = await sendDueOnTimeExitMessages();
-      return { result, dawnResult, exitResult };
+      return { result, dawnResult, exitResult, contactSync };
     })
-    .then(({ result, dawnResult, exitResult }) => {
+    .then(({ result, dawnResult, exitResult, contactSync }) => {
       console.log(
-        `[RPAQueue] Post-RPA contact sync/notification: reservation=${reservationId}, guide-checked=${result.checkedCount}, guide-sent=${result.sentCount}, dawn-checked=${dawnResult.checkedCount}, dawn-sent=${dawnResult.sentCount}, exit-checked=${exitResult.checkedCount}, exit-sent=${exitResult.sentCount}, waiting-contact=${result.waitingContactCount + dawnResult.waitingContactCount}, waiting-contact-sync=${result.waitingContactSyncCount}, google-sync=${result.contactSyncMs}ms, pipeline=${result.pipelineMs + dawnResult.pipelineMs + exitResult.pipelineMs}ms`,
+        `[RPAQueue] Post-RPA contact sync/notification: reservation=${reservationId}, immediate-contact-sync=${contactSync.success ? "ready" : contactSync.timedOut ? "timed-out" : "failed"}, guide-checked=${result.checkedCount}, guide-sent=${result.sentCount}, dawn-checked=${dawnResult.checkedCount}, dawn-sent=${dawnResult.sentCount}, exit-checked=${exitResult.checkedCount}, exit-sent=${exitResult.sentCount}, waiting-contact=${result.waitingContactCount + dawnResult.waitingContactCount}, waiting-contact-sync=${result.waitingContactSyncCount}, google-sync=${result.contactSyncMs}ms, pipeline=${result.pipelineMs + dawnResult.pipelineMs + exitResult.pipelineMs}ms`,
       );
     })
     .catch((error) => {
