@@ -1354,7 +1354,7 @@ export default function CalendarPage() {
           "scroll-mt-4 overflow-hidden border border-slate-100 bg-white",
           isMobileAgendaOpen
             ? cn(
-                "fixed inset-x-0 bottom-0 z-[70] block max-h-[90dvh] touch-pan-y rounded-t-[28px] shadow-2xl transform-gpu will-change-transform [backface-visibility:hidden] transition-transform duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:static sm:z-auto sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:shadow-sm sm:transition-none",
+                "fixed inset-x-0 bottom-0 z-[70] block h-[90dvh] max-h-[90dvh] touch-pan-y rounded-t-[28px] shadow-2xl transform-gpu will-change-transform [backface-visibility:hidden] transition-transform duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:static sm:z-auto sm:h-auto sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:shadow-sm sm:transition-none",
                 isMobileAgendaVisible ? "translate-y-0" : "translate-y-[calc(100%+1rem)]",
               )
             : "hidden rounded-2xl shadow-sm sm:block",
@@ -1362,7 +1362,7 @@ export default function CalendarPage() {
       >
         <div
           data-mobile-agenda-scroll
-          className="max-h-[90dvh] space-y-4 overflow-y-auto overscroll-y-contain p-4 [scrollbar-gutter:stable] sm:max-h-none sm:overflow-visible sm:overscroll-auto"
+          className="h-full max-h-[90dvh] space-y-4 overflow-y-auto overscroll-y-contain p-4 [scrollbar-gutter:stable] sm:h-auto sm:max-h-none sm:overflow-visible sm:overscroll-auto"
         >
         <div
           className="sticky -top-4 z-10 -mx-4 -mt-4 border-b border-slate-100 bg-white px-4 pb-3 pt-2 sm:static sm:mx-0 sm:mt-0 sm:border-slate-50 sm:p-0 sm:pb-2"
@@ -1636,7 +1636,7 @@ export default function CalendarPage() {
                       )}
                     </div>
                     <div className="flex shrink-0 items-center">
-                      <ChevronDown className={cn("h-4 w-4 text-slate-400 transition-transform", isExpanded && "rotate-180")} />
+                      <ChevronDown className="h-4 w-4 text-slate-400" />
                     </div>
                   </div>
 
