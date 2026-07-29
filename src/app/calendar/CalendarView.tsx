@@ -402,12 +402,12 @@ export default function CalendarPage() {
   const closeMobileAgenda = useCallback(() => {
     setIsMobileAgendaVisible(false);
     setIsMobileAddMenuOpen(false);
-    setExpandedReservationId(null);
     if (mobileAgendaCloseTimerRef.current) clearTimeout(mobileAgendaCloseTimerRef.current);
     mobileAgendaCloseTimerRef.current = setTimeout(() => {
       setIsMobileAgendaOpen(false);
+      setExpandedReservationId(null);
       mobileAgendaCloseTimerRef.current = null;
-    }, 380);
+    }, 420);
   }, []);
 
   const selectCalendarDay = (day: Date) => {
@@ -1229,7 +1229,7 @@ export default function CalendarPage() {
           type="button"
           aria-label="날짜 상세 닫기"
           className={cn(
-            "fixed inset-0 z-[60] bg-slate-950/35 backdrop-blur-[1px] transition-opacity duration-300 sm:hidden",
+            "fixed inset-0 z-[60] bg-slate-950/35 backdrop-blur-[1px] transition-opacity duration-[360ms] ease-out sm:hidden",
             isMobileAgendaVisible ? "opacity-100" : "pointer-events-none opacity-0",
           )}
           onClick={closeMobileAgenda}
@@ -1250,8 +1250,8 @@ export default function CalendarPage() {
           "scroll-mt-4 space-y-4 border border-slate-100 bg-white p-4",
           isMobileAgendaOpen
             ? cn(
-                "fixed inset-x-0 bottom-0 z-[70] block max-h-[90dvh] touch-pan-y overflow-y-auto rounded-t-[28px] shadow-2xl will-change-transform transition-transform duration-[380ms] ease-[cubic-bezier(0.22,1,0.36,1)] sm:static sm:z-auto sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:shadow-sm sm:transition-none",
-                isMobileAgendaVisible ? "translate-y-0" : "translate-y-full",
+                "fixed inset-x-0 bottom-0 z-[70] block max-h-[90dvh] touch-pan-y overflow-y-auto rounded-t-[28px] shadow-2xl transform-gpu will-change-transform [backface-visibility:hidden] transition-transform duration-[420ms] ease-[cubic-bezier(0.16,1,0.3,1)] sm:static sm:z-auto sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:shadow-sm sm:transition-none",
+                isMobileAgendaVisible ? "translate-y-0" : "translate-y-[calc(100%+1rem)]",
               )
             : "hidden rounded-2xl shadow-sm sm:block",
         )}
