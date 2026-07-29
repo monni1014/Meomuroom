@@ -5,6 +5,7 @@ import {
   RESERVATION_END_REMINDER_LEAD_MS,
   resolveReservationEndReminderGroup,
   resolveReservationEndReminderHeadCount,
+  splitReservationEndReminderGroups,
 } from "@/lib/reservation-end-reminder-policy";
 import { getKstDayRange } from "@/lib/kst-time";
 import {
@@ -126,15 +127,23 @@ export async function sendDueReservationEndReminders(now = new Date()) {
 
   for (const reservation of reservations) {
     const notificationGroupKey = reservationNotificationGroupKey(reservation);
-    const group = notificationGroupKey
+    const sameDayGroup = notificationGroupKey
       ? notificationGroups.get(notificationGroupKey) || [reservation]
       : [reservation];
+    const group = splitReservationEndReminderGroups(sameDayGroup).find(
+      (members) => members.some((member) => member.id === reservation.id),
+    ) || [reservation];
     const resolvedGroup = resolveReservationEndReminderGroup(group);
     if (resolvedGroup.reminder?.id !== reservation.id) {
       skippedCount += 1;
       continue;
     }
-    groups.set(notificationGroupKey || `reservation:${reservation.id}`, resolvedGroup.members);
+    groups.set(
+      notificationGroupKey
+        ? `${notificationGroupKey}|segment:${resolvedGroup.members[0]?.id || reservation.id}`
+        : `reservation:${reservation.id}`,
+      resolvedGroup.members,
+    );
   }
 
   let sentCount = 0;

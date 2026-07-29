@@ -5,6 +5,7 @@ import {
   isReservationEndReminderDue,
   resolveReservationEndReminderGroup,
   resolveReservationEndReminderHeadCount,
+  splitReservationEndReminderGroups,
 } from "../src/lib/reservation-end-reminder-policy.ts";
 
 const now = new Date("2026-07-24T05:00:00.000Z");
@@ -42,6 +43,37 @@ const splitPaymentGroup = resolveReservationEndReminderGroup([
 ]);
 assert.equal(splitPaymentGroup.reminder?.id, "last");
 assert.equal(splitPaymentGroup.members.length, 2);
+const separatedGroups = splitReservationEndReminderGroups([
+  {
+    id: "morning",
+    startTime: new Date("2026-07-29T01:00:00.000Z"),
+    endTime: new Date("2026-07-29T03:00:00.000Z"),
+  },
+  {
+    id: "afternoon",
+    startTime: new Date("2026-07-29T05:00:00.000Z"),
+    endTime: new Date("2026-07-29T07:00:00.000Z"),
+  },
+]);
+assert.deepEqual(separatedGroups.map((group) => group.map((member) => member.id)), [
+  ["morning"],
+  ["afternoon"],
+]);
+const continuousGroups = splitReservationEndReminderGroups([
+  {
+    id: "first",
+    startTime: new Date("2026-07-29T01:00:00.000Z"),
+    endTime: new Date("2026-07-29T03:00:00.000Z"),
+  },
+  {
+    id: "second",
+    startTime: new Date("2026-07-29T03:00:00.000Z"),
+    endTime: new Date("2026-07-29T05:00:00.000Z"),
+  },
+]);
+assert.deepEqual(continuousGroups.map((group) => group.map((member) => member.id)), [
+  ["first", "second"],
+]);
 assert.equal(isReservationEndReminderDue({
   startTime: new Date("2026-07-24T04:00:00.000Z"),
   endTime: new Date("2026-07-24T05:10:00.000Z"),
@@ -66,6 +98,7 @@ const reminderSource = await readFile(
   "utf8",
 );
 assert.match(reminderSource, /buildReservationNotificationGroups\(groupCandidates\)/);
+assert.match(reminderSource, /splitReservationEndReminderGroups\(sameDayGroup\)/);
 assert.match(reminderSource, /reservationNotificationGroupKey\(reservation\)/);
 assert.match(reminderSource, /resolvedGroup\.reminder\?\.id !== reservation\.id/);
 assert.match(reminderSource, /groupAlreadySent\(group\.map\(\(member\) => member\.id\)\)/);

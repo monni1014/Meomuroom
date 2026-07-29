@@ -1,5 +1,35 @@
 export const RESERVATION_END_REMINDER_LEAD_MS = 10 * 60 * 1000;
 
+export function splitReservationEndReminderGroups<
+  T extends { id: string; startTime: Date; endTime: Date },
+>(members: T[]) {
+  const orderedMembers = [...members].sort((left, right) => (
+    left.startTime.getTime() - right.startTime.getTime()
+    || left.endTime.getTime() - right.endTime.getTime()
+    || left.id.localeCompare(right.id)
+  ));
+  const groups: T[][] = [];
+
+  for (const member of orderedMembers) {
+    const currentGroup = groups.at(-1);
+    if (!currentGroup) {
+      groups.push([member]);
+      continue;
+    }
+
+    const currentEndTime = Math.max(
+      ...currentGroup.map((item) => item.endTime.getTime()),
+    );
+    if (member.startTime.getTime() <= currentEndTime) {
+      currentGroup.push(member);
+    } else {
+      groups.push([member]);
+    }
+  }
+
+  return groups;
+}
+
 export function resolveReservationEndReminderGroup<
   T extends { id: string; endTime: Date },
 >(members: T[]) {
