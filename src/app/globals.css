@@ -24,6 +24,43 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+@keyframes calendar-month-enter-next {
+  from {
+    transform: translate3d(34px, 0, 0);
+    opacity: 0.68;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes calendar-month-enter-previous {
+  from {
+    transform: translate3d(-34px, 0, 0);
+    opacity: 0.68;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+.calendar-month-enter-next {
+  animation: calendar-month-enter-next 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.calendar-month-enter-previous {
+  animation: calendar-month-enter-previous 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-month-enter-next,
+  .calendar-month-enter-previous {
+    animation: none;
+  }
+}
+
 /* Keep the desktop density unchanged while making phone screens slightly more compact. */
 @media (max-width: 767px), (max-height: 767px) and (pointer: coarse) {
   html {

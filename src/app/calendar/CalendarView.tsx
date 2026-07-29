@@ -286,7 +286,10 @@ export default function CalendarPage() {
   const [expandedReservationId, setExpandedReservationId] = useState<string | null>(null);
   const selectedDaySectionRef = useRef<HTMLElement>(null);
   const hasFocusedInitialAgendaRef = useRef(false);
-  const calendarSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const calendarSwipeStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const [calendarSwipeOffsetX, setCalendarSwipeOffsetX] = useState(0);
+  const [isCalendarDragging, setIsCalendarDragging] = useState(false);
+  const [calendarSlideDirection, setCalendarSlideDirection] = useState<"next" | "previous" | null>(null);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
   const [editId, setEditId] = useState<string | null>(null);
@@ -422,18 +425,43 @@ export default function CalendarPage() {
   const lastDay = endOfMonth(currentDate);
   const daysInMonth = eachDayOfInterval({ start: firstDay, end: lastDay });
 
-  const nextMonth = () => setCurrentDate((date) => addMonths(date, 1));
-  const prevMonth = () => setCurrentDate((date) => subMonths(date, 1));
+  const nextMonth = () => {
+    setCalendarSlideDirection("next");
+    setCurrentDate((date) => addMonths(date, 1));
+  };
+  const prevMonth = () => {
+    setCalendarSlideDirection("previous");
+    setCurrentDate((date) => subMonths(date, 1));
+  };
 
   const handleCalendarPointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (!event.isPrimary || event.button !== 0) return;
-    calendarSwipeStartRef.current = { x: event.clientX, y: event.clientY };
+    calendarSwipeStartRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    setCalendarSlideDirection(null);
+    setCalendarSwipeOffsetX(0);
+    setIsCalendarDragging(true);
+  };
+
+  const handleCalendarPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const start = calendarSwipeStartRef.current;
+    if (!start || start.pointerId !== event.pointerId || !event.isPrimary) return;
+
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) <= Math.abs(deltaY)) return;
+
+    if (event.cancelable) event.preventDefault();
+    const maxOffset = Math.min(event.currentTarget.clientWidth * 0.24, 88);
+    const resistedOffset = Math.sign(deltaX) * Math.min(Math.abs(deltaX) * 0.68, maxOffset);
+    setCalendarSwipeOffsetX(resistedOffset);
   };
 
   const handleCalendarPointerUp = (event: React.PointerEvent<HTMLElement>) => {
     const start = calendarSwipeStartRef.current;
     calendarSwipeStartRef.current = null;
-    if (!start || !event.isPrimary) return;
+    setIsCalendarDragging(false);
+    setCalendarSwipeOffsetX(0);
+    if (!start || start.pointerId !== event.pointerId || !event.isPrimary) return;
 
     const deltaX = event.clientX - start.x;
     const deltaY = event.clientY - start.y;
@@ -943,13 +971,31 @@ export default function CalendarPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
       {/* Calendar Grid Section */}
       <section
-        className="touch-pan-y bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col"
+        className="touch-pan-y overflow-hidden bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col"
         onPointerDown={handleCalendarPointerDown}
+        onPointerMove={handleCalendarPointerMove}
         onPointerUp={handleCalendarPointerUp}
         onPointerCancel={() => {
           calendarSwipeStartRef.current = null;
+          setIsCalendarDragging(false);
+          setCalendarSwipeOffsetX(0);
         }}
       >
+        <div
+          key={format(currentDate, "yyyy-MM")}
+          className={cn(
+            "will-change-transform",
+            !isCalendarDragging && calendarSlideDirection === "next" && "calendar-month-enter-next",
+            !isCalendarDragging && calendarSlideDirection === "previous" && "calendar-month-enter-previous",
+          )}
+          style={{
+            transform: `translate3d(${calendarSwipeOffsetX}px, 0, 0)`,
+            opacity: 1 - Math.min(Math.abs(calendarSwipeOffsetX) / 420, 0.16),
+            transition: isCalendarDragging
+              ? "none"
+              : "transform 190ms cubic-bezier(0.22, 1, 0.36, 1), opacity 190ms ease-out",
+          }}
+        >
         {/* Calendar Header Nav */}
         <div className="flex justify-between items-center mb-4 sm:mb-6">
           <button onClick={prevMonth} className="p-1 rounded-full hover:bg-slate-50 active:scale-95 transition-all">
@@ -962,6 +1008,7 @@ export default function CalendarPage() {
             <button
               onClick={() => {
                 const today = new Date();
+                setCalendarSlideDirection(null);
                 setCurrentDate(today);
                 setSelectedDate(today);
                 replaceCalendarState(today, roomFilter);
@@ -1135,6 +1182,7 @@ export default function CalendarPage() {
               </button>
             );
           })}
+        </div>
         </div>
       </section>
 
