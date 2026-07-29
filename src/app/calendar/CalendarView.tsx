@@ -1598,7 +1598,7 @@ export default function CalendarPage() {
                             />
                           )}
                           {!isExpanded && res.phone && (
-                            <span className="flex min-w-0 max-w-[132px] shrink-0 items-center gap-1 text-[13px] font-medium leading-none text-slate-500">
+                            <span className="ml-0.5 flex min-w-0 max-w-[132px] shrink-0 items-center gap-1 text-[13px] font-medium leading-none text-slate-500">
                               <PhoneActionLink
                                 phone={res.phone}
                                 contactName={res.customerName}
