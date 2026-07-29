@@ -54,9 +54,41 @@ body {
   animation: calendar-month-enter-previous 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+@keyframes agenda-day-enter-next {
+  from {
+    transform: translate3d(30px, 0, 0);
+    opacity: 0.45;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes agenda-day-enter-previous {
+  from {
+    transform: translate3d(-30px, 0, 0);
+    opacity: 0.45;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+.agenda-day-enter-next {
+  animation: agenda-day-enter-next 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.agenda-day-enter-previous {
+  animation: agenda-day-enter-previous 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .calendar-month-enter-next,
-  .calendar-month-enter-previous {
+  .calendar-month-enter-previous,
+  .agenda-day-enter-next,
+  .agenda-day-enter-previous {
     animation: none;
   }
 }

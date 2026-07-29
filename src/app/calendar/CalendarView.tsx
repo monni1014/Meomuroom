@@ -277,6 +277,7 @@ export default function CalendarPage() {
   const [isScheduleTypeModalOpen, setIsScheduleTypeModalOpen] = useState(false);
   const [isCleaningModalOpen, setIsCleaningModalOpen] = useState(false);
   const [isMobileAgendaOpen, setIsMobileAgendaOpen] = useState(false);
+  const [isMobileAgendaVisible, setIsMobileAgendaVisible] = useState(false);
   const [isMobileAddMenuOpen, setIsMobileAddMenuOpen] = useState(false);
   const [roomFilter, setRoomFilter] = useState<RoomFilter>(initialRoomFilter);
   const [expandedReservationId, setExpandedReservationId] = useState<string | null>(null);
@@ -287,6 +288,9 @@ export default function CalendarPage() {
   const [isCalendarDragging, setIsCalendarDragging] = useState(false);
   const [calendarSlideDirection, setCalendarSlideDirection] = useState<"next" | "previous" | null>(null);
   const agendaGestureStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const agendaTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const mobileAgendaCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [agendaSlideDirection, setAgendaSlideDirection] = useState<"next" | "previous" | null>(null);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
   const [editId, setEditId] = useState<string | null>(null);
@@ -384,13 +388,35 @@ export default function CalendarPage() {
     window.history.replaceState(null, "", `/calendar?${params.toString()}`);
   };
 
+  const openMobileAgenda = useCallback(() => {
+    if (mobileAgendaCloseTimerRef.current) {
+      clearTimeout(mobileAgendaCloseTimerRef.current);
+      mobileAgendaCloseTimerRef.current = null;
+    }
+    setIsMobileAgendaOpen(true);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => setIsMobileAgendaVisible(true));
+    });
+  }, []);
+
+  const closeMobileAgenda = useCallback(() => {
+    setIsMobileAgendaVisible(false);
+    setIsMobileAddMenuOpen(false);
+    setExpandedReservationId(null);
+    if (mobileAgendaCloseTimerRef.current) clearTimeout(mobileAgendaCloseTimerRef.current);
+    mobileAgendaCloseTimerRef.current = setTimeout(() => {
+      setIsMobileAgendaOpen(false);
+      mobileAgendaCloseTimerRef.current = null;
+    }, 380);
+  }, []);
+
   const selectCalendarDay = (day: Date) => {
     setSelectedDate(day);
     setExpandedReservationId(null);
     replaceCalendarState(day, roomFilter);
 
     if (window.matchMedia("(max-width: 639px)").matches) {
-      setIsMobileAgendaOpen(true);
+      openMobileAgenda();
     }
   };
 
@@ -406,6 +432,7 @@ export default function CalendarPage() {
 
   const moveSelectedDay = (offset: number) => {
     const nextDate = addDays(selectedDate, offset);
+    setAgendaSlideDirection(offset > 0 ? "next" : "previous");
     setSelectedDate(nextDate);
     setExpandedReservationId(null);
     if (!isSameMonth(nextDate, currentDate)) setCurrentDate(nextDate);
@@ -413,7 +440,7 @@ export default function CalendarPage() {
   };
 
   const handleAgendaGestureStart = (event: React.PointerEvent<HTMLElement>) => {
-    if (!event.isPrimary || event.button !== 0) return;
+    if (event.pointerType === "touch" || !event.isPrimary || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     agendaGestureStartRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
   };
@@ -433,12 +460,12 @@ export default function CalendarPage() {
       return;
     }
     if (deltaY >= 70 && Math.abs(deltaY) > Math.abs(deltaX) * 1.2) {
-      setIsMobileAgendaOpen(false);
-      setExpandedReservationId(null);
+      closeMobileAgenda();
     }
   };
 
   const handleAgendaGestureMove = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.pointerType === "touch") return;
     const start = agendaGestureStartRef.current;
     if (!start || start.pointerId !== event.pointerId || !event.isPrimary) return;
 
@@ -451,8 +478,33 @@ export default function CalendarPage() {
     }
     if (deltaY >= 70 && Math.abs(deltaY) > Math.abs(deltaX) * 1.2) {
       agendaGestureStartRef.current = null;
-      setIsMobileAgendaOpen(false);
-      setExpandedReservationId(null);
+      closeMobileAgenda();
+    }
+  };
+
+  const handleAgendaTouchStart = (event: React.TouchEvent<HTMLElement>) => {
+    if (event.touches.length !== 1) {
+      agendaTouchStartRef.current = null;
+      return;
+    }
+    const touch = event.touches[0];
+    agendaTouchStartRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleAgendaTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
+    const start = agendaTouchStartRef.current;
+    agendaTouchStartRef.current = null;
+    const touch = event.changedTouches[0];
+    if (!start || !touch) return;
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    if (Math.abs(deltaX) >= 65 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+      moveSelectedDay(deltaX < 0 ? 1 : -1);
+      return;
+    }
+    if (deltaY >= 75 && Math.abs(deltaY) > Math.abs(deltaX) * 1.2) {
+      closeMobileAgenda();
     }
   };
 
@@ -547,7 +599,7 @@ export default function CalendarPage() {
     hasFocusedInitialAgendaRef.current = true;
     const frame = window.requestAnimationFrame(() => {
       if (window.matchMedia("(max-width: 639px)").matches) {
-        setIsMobileAgendaOpen(true);
+        openMobileAgenda();
       } else {
         selectedDaySectionRef.current?.scrollIntoView({
           behavior: "auto",
@@ -557,7 +609,11 @@ export default function CalendarPage() {
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [isLoading, shouldFocusAgenda]);
+  }, [isLoading, openMobileAgenda, shouldFocusAgenda]);
+
+  useEffect(() => () => {
+    if (mobileAgendaCloseTimerRef.current) clearTimeout(mobileAgendaCloseTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!isMobileAgendaOpen && !isMobileAddMenuOpen) return;
@@ -944,7 +1000,7 @@ export default function CalendarPage() {
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4 p-4 pb-24 sm:space-y-6 md:p-8">
-      <header className="flex items-start justify-between gap-3 pt-8 sm:items-center sm:pb-4">
+      <header className="hidden items-start justify-between gap-3 pt-8 sm:flex sm:items-center sm:pb-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">통합 캘린더</h1>
         </div>
@@ -1084,7 +1140,7 @@ export default function CalendarPage() {
                 key={day.toISOString()}
                 onClick={() => selectCalendarDay(day)}
                 className={cn(
-                  "relative flex min-h-[104px] flex-col items-stretch rounded-lg p-0.5 transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
+                  "relative flex min-h-[86px] flex-col items-stretch rounded-lg p-0.5 transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
                   isSelected
                     ? "bg-indigo-50 text-indigo-800 sm:bg-[#d6ddff] sm:text-indigo-900"
                     : "hover:bg-slate-50 text-slate-700",
@@ -1129,11 +1185,6 @@ export default function CalendarPage() {
                       </span>
                     );
                   })}
-                  {dayReservations.length > 4 && (
-                    <span className="px-1 text-left text-[9px] font-bold leading-none text-slate-400">
-                      +{dayReservations.length - 4}건
-                    </span>
-                  )}
                 </div>
 
                 <div className="mt-1 hidden h-2 justify-center gap-0.5 sm:flex">
@@ -1177,34 +1228,47 @@ export default function CalendarPage() {
         <button
           type="button"
           aria-label="날짜 상세 닫기"
-          className="fixed inset-0 z-[60] bg-slate-950/35 backdrop-blur-[1px] sm:hidden"
-          onClick={() => {
-            setIsMobileAgendaOpen(false);
-            setExpandedReservationId(null);
-          }}
+          className={cn(
+            "fixed inset-0 z-[60] bg-slate-950/35 backdrop-blur-[1px] transition-opacity duration-300 sm:hidden",
+            isMobileAgendaVisible ? "opacity-100" : "pointer-events-none opacity-0",
+          )}
+          onClick={closeMobileAgenda}
         />
       )}
 
       {/* Selected Day Reservations List */}
       <section
         ref={selectedDaySectionRef}
+        onPointerDown={handleAgendaGestureStart}
+        onPointerMove={handleAgendaGestureMove}
+        onPointerUp={handleAgendaGestureEnd}
+        onPointerCancel={() => { agendaGestureStartRef.current = null; }}
+        onTouchStart={handleAgendaTouchStart}
+        onTouchEnd={handleAgendaTouchEnd}
+        onTouchCancel={() => { agendaTouchStartRef.current = null; }}
         className={cn(
           "scroll-mt-4 space-y-4 border border-slate-100 bg-white p-4",
           isMobileAgendaOpen
-            ? "fixed inset-x-0 bottom-0 z-[70] block max-h-[90dvh] overflow-y-auto rounded-t-[28px] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:shadow-sm"
+            ? cn(
+                "fixed inset-x-0 bottom-0 z-[70] block max-h-[90dvh] touch-pan-y overflow-y-auto rounded-t-[28px] shadow-2xl will-change-transform transition-transform duration-[380ms] ease-[cubic-bezier(0.22,1,0.36,1)] sm:static sm:z-auto sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:shadow-sm sm:transition-none",
+                isMobileAgendaVisible ? "translate-y-0" : "translate-y-full",
+              )
             : "hidden rounded-2xl shadow-sm sm:block",
         )}
       >
         <div
-          className="sticky -top-4 z-10 -mx-4 -mt-4 touch-none border-b border-slate-100 bg-white px-4 pb-3 pt-2 sm:static sm:mx-0 sm:mt-0 sm:border-slate-50 sm:p-0 sm:pb-2"
-          onPointerDown={handleAgendaGestureStart}
-          onPointerMove={handleAgendaGestureMove}
-          onPointerUp={handleAgendaGestureEnd}
-          onPointerCancel={() => { agendaGestureStartRef.current = null; }}
+          className="sticky -top-4 z-10 -mx-4 -mt-4 border-b border-slate-100 bg-white px-4 pb-3 pt-2 sm:static sm:mx-0 sm:mt-0 sm:border-slate-50 sm:p-0 sm:pb-2"
         >
           <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
           <div className="flex items-center justify-between gap-3 touch-none">
-          <h3 className="text-sm font-bold text-slate-800">
+          <h3
+            key={`agenda-heading-${format(selectedDate, "yyyy-MM-dd")}`}
+            className={cn(
+              "text-sm font-bold text-slate-800",
+              agendaSlideDirection === "next" && "agenda-day-enter-next",
+              agendaSlideDirection === "previous" && "agenda-day-enter-previous",
+            )}
+          >
             {format(selectedDate, "M월 d일")} 일정 ({selectedAgendaItems.length}건)
           </h3>
           <div className="flex items-center gap-2">
@@ -1226,12 +1290,16 @@ export default function CalendarPage() {
             </button>
           </div>
           </div>
-          <p className="mt-1 text-center text-[10px] font-medium text-slate-400 sm:hidden">
-            좌우로 날짜 이동 · 아래로 밀어 닫기
-          </p>
         </div>
 
-        <div className="space-y-3">
+        <div
+          key={`agenda-list-${format(selectedDate, "yyyy-MM-dd")}`}
+          className={cn(
+            "space-y-3",
+            agendaSlideDirection === "next" && "agenda-day-enter-next",
+            agendaSlideDirection === "previous" && "agenda-day-enter-previous",
+          )}
+        >
           {isLoading ? (
             <div className="text-center py-6 text-slate-400 text-xs">일정 데이터를 불러오는 중...</div>
           ) : selectedAgendaItems.length === 0 ? (
