@@ -286,6 +286,7 @@ export default function CalendarPage() {
   const [expandedReservationId, setExpandedReservationId] = useState<string | null>(null);
   const selectedDaySectionRef = useRef<HTMLElement>(null);
   const hasFocusedInitialAgendaRef = useRef(false);
+  const calendarSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
   const [editId, setEditId] = useState<string | null>(null);
@@ -421,8 +422,27 @@ export default function CalendarPage() {
   const lastDay = endOfMonth(currentDate);
   const daysInMonth = eachDayOfInterval({ start: firstDay, end: lastDay });
 
-  const nextMonth = () => setCurrentDate(addMonths(currentDate, 1));
-  const prevMonth = () => setCurrentDate(subMonths(currentDate, 1));
+  const nextMonth = () => setCurrentDate((date) => addMonths(date, 1));
+  const prevMonth = () => setCurrentDate((date) => subMonths(date, 1));
+
+  const handleCalendarPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    calendarSwipeStartRef.current = { x: event.clientX, y: event.clientY };
+  };
+
+  const handleCalendarPointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    const start = calendarSwipeStartRef.current;
+    calendarSwipeStartRef.current = null;
+    if (!start || !event.isPrimary) return;
+
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    const isHorizontalSwipe = Math.abs(deltaX) >= 55 && Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
+    if (!isHorizontalSwipe) return;
+
+    if (deltaX < 0) nextMonth();
+    else prevMonth();
+  };
 
   // Filter reservations for the selected date and room
   const filteredReservations = roomFilter === "all" 
@@ -922,7 +942,14 @@ export default function CalendarPage() {
       {/* 데스크톱에서는 달력과 일정 목록을 좌우로 배치 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
       {/* Calendar Grid Section */}
-      <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col">
+      <section
+        className="touch-pan-y bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col"
+        onPointerDown={handleCalendarPointerDown}
+        onPointerUp={handleCalendarPointerUp}
+        onPointerCancel={() => {
+          calendarSwipeStartRef.current = null;
+        }}
+      >
         {/* Calendar Header Nav */}
         <div className="flex justify-between items-center mb-4 sm:mb-6">
           <button onClick={prevMonth} className="p-1 rounded-full hover:bg-slate-50 active:scale-95 transition-all">
