@@ -403,10 +403,10 @@ export default function CalendarPage() {
   );
 
   const replaceCalendarState = (date: Date, room: RoomFilter) => {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(window.location.search);
     params.set("date", format(date, "yyyy-MM-dd"));
     params.set("room", room);
-    window.history.replaceState(null, "", `/calendar?${params.toString()}`);
+    window.history.replaceState(window.history.state, "", `/calendar?${params.toString()}`);
   };
 
   const openMobileAgenda = useCallback(() => {
@@ -474,13 +474,41 @@ export default function CalendarPage() {
     }, 420);
   }, []);
 
+  const openMobileAgendaWithHistory = useCallback((date: Date, room: RoomFilter) => {
+    const currentState = window.history.state && typeof window.history.state === "object"
+      ? window.history.state as Record<string, unknown>
+      : {};
+
+    if (currentState.memoroomMobileAgenda !== true) {
+      const params = new URLSearchParams(window.location.search);
+      params.set("date", format(date, "yyyy-MM-dd"));
+      params.set("room", room);
+      window.history.pushState(
+        { ...currentState, memoroomMobileAgenda: true },
+        "",
+        `/calendar?${params.toString()}`,
+      );
+    }
+
+    openMobileAgenda();
+  }, [openMobileAgenda]);
+
+  const dismissMobileAgenda = useCallback(() => {
+    const currentState = window.history.state;
+    if (currentState && typeof currentState === "object" && currentState.memoroomMobileAgenda === true) {
+      window.history.back();
+      return;
+    }
+    closeMobileAgenda();
+  }, [closeMobileAgenda]);
+
   const selectCalendarDay = (day: Date) => {
     setSelectedDate(day);
     setExpandedReservationId(null);
     replaceCalendarState(day, roomFilter);
 
     if (window.matchMedia("(max-width: 639px)").matches) {
-      openMobileAgenda();
+      openMobileAgendaWithHistory(day, roomFilter);
     }
   };
 
@@ -524,7 +552,7 @@ export default function CalendarPage() {
       return;
     }
     if (deltaY >= 70 && Math.abs(deltaY) > Math.abs(deltaX) * 1.2) {
-      closeMobileAgenda();
+      dismissMobileAgenda();
     }
   };
 
@@ -542,7 +570,7 @@ export default function CalendarPage() {
     }
     if (deltaY >= 70 && Math.abs(deltaY) > Math.abs(deltaX) * 1.2) {
       agendaGestureStartRef.current = null;
-      closeMobileAgenda();
+      dismissMobileAgenda();
     }
   };
 
@@ -569,7 +597,7 @@ export default function CalendarPage() {
       return;
     }
     if (agendaTouchOffsetYRef.current >= 60 && deltaY > Math.abs(deltaX) * 1.1) {
-      closeMobileAgenda();
+      dismissMobileAgenda();
       return;
     }
 
@@ -689,7 +717,7 @@ export default function CalendarPage() {
     hasFocusedInitialAgendaRef.current = true;
     const frame = window.requestAnimationFrame(() => {
       if (window.matchMedia("(max-width: 639px)").matches) {
-        openMobileAgenda();
+        openMobileAgendaWithHistory(selectedDate, roomFilter);
       } else {
         selectedDaySectionRef.current?.scrollIntoView({
           behavior: "auto",
@@ -699,7 +727,31 @@ export default function CalendarPage() {
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [isLoading, openMobileAgenda, shouldFocusAgenda]);
+  }, [isLoading, openMobileAgendaWithHistory, roomFilter, selectedDate, shouldFocusAgenda]);
+
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      if (!window.matchMedia("(max-width: 639px)").matches) return;
+
+      const historyState = event.state;
+      if (historyState && typeof historyState === "object" && historyState.memoroomMobileAgenda === true) {
+        const params = new URLSearchParams(window.location.search);
+        const historyDate = calendarDateFromParam(params.get("date"));
+        const historyRoom = normalizeRoomFilter(params.get("room"));
+        setSelectedDate(historyDate);
+        setCurrentDate((date) => isSameMonth(date, historyDate) ? date : historyDate);
+        setRoomFilter(historyRoom);
+        setExpandedReservationId(null);
+        openMobileAgenda();
+        return;
+      }
+
+      if (isMobileAgendaOpen) closeMobileAgenda();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [closeMobileAgenda, isMobileAgendaOpen, openMobileAgenda]);
 
   useEffect(() => () => {
     if (mobileAgendaCloseTimerRef.current) clearTimeout(mobileAgendaCloseTimerRef.current);
@@ -1352,7 +1404,7 @@ export default function CalendarPage() {
             "fixed inset-0 z-[60] bg-slate-950/35 backdrop-blur-[1px] transition-opacity duration-[360ms] ease-out sm:hidden",
             isMobileAgendaVisible ? "opacity-100" : "pointer-events-none opacity-0",
           )}
-          onClick={closeMobileAgenda}
+          onClick={dismissMobileAgenda}
         />
       )}
 
