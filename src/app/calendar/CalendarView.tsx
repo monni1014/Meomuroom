@@ -268,6 +268,7 @@ export default function CalendarPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
+  const shouldFocusAgenda = searchParams.get("focus") === "agenda";
   const initialDate = calendarDateFromParam(dateParam);
   const initialRoomFilter = normalizeRoomFilter(searchParams.get("room"));
 
@@ -284,6 +285,7 @@ export default function CalendarPage() {
   const [roomFilter, setRoomFilter] = useState<RoomFilter>(initialRoomFilter);
   const [expandedReservationId, setExpandedReservationId] = useState<string | null>(null);
   const selectedDaySectionRef = useRef<HTMLElement>(null);
+  const hasFocusedInitialAgendaRef = useRef(false);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
   const [editId, setEditId] = useState<string | null>(null);
@@ -455,6 +457,20 @@ export default function CalendarPage() {
       cleaning,
     })),
   ].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+  useEffect(() => {
+    if (!shouldFocusAgenda || isLoading || hasFocusedInitialAgendaRef.current) return;
+
+    hasFocusedInitialAgendaRef.current = true;
+    const frame = window.requestAnimationFrame(() => {
+      selectedDaySectionRef.current?.scrollIntoView({
+        behavior: "auto",
+        block: "start",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [isLoading, shouldFocusAgenda]);
 
   const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();

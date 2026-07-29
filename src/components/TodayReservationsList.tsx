@@ -57,9 +57,9 @@ export default function TodayReservationsList({ reservations }: { reservations: 
             key={res.id}
             onDoubleClick={() => {
               const dateStr = getKstDateKey(new Date(res.startTime));
-              router.push(`/calendar?date=${dateStr}`);
+              router.push(`/calendar?date=${dateStr}&focus=agenda`);
             }}
-            title="더블클릭하면 캘린더로 이동합니다"
+            title="더블클릭하면 해당 날짜의 예약 상세 목록으로 이동합니다"
             className={`p-4 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] border flex justify-between items-center border-l-4 ${borderColors} ${isCancelled ? "bg-slate-100 border-slate-200" : "bg-white border-slate-100"} cursor-pointer select-none`}
           >
             <div>
