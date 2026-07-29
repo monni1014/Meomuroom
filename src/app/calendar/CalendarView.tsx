@@ -1790,7 +1790,7 @@ export default function CalendarPage() {
 
       {/* Manual Booking Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="p-4 flex justify-between items-center border-b border-slate-100 bg-slate-50">
               <h2 className="font-bold text-slate-800">
@@ -2127,7 +2127,7 @@ export default function CalendarPage() {
       )}
 
       {isScheduleTypeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-xl animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-slate-100 p-4">
               <h2 className="font-bold text-slate-800">추가할 일정 선택</h2>
@@ -2162,7 +2162,7 @@ export default function CalendarPage() {
       )}
 
       {isCleaningModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl animate-in fade-in zoom-in-95 duration-150">
             <div className={cn(
               "flex items-center justify-between border-b border-slate-100 p-4",
