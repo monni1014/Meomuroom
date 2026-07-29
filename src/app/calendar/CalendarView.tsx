@@ -1586,37 +1586,37 @@ export default function CalendarPage() {
                         <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold", getRoomCalendarStyle(res.roomName, isCancelled))}>
                           {res.roomName.replace(/^머무룸/, "")}
                         </span>
-                        <span className="relative min-w-0 flex-1 pr-2">
-                          <strong className={cn("block min-w-0 truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
+                        <span className="flex min-w-0 flex-1 items-center gap-1">
+                          <strong className={cn("min-w-0 shrink truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
                             {res.customerName ?? "이름 미확인"}
                           </strong>
                           {reviewBadge && (
                             <MessageSquareText
                               data-testid="calendar-review-badge"
-                              className={cn("absolute -right-0.5 -top-1 h-2.5 w-2.5", reviewBadge.className)}
+                              className={cn("relative -top-1 h-3 w-3 shrink-0", reviewBadge.className)}
                               aria-label={reviewBadge.label}
                             />
                           )}
+                          {!isExpanded && res.phone && (
+                            <span className="flex min-w-0 max-w-[132px] shrink-0 items-center gap-1 text-[13px] font-medium leading-none text-slate-500">
+                              <PhoneActionLink
+                                phone={res.phone}
+                                contactName={res.customerName}
+                                cancelled={isCancelled}
+                                className="truncate"
+                                iconClassName="hidden"
+                              />
+                              {res.phoneLocked && (
+                                <span
+                                  className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[8px] font-bold text-amber-700 ring-1 ring-amber-200"
+                                  title="수동 고정 전화번호"
+                                >
+                                  고정
+                                </span>
+                              )}
+                            </span>
+                          )}
                         </span>
-                        {!isExpanded && res.phone && (
-                          <span className="flex min-w-0 max-w-[112px] shrink-0 items-center gap-1 text-[10px] text-slate-500">
-                            <PhoneActionLink
-                              phone={res.phone}
-                              contactName={res.customerName}
-                              cancelled={isCancelled}
-                              className="truncate"
-                              iconClassName="hidden"
-                            />
-                            {res.phoneLocked && (
-                              <span
-                                className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[8px] font-bold text-amber-700 ring-1 ring-amber-200"
-                                title="수동 고정 전화번호"
-                              >
-                                고정
-                              </span>
-                            )}
-                          </span>
-                        )}
                         {!isCancelled && !res.isPaid && (
                           <span className="shrink-0 text-[11px] font-bold text-rose-600">미수</span>
                         )}
