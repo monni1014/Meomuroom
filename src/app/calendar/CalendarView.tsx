@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, RefreshCw, Copy, Pencil, Star, SprayCan, MessageSquareText, Binoculars } from "lucide-react";
-import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, Copy, Pencil, Star, SprayCan, MessageSquareText, Binoculars } from "lucide-react";
+import { format, addDays, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAJOR_CATEGORIES, UNCATEGORIZED_LABEL } from "@/lib/categories";
 import { CUSTOMER_TYPE_LABELS, normalizeCustomerType, type CustomerType } from "@/lib/customer-types";
@@ -188,10 +188,6 @@ function formatDuration(start: Date, end: Date) {
   return minutes === 0 ? `${hours}시간` : `${hours}시간 ${minutes}분`;
 }
 
-function formatCleaningRooms(roomNames: string[]) {
-  return roomNames.length === CLEANING_ROOM_OPTIONS.length ? "전체 공간" : roomNames.join(" · ");
-}
-
 function getCleaningRoomTextStyle(roomName: string) {
   if (roomName === "머무룸1") return "text-sky-700";
   if (roomName === "머무룸2") return "text-purple-700";
@@ -280,8 +276,8 @@ export default function CalendarPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isScheduleTypeModalOpen, setIsScheduleTypeModalOpen] = useState(false);
   const [isCleaningModalOpen, setIsCleaningModalOpen] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [isMobileAgendaOpen, setIsMobileAgendaOpen] = useState(false);
+  const [isMobileAddMenuOpen, setIsMobileAddMenuOpen] = useState(false);
   const [roomFilter, setRoomFilter] = useState<RoomFilter>(initialRoomFilter);
   const [expandedReservationId, setExpandedReservationId] = useState<string | null>(null);
   const selectedDaySectionRef = useRef<HTMLElement>(null);
@@ -290,6 +286,7 @@ export default function CalendarPage() {
   const [calendarSwipeOffsetX, setCalendarSwipeOffsetX] = useState(0);
   const [isCalendarDragging, setIsCalendarDragging] = useState(false);
   const [calendarSlideDirection, setCalendarSlideDirection] = useState<"next" | "previous" | null>(null);
+  const agendaGestureStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
   const [editId, setEditId] = useState<string | null>(null);
@@ -389,35 +386,73 @@ export default function CalendarPage() {
 
   const selectCalendarDay = (day: Date) => {
     setSelectedDate(day);
+    setExpandedReservationId(null);
     replaceCalendarState(day, roomFilter);
 
     if (window.matchMedia("(max-width: 639px)").matches) {
-      window.requestAnimationFrame(() => {
-        selectedDaySectionRef.current?.scrollIntoView({
-          behavior: "auto",
-          block: "start",
-        });
-      });
+      setIsMobileAgendaOpen(true);
     }
   };
 
-  const handleSyncEmails = async () => {
-    setIsSyncing(true);
-    setSyncMessage(null);
-    try {
-      const res = await fetch("/api/email-sync");
-      const data = await res.json();
-      if (data.success) {
-        setSyncMessage(`✅ ${data.message}`);
-        fetchReservations();
-      } else {
-        setSyncMessage(`❌ 동기화 실패: ${data.error}`);
-      }
-    } catch {
-      setSyncMessage("❌ 메일 서버 연결에 실패했습니다.");
-    } finally {
-      setIsSyncing(false);
-      setTimeout(() => setSyncMessage(null), 5000);
+  const openReservationCreateModal = (date = selectedDate) => {
+    setModalMode("create");
+    setEditId(null);
+    setFormDates([format(date, "yyyy-MM-dd")]);
+    setFormRoom(roomFilter === "all" ? "머무룸1" : roomFilter);
+    setIsReservationContactMenuOpen(false);
+    setIsMobileAddMenuOpen(false);
+    setIsModalOpen(true);
+  };
+
+  const moveSelectedDay = (offset: number) => {
+    const nextDate = addDays(selectedDate, offset);
+    setSelectedDate(nextDate);
+    setExpandedReservationId(null);
+    if (!isSameMonth(nextDate, currentDate)) setCurrentDate(nextDate);
+    replaceCalendarState(nextDate, roomFilter);
+  };
+
+  const handleAgendaGestureStart = (event: React.PointerEvent<HTMLElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    agendaGestureStartRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+  };
+
+  const handleAgendaGestureEnd = (event: React.PointerEvent<HTMLElement>) => {
+    const start = agendaGestureStartRef.current;
+    agendaGestureStartRef.current = null;
+    if (!start || start.pointerId !== event.pointerId || !event.isPrimary) return;
+    if (event.currentTarget.hasPointerCapture(start.pointerId)) {
+      event.currentTarget.releasePointerCapture(start.pointerId);
+    }
+
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) >= 55 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+      moveSelectedDay(deltaX < 0 ? 1 : -1);
+      return;
+    }
+    if (deltaY >= 70 && Math.abs(deltaY) > Math.abs(deltaX) * 1.2) {
+      setIsMobileAgendaOpen(false);
+      setExpandedReservationId(null);
+    }
+  };
+
+  const handleAgendaGestureMove = (event: React.PointerEvent<HTMLElement>) => {
+    const start = agendaGestureStartRef.current;
+    if (!start || start.pointerId !== event.pointerId || !event.isPrimary) return;
+
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) >= 55 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+      agendaGestureStartRef.current = null;
+      moveSelectedDay(deltaX < 0 ? 1 : -1);
+      return;
+    }
+    if (deltaY >= 70 && Math.abs(deltaY) > Math.abs(deltaX) * 1.2) {
+      agendaGestureStartRef.current = null;
+      setIsMobileAgendaOpen(false);
+      setExpandedReservationId(null);
     }
   };
 
@@ -511,14 +546,27 @@ export default function CalendarPage() {
 
     hasFocusedInitialAgendaRef.current = true;
     const frame = window.requestAnimationFrame(() => {
-      selectedDaySectionRef.current?.scrollIntoView({
-        behavior: "auto",
-        block: "start",
-      });
+      if (window.matchMedia("(max-width: 639px)").matches) {
+        setIsMobileAgendaOpen(true);
+      } else {
+        selectedDaySectionRef.current?.scrollIntoView({
+          behavior: "auto",
+          block: "start",
+        });
+      }
     });
 
     return () => window.cancelAnimationFrame(frame);
   }, [isLoading, shouldFocusAgenda]);
+
+  useEffect(() => {
+    if (!isMobileAgendaOpen && !isMobileAddMenuOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobileAgendaOpen, isMobileAddMenuOpen]);
 
   const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -726,7 +774,7 @@ export default function CalendarPage() {
   ) => {
     setCleaningEditId(null);
     setCalendarScheduleType(scheduleType);
-    setCleaningRooms([]);
+    setCleaningRooms(roomFilter === "all" ? [] : [roomFilter]);
     setCleanerName("");
     setScheduleContactPhone("");
     setIsScheduleContactMenuOpen(false);
@@ -738,9 +786,13 @@ export default function CalendarPage() {
     setCleaningMemo("");
   };
 
-  const openCleaningCreateModal = (scheduleType: "CLEANING" | "SITE_VISIT") => {
-    resetCleaningForm(selectedDate, scheduleType);
+  const openCleaningCreateModal = (
+    scheduleType: "CLEANING" | "SITE_VISIT",
+    date = selectedDate,
+  ) => {
+    resetCleaningForm(date, scheduleType);
     setIsScheduleTypeModalOpen(false);
+    setIsMobileAddMenuOpen(false);
     setIsCleaningModalOpen(true);
   };
 
@@ -891,63 +943,31 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="p-4 md:p-8 space-y-6 pb-24 max-w-7xl mx-auto w-full">
-      <header className="pt-8 pb-4 flex justify-between items-start gap-3 flex-wrap sm:items-center">
+    <div className="mx-auto w-full max-w-7xl space-y-4 p-4 pb-24 sm:space-y-6 md:p-8">
+      <header className="flex items-start justify-between gap-3 pt-8 sm:items-center sm:pb-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">통합 캘린더</h1>
         </div>
-        <div className="grid w-full grid-cols-3 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:justify-end sm:gap-2">
+        <div className="hidden flex-wrap justify-end gap-2 sm:flex">
           <button
-            onClick={handleSyncEmails}
-            disabled={isSyncing}
-            className={cn(
-              "flex min-w-0 items-center justify-center gap-1 px-2 py-2 rounded-xl shadow-md text-[11px] font-bold transition-all active:scale-95 whitespace-nowrap sm:gap-1.5 sm:px-3.5 sm:py-2.5 sm:text-sm",
-              isSyncing ? "bg-slate-400 cursor-wait" : "bg-emerald-600 hover:bg-emerald-700",
-              "text-white"
-            )}
-            title="메일 동기화"
+            onClick={() => openReservationCreateModal()}
+            className="flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-indigo-600 px-3.5 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-indigo-700 active:scale-95"
           >
-            <RefreshCw className={cn("h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4", isSyncing && "animate-spin")} />
-            <span className="sm:hidden">{isSyncing ? "동기화 중" : "메일 동기화"}</span>
-            <span className="hidden sm:inline">{isSyncing ? "동기화 중..." : "메일 동기화"}</span>
-          </button>
-          <button
-            onClick={() => {
-              setModalMode("create");
-              setEditId(null);
-              setFormDates([format(selectedDate, "yyyy-MM-dd")]);
-              setIsReservationContactMenuOpen(false);
-              setIsModalOpen(true);
-            }}
-            className="flex min-w-0 items-center justify-center gap-1 rounded-xl bg-indigo-600 px-2 py-2 text-[11px] font-bold text-white shadow-md transition-all hover:bg-indigo-700 active:scale-95 whitespace-nowrap sm:gap-1.5 sm:px-3.5 sm:py-2.5 sm:text-sm"
-          >
-            <Plus className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-            <span className="sm:hidden">예약 추가</span>
-            <span className="hidden sm:inline">수동 예약 추가</span>
+            <Plus className="h-4 w-4 shrink-0" />
+            <span>수동 예약 추가</span>
           </button>
           <button
             onClick={() => setIsScheduleTypeModalOpen(true)}
-            className="flex min-w-0 items-center justify-center gap-1 rounded-xl bg-amber-400 px-2 py-2 text-[11px] font-bold text-amber-950 shadow-md transition-all hover:bg-amber-500 active:scale-95 whitespace-nowrap sm:gap-1.5 sm:px-3.5 sm:py-2.5 sm:text-sm"
+            className="flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-amber-400 px-3.5 py-2.5 text-sm font-bold text-amber-950 shadow-md transition-all hover:bg-amber-500 active:scale-95"
           >
-            <SprayCan className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-            <span className="sm:hidden">청소·답사</span>
-            <span className="hidden sm:inline">청소/사전답사 일정 추가</span>
+            <SprayCan className="h-4 w-4 shrink-0" />
+            <span>청소/사전답사 일정 추가</span>
           </button>
         </div>
       </header>
 
-      {/* Sync Message Toast */}
-      {syncMessage && (
-        <div className={cn(
-          "px-4 py-3 rounded-xl text-sm font-medium shadow-sm border animate-in fade-in slide-in-from-top-2 duration-300",
-          syncMessage.startsWith("✅") ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-rose-50 text-rose-700 border-rose-100"
-        )}>
-          {syncMessage}
-        </div>
-      )}
-
       {/* Room Filter Tabs */}
-      <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] sm:gap-2 [&::-webkit-scrollbar]:hidden">
         {ROOM_FILTERS.map((room) => (
           <button
             key={room}
@@ -956,7 +976,7 @@ export default function CalendarPage() {
               replaceCalendarState(selectedDate, room);
             }}
             className={cn(
-              "shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border",
+              "shrink-0 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 sm:px-4 sm:py-2 sm:text-sm",
               roomFilter === room
                 ? "bg-indigo-600 text-white border-indigo-600 shadow-md"
                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
@@ -1056,21 +1076,6 @@ export default function CalendarPage() {
             const dayCleaningSchedules = filteredCleaningSchedules
               .filter((schedule) => isSameDay(new Date(schedule.startTime), day))
               .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-            const dayAgendaItems: CalendarAgendaItem[] = [
-              ...dayReservations.map((reservation) => ({
-                kind: "reservation" as const,
-                id: reservation.id,
-                startTime: reservation.startTime,
-                reservation,
-              })),
-              ...dayCleaningSchedules.map((cleaning) => ({
-                kind: "cleaning" as const,
-                id: cleaning.id,
-                startTime: cleaning.startTime,
-                cleaning,
-              })),
-            ].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-            
             const hasUnpaid = dayReservations.some((res) => !res.isPaid && res.status !== "CANCELLED");
             const hasUnpaidExtra = dayReservations.some((res) => res.usageLog && (res.usageLog.extraPrice ?? 0) > 0 && !res.usageLog.isExtraPaid && res.status !== "CANCELLED");
 
@@ -1079,7 +1084,7 @@ export default function CalendarPage() {
                 key={day.toISOString()}
                 onClick={() => selectCalendarDay(day)}
                 className={cn(
-                  "flex min-h-[72px] flex-col items-stretch rounded-lg p-0.5 relative transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
+                  "relative flex min-h-[104px] flex-col items-stretch rounded-lg p-0.5 transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
                   isSelected
                     ? "bg-indigo-50 text-indigo-800 sm:bg-[#d6ddff] sm:text-indigo-900"
                     : "hover:bg-slate-50 text-slate-700",
@@ -1102,38 +1107,20 @@ export default function CalendarPage() {
                   )}
                 </div>
                 
-                {/* 모바일은 타임트리처럼 일정 내용을, 넓은 화면은 기존 점 표시를 사용 */}
+                {/* 모바일 월 화면은 예약만 최대 4건 표시합니다. 청소·답사는 날짜 상세에서 확인합니다. */}
                 <div data-testid="mobile-month-events" className="mt-1 flex min-w-0 flex-col gap-0.5 sm:hidden">
-                  {dayAgendaItems.slice(0, 2).map((agendaItem) => {
-                    const startParts = getKstDateParts(new Date(agendaItem.startTime));
+                  {dayReservations.slice(0, 4).map((res) => {
+                    const startParts = getKstDateParts(new Date(res.startTime));
                     const clock = `${String(startParts.hour).padStart(2, "0")}:${String(startParts.minute).padStart(2, "0")}`;
                     const compactClock = startParts.minute === 0
                       ? String(startParts.hour)
                       : `${startParts.hour}:${String(startParts.minute).padStart(2, "0")}`;
-                    if (agendaItem.kind === "cleaning") {
-                      const isSiteVisit = agendaItem.cleaning.scheduleType === "SITE_VISIT";
-                      return (
-                        <span
-                          key={`cleaning-${agendaItem.id}`}
-                          className={cn(
-                            "block min-w-0 truncate rounded border border-dashed px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight",
-                            isSiteVisit
-                              ? "border-sky-400 bg-sky-100 text-sky-900"
-                              : "border-amber-400 bg-amber-100 text-amber-950",
-                          )}
-                          title={`${clock} ${formatCleaningRooms(agendaItem.cleaning.roomNames)} ${isSiteVisit ? "사전답사" : "청소"} · ${agendaItem.cleaning.cleanerName}`}
-                        >
-                          {compactClock} {isSiteVisit ? "답사" : "청소"}
-                        </span>
-                      );
-                    }
-                    const res = agendaItem.reservation;
                     const isCancelled = res.status === "CANCELLED";
                     return (
                       <span
                         key={`reservation-${res.id}`}
                         className={cn(
-                          "block min-w-0 truncate rounded px-0.5 py-0.5 text-left text-[8px] font-bold leading-none tracking-tight",
+                          "block min-w-0 truncate rounded px-1 py-0.5 text-left text-[8px] font-bold leading-[1.05] tracking-tight",
                           getRoomCalendarStyle(res.roomName, isCancelled)
                         )}
                         title={`${clock} ${res.roomName} ${res.customerName ?? "이름 미확인"}`}
@@ -1142,9 +1129,9 @@ export default function CalendarPage() {
                       </span>
                     );
                   })}
-                  {dayAgendaItems.length > 2 && (
+                  {dayReservations.length > 4 && (
                     <span className="px-1 text-left text-[9px] font-bold leading-none text-slate-400">
-                      +{dayAgendaItems.length - 2}건
+                      +{dayReservations.length - 4}건
                     </span>
                   )}
                 </div>
@@ -1186,18 +1173,62 @@ export default function CalendarPage() {
         </div>
       </section>
 
+      {isMobileAgendaOpen && (
+        <button
+          type="button"
+          aria-label="날짜 상세 닫기"
+          className="fixed inset-0 z-[60] bg-slate-950/35 backdrop-blur-[1px] sm:hidden"
+          onClick={() => {
+            setIsMobileAgendaOpen(false);
+            setExpandedReservationId(null);
+          }}
+        />
+      )}
+
       {/* Selected Day Reservations List */}
-      <section ref={selectedDaySectionRef} className="scroll-mt-4 bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-4">
-        <div className="flex justify-between items-center pb-2 border-b border-slate-50">
+      <section
+        ref={selectedDaySectionRef}
+        className={cn(
+          "scroll-mt-4 space-y-4 border border-slate-100 bg-white p-4",
+          isMobileAgendaOpen
+            ? "fixed inset-x-0 bottom-0 z-[70] block max-h-[90dvh] overflow-y-auto rounded-t-[28px] shadow-2xl sm:static sm:z-auto sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:shadow-sm"
+            : "hidden rounded-2xl shadow-sm sm:block",
+        )}
+      >
+        <div
+          className="sticky -top-4 z-10 -mx-4 -mt-4 touch-none border-b border-slate-100 bg-white px-4 pb-3 pt-2 sm:static sm:mx-0 sm:mt-0 sm:border-slate-50 sm:p-0 sm:pb-2"
+          onPointerDown={handleAgendaGestureStart}
+          onPointerMove={handleAgendaGestureMove}
+          onPointerUp={handleAgendaGestureEnd}
+          onPointerCancel={() => { agendaGestureStartRef.current = null; }}
+        >
+          <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+          <div className="flex items-center justify-between gap-3 touch-none">
           <h3 className="text-sm font-bold text-slate-800">
             {format(selectedDate, "M월 d일")} 일정 ({selectedAgendaItems.length}건)
           </h3>
-          <span className="whitespace-nowrap text-xs font-semibold text-slate-500">
-            하루 총 매출{" "}
-            <strong className="text-sm font-black tabular-nums text-slate-950">
-              {selectedDayRevenue.toLocaleString("ko-KR")}원
-            </strong>
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="whitespace-nowrap text-xs font-semibold text-slate-500">
+              하루 총 매출{" "}
+              <strong className="text-sm font-black tabular-nums text-slate-950">
+                {selectedDayRevenue.toLocaleString("ko-KR")}원
+              </strong>
+            </span>
+            <button
+              type="button"
+              aria-label={`${format(selectedDate, "M월 d일")} 일정 추가`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onPointerUp={(event) => event.stopPropagation()}
+              onClick={() => setIsMobileAddMenuOpen(true)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white shadow-md active:scale-95 sm:hidden"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+          </div>
+          <p className="mt-1 text-center text-[10px] font-medium text-slate-400 sm:hidden">
+            좌우로 날짜 이동 · 아래로 밀어 닫기
+          </p>
         </div>
 
         <div className="space-y-3">
@@ -1623,6 +1654,71 @@ export default function CalendarPage() {
         </div>
       </section>
       </div>
+
+      {!isMobileAgendaOpen && (
+        <button
+          type="button"
+          aria-label="일정 추가"
+          onClick={() => setIsMobileAddMenuOpen(true)}
+          className="fixed bottom-24 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-xl shadow-indigo-300/60 transition active:scale-95 sm:hidden"
+        >
+          <Plus className="h-7 w-7" />
+        </button>
+      )}
+
+      {isMobileAddMenuOpen && (
+        <div className="fixed inset-0 z-[80] sm:hidden">
+          <button
+            type="button"
+            aria-label="일정 추가 메뉴 닫기"
+            className="absolute inset-0 bg-slate-950/40 backdrop-blur-[1px]"
+            onClick={() => setIsMobileAddMenuOpen(false)}
+          />
+          <section className="absolute inset-x-0 bottom-0 rounded-t-[28px] bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] shadow-2xl">
+            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300" />
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-black text-slate-900">일정 추가</h2>
+                <p className="mt-0.5 text-xs font-medium text-slate-400">{format(selectedDate, "M월 d일")}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileAddMenuOpen(false)}
+                className="rounded-full p-2 text-slate-400 hover:bg-slate-100"
+                aria-label="닫기"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => openReservationCreateModal(selectedDate)}
+                className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-indigo-100 bg-indigo-50 p-3 text-xs font-bold text-indigo-800 active:scale-95"
+              >
+                <Plus className="h-6 w-6" />
+                예약 추가
+              </button>
+              <button
+                type="button"
+                onClick={() => openCleaningCreateModal("CLEANING", selectedDate)}
+                className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-amber-100 bg-amber-50 p-3 text-xs font-bold text-amber-900 active:scale-95"
+              >
+                <SprayCan className="h-6 w-6" />
+                청소 일정
+              </button>
+              <button
+                type="button"
+                onClick={() => openCleaningCreateModal("SITE_VISIT", selectedDate)}
+                className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-sky-100 bg-sky-50 p-3 text-xs font-bold text-sky-800 active:scale-95"
+              >
+                <Binoculars className="h-6 w-6" />
+                사전답사
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Manual Booking Modal */}
       {isModalOpen && (
