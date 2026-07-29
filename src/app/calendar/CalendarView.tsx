@@ -402,10 +402,12 @@ export default function CalendarPage() {
     fetchReservations,
   );
 
-  const replaceCalendarState = (date: Date, room: RoomFilter) => {
+  const replaceCalendarState = (date: Date, room: RoomFilter, focusAgenda = false) => {
     const params = new URLSearchParams(window.location.search);
     params.set("date", format(date, "yyyy-MM-dd"));
     params.set("room", room);
+    if (focusAgenda) params.set("focus", "agenda");
+    else params.delete("focus");
     window.history.replaceState(window.history.state, "", `/calendar?${params.toString()}`);
   };
 
@@ -1613,7 +1615,7 @@ export default function CalendarPage() {
                   }}
                   onDoubleClick={(event) => {
                     if ((event.target as HTMLElement).closest("button, a, input, select, textarea, [role='button']")) return;
-                    replaceCalendarState(selectedDate, roomFilter);
+                    replaceCalendarState(selectedDate, roomFilter, true);
                     const params = new URLSearchParams({
                       selected: res.id,
                       fromDate: format(selectedDate, "yyyy-MM-dd"),

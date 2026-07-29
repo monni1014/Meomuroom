@@ -76,7 +76,7 @@ function readCalendarReturnState() {
 }
 
 function buildCalendarReturnUrl(date: string, room: CalendarRoomFilter) {
-  const params = new URLSearchParams({ date, room });
+  const params = new URLSearchParams({ date, room, focus: "agenda" });
   return `/calendar?${params.toString()}`;
 }
 
