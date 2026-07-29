@@ -1056,12 +1056,12 @@ export default function CalendarPage() {
     }
   };
 
-  const getSourceBadgeStyle = (source: string) => {
+  const getCalendarSourceTextStyle = (source: string) => {
     switch (source) {
       case "naver":
-        return "text-slate-500";
+        return "text-emerald-600";
       case "spacecloud":
-        return "text-slate-500";
+        return "text-violet-600";
       default:
         return "text-slate-500";
     }
@@ -1460,10 +1460,7 @@ export default function CalendarPage() {
                               {getSourceDisplay(schedule.source)}
                             </span>
                           )}
-                          {(schedule.roomNames.length === CLEANING_ROOM_OPTIONS.length
-                            ? ["전체 공간"]
-                            : schedule.roomNames
-                          ).map((roomName) => (
+                          {schedule.roomNames.map((roomName) => (
                             <span
                               key={roomName}
                               className={cn(
@@ -1471,7 +1468,7 @@ export default function CalendarPage() {
                                 getCleaningRoomTextStyle(roomName),
                               )}
                             >
-                              {roomName}
+                              {roomName.replace(/^머무룸/, "")}
                             </span>
                           ))}
                           <strong className="hidden min-w-0 truncate text-sm text-slate-900 md:block">{schedule.cleanerName}</strong>
@@ -1571,7 +1568,7 @@ export default function CalendarPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold", getRoomCalendarStyle(res.roomName, isCancelled))}>
-                          {res.roomName}
+                          {res.roomName.replace(/^머무룸/, "")}
                         </span>
                         <span className="relative min-w-0 pr-2">
                           <strong className={cn("block min-w-0 truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
@@ -1600,7 +1597,7 @@ export default function CalendarPage() {
                         )}
                       </div>
                       <div className="mt-1 flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden whitespace-nowrap text-[11px] text-slate-500">
-                        <span className={cn("shrink-0 text-[11px] font-medium", getSourceBadgeStyle(res.source))}>
+                        <span className={cn("shrink-0 text-[11px] font-medium", getCalendarSourceTextStyle(res.source))}>
                           {getSourceDisplay(res.source)}
                         </span>
                         {!isCancelled && res.paymentMethod && (
@@ -1656,7 +1653,7 @@ export default function CalendarPage() {
                           </span>
                         )
                       )}
-                      <span className={cn("hidden text-[11px] font-medium md:inline-flex", getSourceBadgeStyle(res.source))}>
+                      <span className={cn("hidden text-[11px] font-medium md:inline-flex", getCalendarSourceTextStyle(res.source))}>
                         {getSourceDisplay(res.source)}
                       </span>
                       {!res.emailId && res.paymentMethod !== '온라인' && (
@@ -1671,7 +1668,7 @@ export default function CalendarPage() {
                       )}
                       <RpaStatusBadge memo={res.memo} createdAt={res.createdAt} updatedAt={res.updatedAt} />
                       <span className={cn("hidden px-1.5 py-0.5 rounded text-[10px] font-semibold md:inline-flex", getRoomBadgeStyle(res.roomName))}>
-                        {res.roomName}
+                        {res.roomName.replace(/^머무룸/, "")}
                       </span>
                       <span className="relative hidden pr-2 md:inline-flex">
                         <strong className={cn("text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
