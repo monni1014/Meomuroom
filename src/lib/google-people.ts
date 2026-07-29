@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
+import {
+  accumulateGooglePeopleDailyStats,
+  getGooglePeopleDailyStats,
+} from "@/lib/google-people-daily-stats";
 import { buildMemoroomContactName, chooseReservationForContact } from "@/lib/google-people-contact-name";
 import { formatKoreanPhone, isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { prisma } from "@/lib/prisma";
@@ -75,6 +79,9 @@ type StoredSyncStatus = {
   unchangedCount?: number;
   deletedCount?: number;
   restoredCount?: number;
+  dailyDate?: string;
+  dailyDeletedCount?: number;
+  dailyRestoredCount?: number;
 };
 
 export type GooglePeopleStatus = {
@@ -90,6 +97,9 @@ export type GooglePeopleStatus = {
   unchangedCount: number;
   deletedCount: number;
   restoredCount: number;
+  dailyDate: string;
+  dailyDeletedCount: number;
+  dailyRestoredCount: number;
 };
 
 export type GooglePeopleSyncResult = {
@@ -395,6 +405,7 @@ export async function getGooglePeopleStatus(): Promise<GooglePeopleStatus> {
     loadToken(),
     readSyncStatus(),
   ]);
+  const dailyStats = getGooglePeopleDailyStats(syncStatus);
   return {
     configured: Boolean(credentials),
     connected: Boolean(credentials && token?.refresh_token),
@@ -408,6 +419,9 @@ export async function getGooglePeopleStatus(): Promise<GooglePeopleStatus> {
     unchangedCount: syncStatus.unchangedCount || 0,
     deletedCount: syncStatus.deletedCount || 0,
     restoredCount: syncStatus.restoredCount || 0,
+    dailyDate: dailyStats.date,
+    dailyDeletedCount: dailyStats.deletedCount,
+    dailyRestoredCount: dailyStats.restoredCount,
   };
 }
 
@@ -644,6 +658,8 @@ async function runSyncUpcomingReservationContacts(
       deletedCount,
       restoredCount,
     } satisfies GooglePeopleSyncResult;
+    const previousStatus = await readSyncStatus();
+    const dailyStats = accumulateGooglePeopleDailyStats(previousStatus, result, new Date());
     await saveSyncStatus({
       lastSyncAt: syncStartedAt.toISOString(),
       lastSuccessAt: new Date().toISOString(),
@@ -654,6 +670,9 @@ async function runSyncUpcomingReservationContacts(
       unchangedCount,
       deletedCount,
       restoredCount,
+      dailyDate: dailyStats.date,
+      dailyDeletedCount: dailyStats.deletedCount,
+      dailyRestoredCount: dailyStats.restoredCount,
     });
     await resolveAdminAlertByDedupeKey(SYNC_ALERT_KEY);
     return result;

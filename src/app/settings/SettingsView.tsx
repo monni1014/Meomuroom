@@ -1019,7 +1019,7 @@ export default function SettingsView({
               <InfoRow label="최근 성공" value={formatDateTime(googlePeopleStatus.lastSuccessAt)} />
               <InfoRow label="확인한 고객" value={`${googlePeopleStatus.checkedCount}명`} />
               <InfoRow label="최근 처리" value={`신규 ${googlePeopleStatus.createdCount} · 갱신 ${googlePeopleStatus.updatedCount} · 동일 ${googlePeopleStatus.unchangedCount}`} />
-              <InfoRow label="최근 정리" value={`삭제 ${googlePeopleStatus.deletedCount} · 원래 이름 복원 ${googlePeopleStatus.restoredCount}`} />
+              <InfoRow label="오늘 정리" value={`삭제 ${googlePeopleStatus.dailyDeletedCount} · 원래 이름 복원 ${googlePeopleStatus.dailyRestoredCount}`} />
             </div>
 
             {!googlePeopleStatus.configured && (
