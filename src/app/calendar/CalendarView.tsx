@@ -1571,7 +1571,7 @@ export default function CalendarPage() {
                   }}
                   title="더블클릭하면 이용현황에서 수정"
                   className={cn(
-                    "relative flex flex-col gap-3 rounded-xl border border-l-4 p-3 cursor-pointer select-none sm:p-4 md:flex-row md:items-start md:justify-between md:gap-2",
+                    "relative flex flex-col gap-3 rounded-xl border border-l-4 px-3 py-2.5 cursor-pointer select-none sm:p-4 md:flex-row md:items-start md:justify-between md:gap-2",
                     isCancelled ? "bg-slate-100 border-slate-200" : "bg-slate-50 border-slate-100",
                     getSourceAccentStyle(res.source, isCancelled)
                   )}
@@ -1586,7 +1586,7 @@ export default function CalendarPage() {
                         <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold", getRoomCalendarStyle(res.roomName, isCancelled))}>
                           {res.roomName.replace(/^머무룸/, "")}
                         </span>
-                        <span className="relative min-w-0 pr-2">
+                        <span className="relative min-w-0 flex-1 pr-2">
                           <strong className={cn("block min-w-0 truncate text-sm", isCancelled ? "text-slate-500 line-through" : "text-slate-900")}>
                             {res.customerName ?? "이름 미확인"}
                           </strong>
@@ -1598,6 +1598,25 @@ export default function CalendarPage() {
                             />
                           )}
                         </span>
+                        {!isExpanded && res.phone && (
+                          <span className="flex min-w-0 max-w-[112px] shrink-0 items-center gap-1 text-[10px] text-slate-500">
+                            <PhoneActionLink
+                              phone={res.phone}
+                              contactName={res.customerName}
+                              cancelled={isCancelled}
+                              className="truncate"
+                              iconClassName="hidden"
+                            />
+                            {res.phoneLocked && (
+                              <span
+                                className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[8px] font-bold text-amber-700 ring-1 ring-amber-200"
+                                title="수동 고정 전화번호"
+                              >
+                                고정
+                              </span>
+                            )}
+                          </span>
+                        )}
                         {!isCancelled && !res.isPaid && (
                           <span className="shrink-0 text-[11px] font-bold text-rose-600">미수</span>
                         )}
@@ -1631,22 +1650,6 @@ export default function CalendarPage() {
                         {res.price > 0 && <><span>·</span><span>{res.price.toLocaleString()}원</span></>}
                         {isCancelled && <span className="font-bold text-slate-500">· 취소</span>}
                       </div>
-                      {res.phone && (
-                        <div className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-slate-500">
-                          <PhoneActionLink
-                            phone={res.phone}
-                            contactName={res.customerName}
-                            cancelled={isCancelled}
-                            className="truncate"
-                            iconClassName="h-3 w-3 text-slate-400"
-                          />
-                          {res.phoneLocked && (
-                            <span className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[9px] font-bold text-amber-700 ring-1 ring-amber-200">
-                              수동고정
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
                     <div className="flex shrink-0 items-center">
                       <ChevronDown className="h-4 w-4 text-slate-400" />
