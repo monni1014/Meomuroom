@@ -127,6 +127,23 @@ function normalizeEndClock(startClock: string, endClock: string) {
   return endClock;
 }
 
+function formatAmPmClock(clock: string) {
+  const totalMinutes = parseClockMinutes(clock);
+  if (Number.isNaN(totalMinutes)) return clock;
+
+  const hour = Math.floor(totalMinutes / 60) % 24;
+  const minute = totalMinutes % 60;
+  const displayHour = hour % 12 || 12;
+  const minuteText = minute === 0 ? "" : `:${String(minute).padStart(2, "0")}`;
+
+  return `${displayHour}${minuteText}${hour < 12 ? "am" : "pm"}`;
+}
+
+function formatCalendarTime(value: Date) {
+  const parts = getKstDateParts(value);
+  return formatAmPmClock(`${parts.hour}:${parts.minute}`);
+}
+
 function buildLocalDateTime(dateText: string, clockText: string) {
   const [year, month, day] = dateText.split("-").map(Number);
   const minutes = parseClockMinutes(clockText);
@@ -1421,8 +1438,8 @@ export default function CalendarPage() {
                 const isSiteVisit = schedule.scheduleType === "SITE_VISIT";
                 const start = new Date(schedule.startTime);
                 const end = new Date(schedule.endTime);
-                const startClock = `${String(getKstDateParts(start).hour).padStart(2, "0")}:${String(getKstDateParts(start).minute).padStart(2, "0")}`;
-                const displayEndTime = extendedEndClock(start, end);
+                const startClock = formatCalendarTime(start);
+                const displayEndTime = formatAmPmClock(extendedEndClock(start, end));
 
                 return (
                   <div
@@ -1522,8 +1539,7 @@ export default function CalendarPage() {
               const res = agendaItem.reservation;
               const start = new Date(res.startTime);
               const end = new Date(res.endTime);
-              const formatTime = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-              const displayEndTime = extendedEndClock(start, end);
+              const displayEndTime = formatAmPmClock(extendedEndClock(start, end));
               const isCancelled = res.status === "CANCELLED";
               const isExpanded = expandedReservationId === res.id;
               const headCount = res.usageLog?.headCount || 1;
@@ -1562,7 +1578,7 @@ export default function CalendarPage() {
                 >
                   <div className="flex min-w-0 items-center gap-3 md:hidden">
                     <div className="w-[58px] shrink-0 text-center">
-                      <strong className={cn("block text-sm", isCancelled ? "text-slate-400 line-through" : "text-slate-900")}>{formatTime(start)}</strong>
+                      <strong className={cn("block text-sm", isCancelled ? "text-slate-400 line-through" : "text-slate-900")}>{formatCalendarTime(start)}</strong>
                       <span className="text-[10px] font-medium text-slate-400">~ {displayEndTime}</span>
                     </div>
                     <div className="min-w-0 flex-1">
@@ -1722,7 +1738,7 @@ export default function CalendarPage() {
                     <div className="grid grid-cols-1 gap-2 text-xs text-slate-500 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-1">
                       <p className="flex min-w-0 items-center gap-1">
                         <Clock className="h-3.5 w-3.5 shrink-0" />
-                        <span>{formatTime(start)} - {displayEndTime} ({formatDuration(start, end)})</span>
+                        <span>{formatCalendarTime(start)} - {displayEndTime} ({formatDuration(start, end)})</span>
                       </p>
                       <p className="flex min-w-0 items-start gap-1">
                         <User className="mt-0.5 h-3.5 w-3.5 shrink-0" />
