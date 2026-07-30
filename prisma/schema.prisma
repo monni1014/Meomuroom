@@ -58,6 +58,7 @@ model CleaningSchedule {
   startTime    DateTime
   endTime      DateTime
   cost         Int      @default(0)
+  isPaid       Boolean  @default(false) // 청소비 입금 완료 여부 (사전답사는 항상 false)
   memo         String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

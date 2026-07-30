@@ -81,6 +81,7 @@ interface CleaningSchedule {
   startTime: string;
   endTime: string;
   cost: number;
+  isPaid: boolean;
   memo: string | null;
   createdAt: string;
   updatedAt: string;
@@ -351,8 +352,10 @@ export default function CalendarPage() {
   const [cleaningStartTime, setCleaningStartTime] = useState("09:00");
   const [cleaningEndTime, setCleaningEndTime] = useState("10:00");
   const [cleaningCost, setCleaningCost] = useState("0");
+  const [cleaningIsPaid, setCleaningIsPaid] = useState(false);
   const [cleaningMemo, setCleaningMemo] = useState("");
   const [isCleaningSubmitting, setIsCleaningSubmitting] = useState(false);
+  const [updatingCleaningPaymentId, setUpdatingCleaningPaymentId] = useState<string | null>(null);
   const [isScheduleContactMenuOpen, setIsScheduleContactMenuOpen] = useState(false);
 
   const savedContacts = useMemo(() => buildContactSuggestions([
@@ -1028,6 +1031,7 @@ export default function CalendarPage() {
     setCleaningStartTime("09:00");
     setCleaningEndTime("10:00");
     setCleaningCost("0");
+    setCleaningIsPaid(false);
     setCleaningMemo("");
   };
 
@@ -1059,6 +1063,7 @@ export default function CalendarPage() {
     setCleaningStartTime(clock(startParts));
     setCleaningEndTime(extendedEndClock(start, end));
     setCleaningCost(schedule.cost.toLocaleString("ko-KR"));
+    setCleaningIsPaid(schedule.isPaid);
     setCleaningMemo(schedule.memo || "");
     setIsCleaningModalOpen(true);
   };
@@ -1089,6 +1094,7 @@ export default function CalendarPage() {
       startTime: buildLocalDateTime(cleaningDate, cleaningStartTime).toISOString(),
       endTime: buildLocalDateTime(cleaningDate, normalizedEndTime).toISOString(),
       cost: isSiteVisit ? 0 : Number(cleaningCost.replace(/,/g, "")) || 0,
+      isPaid: isSiteVisit ? false : cleaningIsPaid,
       memo: cleaningMemo.trim() || null,
     };
 
@@ -1112,6 +1118,38 @@ export default function CalendarPage() {
       alert(error instanceof Error ? error.message : "일정 저장에 실패했습니다.");
     } finally {
       setIsCleaningSubmitting(false);
+    }
+  };
+
+  const handleToggleCleaningPayment = async (schedule: CleaningSchedule) => {
+    if (schedule.scheduleType !== "CLEANING" || updatingCleaningPaymentId) return;
+
+    try {
+      setUpdatingCleaningPaymentId(schedule.id);
+      const response = await fetch(`/api/cleaning-schedules/${schedule.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomNames: schedule.roomNames,
+          cleanerName: schedule.cleanerName,
+          scheduleType: schedule.scheduleType,
+          contactPhone: schedule.contactPhone,
+          source: null,
+          startTime: schedule.startTime,
+          endTime: schedule.endTime,
+          cost: schedule.cost,
+          isPaid: !schedule.isPaid,
+          memo: schedule.memo,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "청소비 입금 상태 변경 실패");
+      await fetchReservations();
+    } catch (error) {
+      console.error("Update cleaning payment status error:", error);
+      alert(error instanceof Error ? error.message : "청소비 입금 상태를 변경하지 못했습니다.");
+    } finally {
+      setUpdatingCleaningPaymentId(null);
     }
   };
 
@@ -1571,6 +1609,26 @@ export default function CalendarPage() {
                               <span className="flex items-center gap-1">
                                 <Wallet className="h-3.5 w-3.5" /> 비용 <strong className="text-slate-800">{schedule.cost.toLocaleString("ko-KR")}원</strong>
                               </span>
+                              <button
+                                type="button"
+                                disabled={updatingCleaningPaymentId === schedule.id}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleToggleCleaningPayment(schedule);
+                                }}
+                                className={cn(
+                                  "rounded-full px-2 py-0.5 text-[10px] font-extrabold ring-1 ring-inset transition active:scale-95 disabled:cursor-wait disabled:opacity-60",
+                                  schedule.isPaid
+                                    ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
+                                    : "bg-rose-50 text-rose-600 ring-rose-200",
+                                )}
+                              >
+                                {updatingCleaningPaymentId === schedule.id
+                                  ? "변경 중"
+                                  : schedule.isPaid
+                                    ? "입금 완료"
+                                    : "미입금"}
+                              </button>
                               {schedule.contactPhone && (
                                 <PhoneActionLink
                                   phone={schedule.contactPhone}
@@ -2581,24 +2639,42 @@ export default function CalendarPage() {
                 </div>
               </div>
 
-              {calendarScheduleType === "CLEANING" && <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500">청소 비용</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    inputMode="numeric"
-                    value={cleaningCost}
-                    onChange={(event) => {
-                      const digits = event.target.value.replace(/\D/g, "");
-                      setCleaningCost(digits ? Number(digits).toLocaleString("ko-KR") : "");
-                    }}
-                    placeholder="0"
-                    className="w-full rounded-xl border border-slate-200 py-2.5 pl-3 pr-9 text-sm font-medium outline-hidden focus:border-teal-500"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
+              {calendarScheduleType === "CLEANING" && (
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-500">청소 비용</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        required
+                        inputMode="numeric"
+                        value={cleaningCost}
+                        onChange={(event) => {
+                          const digits = event.target.value.replace(/\D/g, "");
+                          setCleaningCost(digits ? Number(digits).toLocaleString("ko-KR") : "");
+                        }}
+                        placeholder="0"
+                        className="w-full rounded-xl border border-slate-200 py-2.5 pl-3 pr-9 text-sm font-medium outline-hidden focus:border-teal-500"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={cleaningIsPaid}
+                    onClick={() => setCleaningIsPaid((current) => !current)}
+                    className={cn(
+                      "h-[42px] rounded-xl px-4 text-xs font-extrabold ring-1 ring-inset transition active:scale-95",
+                      cleaningIsPaid
+                        ? "bg-emerald-100 text-emerald-700 ring-emerald-300"
+                        : "bg-rose-50 text-rose-600 ring-rose-200",
+                    )}
+                  >
+                    {cleaningIsPaid ? "입금 완료" : "미입금"}
+                  </button>
                 </div>
-              </div>}
+              )}
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500">메모 (선택)</label>

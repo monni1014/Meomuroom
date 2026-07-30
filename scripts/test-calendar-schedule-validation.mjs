@@ -12,6 +12,7 @@ const cleaning = validateCleaningScheduleInput({
   startTime: "2026-07-28T00:00:00.000Z",
   endTime: "2026-07-28T01:00:00.000Z",
   cost: 20000,
+  isPaid: true,
   memo: "테스트",
 });
 assert(cleaning.ok, "cleaning schedule should be valid");
@@ -20,6 +21,7 @@ if (cleaning.ok) {
   assert(cleaning.data.contactPhone === "010-9876-5432", "cleaning phone should be preserved");
   assert(cleaning.data.source === null, "cleaning should not store a source");
   assert(cleaning.data.cost === 20000, "cleaning cost should be preserved");
+  assert(cleaning.data.isPaid === true, "cleaning payment status should be preserved");
 }
 
 const siteVisit = validateCleaningScheduleInput({
@@ -31,6 +33,7 @@ const siteVisit = validateCleaningScheduleInput({
   startTime: "2026-07-28T02:00:00.000Z",
   endTime: "2026-07-28T03:00:00.000Z",
   cost: 99999,
+  isPaid: true,
   memo: "스클 문의",
 });
 assert(siteVisit.ok, "site visit schedule should be valid");
@@ -39,6 +42,20 @@ if (siteVisit.ok) {
   assert(siteVisit.data.source === "spacecloud", "site visit source should be preserved");
   assert(siteVisit.data.contactPhone === "010-1234-5678", "site visit phone should be preserved");
   assert(siteVisit.data.cost === 0, "site visit should never record cleaning cost");
+  assert(siteVisit.data.isPaid === false, "site visit should never record cleaning payment status");
+}
+
+const unpaidCleaning = validateCleaningScheduleInput({
+  scheduleType: "CLEANING",
+  roomNames: ["머무룸1"],
+  cleanerName: "미입금 청소 담당자",
+  startTime: "2026-07-28T04:00:00.000Z",
+  endTime: "2026-07-28T05:00:00.000Z",
+  cost: 10000,
+});
+assert(unpaidCleaning.ok, "cleaning schedule without payment flag should be valid");
+if (unpaidCleaning.ok) {
+  assert(unpaidCleaning.data.isPaid === false, "missing cleaning payment status should default to unpaid");
 }
 
 const missingSource = validateCleaningScheduleInput({

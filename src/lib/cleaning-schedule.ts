@@ -17,6 +17,7 @@ export type CleaningScheduleInput = {
   startTime: Date;
   endTime: Date;
   cost: number;
+  isPaid: boolean;
   memo: string | null;
 };
 
@@ -72,6 +73,7 @@ export function validateCleaningScheduleInput(body: unknown): ValidationResult {
   const startTime = parseDate(input.startTime);
   const endTime = parseDate(input.endTime);
   const rawCost = typeof input.cost === "string" ? Number(input.cost.replace(/,/g, "")) : Number(input.cost);
+  const isPaid = input.isPaid === true;
   const memo = typeof input.memo === "string" ? input.memo.trim() : "";
 
   if (uniqueRoomNames.length === 0) {
@@ -107,6 +109,7 @@ export function validateCleaningScheduleInput(body: unknown): ValidationResult {
       startTime,
       endTime,
       cost: scheduleType === "CLEANING" ? rawCost : 0,
+      isPaid: scheduleType === "CLEANING" ? isPaid : false,
       memo: memo || null,
     },
   };
