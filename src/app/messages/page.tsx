@@ -8,6 +8,10 @@ import { buildReservationNotificationGroups } from "@/lib/reservation-notificati
 import { customerMessageDisplay } from "@/lib/customer-message-display";
 import { resolveOnTimeExitTargets } from "@/lib/on-time-exit-policy";
 import {
+  canExcludeGuideNotification,
+  isManualGuideNotificationExclusion,
+} from "@/lib/guide-notification-exclusion";
+import {
   SITE_VISIT_MESSAGE_PREFIX,
   siteVisitMessageDedupeKey,
   siteVisitScheduleIdFromDedupeKey,
@@ -192,6 +196,15 @@ export default async function MessagesPage({
     const groupLeader = groupLeaderByFollowerId.get(reservation.id) || null;
     const scheduledAt = new Date(reservation.startTime.getTime() - 2 * 60 * 60 * 1000);
     const phone = normalizeKoreanPhone(reservation.phone);
+    const manuallyExcluded = !message
+      && !groupLeader
+      && isManualGuideNotificationExclusion(reservation);
+    const canExclude = !groupLeader && canExcludeGuideNotification({
+      notificationStatus: reservation.notificationStatus,
+      notified: reservation.notified,
+      reservationStatus: reservation.status,
+      hasOutboundReminder: Boolean(message),
+    });
     let status = message?.status || reservation.notificationStatus || "PENDING";
     let error = reservation.notificationError;
     if (status === "SENT") status = "SUBMITTED";
@@ -222,6 +235,11 @@ export default async function MessagesPage({
       isTest: message?.dedupeKey.startsWith("reservation-test:") || false,
       messageType: "GUIDE" as const,
       messageLabel: "이용 안내",
+      guideExclusion: {
+        canExclude,
+        manuallyExcluded,
+        canRestore: manuallyExcluded && reservation.startTime.getTime() > now.getTime(),
+      },
       onTimeExitAction: onTimeExitTargetIds.has(reservation.id) || onTimeExitMessage
         ? {
             eligible: onTimeExitTargetIds.has(reservation.id)

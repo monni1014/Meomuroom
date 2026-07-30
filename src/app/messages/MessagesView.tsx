@@ -13,6 +13,8 @@ import {
   Coins,
   Radio,
   Send,
+  BellOff,
+  BellRing,
 } from "lucide-react";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 import { formatKoreanPhone } from "@/lib/phone-number";
@@ -40,6 +42,11 @@ type DeliveryEntry = {
   isTest: boolean;
   messageType: "GUIDE" | "DAWN_BOOKING" | "ON_TIME_EXIT" | "SITE_VISIT" | "UNPAID" | "REVIEW_REFUND_ACCOUNT" | "SITUATION";
   messageLabel: string;
+  guideExclusion?: {
+    canExclude: boolean;
+    manuallyExcluded: boolean;
+    canRestore: boolean;
+  } | null;
   onTimeExitAction?: {
     eligible: boolean;
     status: string | null;
@@ -207,6 +214,8 @@ export default function MessagesView({
   const [messageFilter, setMessageFilter] = useState<MessageFilter>("ALL");
   const [sendingOnTimeExitId, setSendingOnTimeExitId] = useState<string | null>(null);
   const [onTimeExitErrors, setOnTimeExitErrors] = useState<Record<string, string>>({});
+  const [updatingGuideExclusionId, setUpdatingGuideExclusionId] = useState<string | null>(null);
+  const [guideExclusionErrors, setGuideExclusionErrors] = useState<Record<string, string>>({});
   const refresh = useCallback(() => router.refresh(), [router]);
   useDataChangePolling("/api/data-version?scope=messages", refresh, { intervalMs: 5_000 });
 
@@ -307,6 +316,32 @@ export default function MessagesView({
       }));
     } finally {
       setSendingOnTimeExitId(null);
+    }
+  }
+
+  async function updateGuideExclusion(entry: DeliveryEntry, excluded: boolean) {
+    if (updatingGuideExclusionId) return;
+
+    setUpdatingGuideExclusionId(entry.reservationId);
+    setGuideExclusionErrors((current) => ({ ...current, [entry.reservationId]: "" }));
+    try {
+      const response = await fetch("/api/messages/guide-exclusion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reservationId: entry.reservationId, excluded }),
+      });
+      const payload = await response.json().catch(() => ({})) as { success?: boolean; error?: string };
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "안내문자 설정을 변경하지 못했습니다.");
+      }
+      router.refresh();
+    } catch (error) {
+      setGuideExclusionErrors((current) => ({
+        ...current,
+        [entry.reservationId]: error instanceof Error ? error.message : "안내문자 설정을 변경하지 못했습니다.",
+      }));
+    } finally {
+      setUpdatingGuideExclusionId(null);
     }
   }
 
@@ -480,6 +515,33 @@ export default function MessagesView({
                       )}
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
+                      {entry.messageType === "GUIDE" && (
+                        entry.guideExclusion?.canExclude
+                        || (entry.guideExclusion?.manuallyExcluded && entry.guideExclusion.canRestore)
+                      ) && (
+                        <button
+                          type="button"
+                          onClick={() => void updateGuideExclusion(
+                            entry,
+                            !entry.guideExclusion?.manuallyExcluded,
+                          )}
+                          disabled={Boolean(updatingGuideExclusionId)}
+                          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-black ring-1 ring-inset transition disabled:cursor-wait disabled:opacity-60 ${
+                            entry.guideExclusion?.manuallyExcluded
+                              ? "bg-indigo-50 text-indigo-700 ring-indigo-200 hover:bg-indigo-100"
+                              : "bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200"
+                          }`}
+                        >
+                          {entry.guideExclusion?.manuallyExcluded
+                            ? <BellRing className="h-3.5 w-3.5" />
+                            : <BellOff className="h-3.5 w-3.5" />}
+                          {updatingGuideExclusionId === entry.reservationId
+                            ? "변경 중"
+                            : entry.guideExclusion?.manuallyExcluded
+                              ? "다시 발송 대상"
+                              : "문자 보내지 않기"}
+                        </button>
+                      )}
                       {entry.messageType === "GUIDE" && entry.onTimeExitAction?.eligible && (
                         <button
                           type="button"
@@ -511,6 +573,11 @@ export default function MessagesView({
                       {onTimeExitErrors[entry.reservationId] && (
                         <p className="max-w-xs rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
                           {onTimeExitErrors[entry.reservationId]}
+                        </p>
+                      )}
+                      {guideExclusionErrors[entry.reservationId] && (
+                        <p className="max-w-xs rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                          {guideExclusionErrors[entry.reservationId]}
                         </p>
                       )}
                       <div className="flex items-center gap-2 text-xs text-slate-400">
