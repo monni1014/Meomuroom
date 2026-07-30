@@ -336,6 +336,8 @@ export default function CalendarPage() {
   const [formPurpose, setFormPurpose] = useState(""); // 대분류
   const [formDetail, setFormDetail] = useState(""); // 세부내용
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingDeleteReservationId, setPendingDeleteReservationId] = useState<string | null>(null);
+  const [isDeletingReservation, setIsDeletingReservation] = useState(false);
   const [showMultiPicker, setShowMultiPicker] = useState(false);
   const [isReservationContactMenuOpen, setIsReservationContactMenuOpen] = useState(false);
 
@@ -535,6 +537,15 @@ export default function CalendarPage() {
 
   const handleAgendaGestureStart = (event: React.PointerEvent<HTMLElement>) => {
     if (event.pointerType === "touch" || !event.isPrimary || event.button !== 0) return;
+
+    const target = event.target;
+    if (
+      target instanceof Element
+      && target.closest("button, a, input, select, textarea, label, [role='button']")
+    ) {
+      return;
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
     agendaGestureStartRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
   };
@@ -981,20 +992,24 @@ export default function CalendarPage() {
     }
   };
 
-  const handleDeleteReservation = async (id: string) => {
-    if (!confirm("정말로 이 예약을 취소하시겠습니까?")) return;
-
+  const handleDeleteReservation = async () => {
+    if (!pendingDeleteReservationId || isDeletingReservation) return;
     try {
-      const res = await fetch(`/api/reservations/${id}`, {
+      setIsDeletingReservation(true);
+      const res = await fetch(`/api/reservations/${pendingDeleteReservationId}`, {
         method: "DELETE",
       });
       if (res.ok) {
-        fetchReservations();
+        setPendingDeleteReservationId(null);
+        await fetchReservations();
       } else {
-        alert("예약 취소에 실패했습니다.");
+        alert("예약 삭제에 실패했습니다.");
       }
     } catch (err) {
       console.error(err);
+      alert("예약 삭제에 실패했습니다.");
+    } finally {
+      setIsDeletingReservation(false);
     }
   };
 
@@ -1572,14 +1587,20 @@ export default function CalendarPage() {
                     </div>
                     <div className="flex shrink-0 justify-end gap-0 md:gap-1">
                       <button
-                        onClick={() => openCleaningEditModal(schedule)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openCleaningEditModal(schedule);
+                        }}
                         className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-teal-600 active:scale-95 md:p-2"
                         title={`${isSiteVisit ? "사전답사" : "청소"} 일정 수정`}
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => handleDeleteCleaning(schedule)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleDeleteCleaning(schedule);
+                        }}
                         className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-500 active:scale-95 md:p-2"
                         title={`${isSiteVisit ? "사전답사" : "청소"} 일정 삭제`}
                       >
@@ -1885,7 +1906,7 @@ export default function CalendarPage() {
                         </>
                       )}
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteReservation(res.id); }}
+                        onClick={(e) => { e.stopPropagation(); setPendingDeleteReservationId(res.id); }}
                         className="p-2 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 transition active:scale-95"
                         title="예약 및 로그 완전 삭제"
                       >
@@ -1961,6 +1982,53 @@ export default function CalendarPage() {
               >
                 <Plus className="h-6 w-6" />
                 예약 추가
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {pendingDeleteReservationId && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[1px]"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="delete-reservation-title"
+        >
+          <button
+            type="button"
+            aria-label="예약 삭제 확인창 닫기"
+            className="absolute inset-0 cursor-default"
+            onClick={() => {
+              if (!isDeletingReservation) setPendingDeleteReservationId(null);
+            }}
+          />
+          <section className="relative w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+              <Trash2 className="h-5 w-5" />
+            </div>
+            <h2 id="delete-reservation-title" className="text-lg font-black text-slate-900">
+              예약을 완전히 삭제할까요?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              예약과 관련 로그가 함께 삭제되며, 삭제한 뒤에는 되돌릴 수 없습니다.
+            </p>
+            <div className="mt-6 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteReservationId(null)}
+                disabled={isDeletingReservation}
+                className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDeleteReservation()}
+                disabled={isDeletingReservation}
+                className="rounded-xl bg-rose-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
+              >
+                {isDeletingReservation ? "삭제 중" : "완전 삭제"}
               </button>
             </div>
           </section>
