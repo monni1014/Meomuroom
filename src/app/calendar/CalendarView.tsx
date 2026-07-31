@@ -312,6 +312,7 @@ export default function CalendarPage() {
   const mobileAgendaDragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mobileAgendaOpenFrameRef = useRef<number | null>(null);
   const mobileAgendaVisibleFrameRef = useRef<number | null>(null);
+  const lastAgendaCardPressRef = useRef<{ reservationId: string; pressedAt: number } | null>(null);
   const [agendaSlideDirection, setAgendaSlideDirection] = useState<"next" | "previous" | null>(null);
 
   const [modalMode, setModalMode] = useState<"create" | "edit" | "copy">("create");
@@ -414,6 +415,16 @@ export default function CalendarPage() {
     if (focusAgenda) params.set("focus", "agenda");
     else params.delete("focus");
     window.history.replaceState(window.history.state, "", `/calendar?${params.toString()}`);
+  };
+
+  const openReservationUsage = (reservationId: string) => {
+    replaceCalendarState(selectedDate, roomFilter, true);
+    const params = new URLSearchParams({
+      selected: reservationId,
+      fromDate: format(selectedDate, "yyyy-MM-dd"),
+      fromRoom: roomFilter,
+    });
+    router.push(`/usage?${params.toString()}`);
   };
 
   const openMobileAgenda = useCallback(() => {
@@ -1693,6 +1704,23 @@ export default function CalendarPage() {
                   key={res.id}
                   data-testid="mobile-agenda-card"
                   aria-expanded={isExpanded}
+                  onPointerDownCapture={(event) => {
+                    if (!event.isPrimary || event.button !== 0) return;
+                    if ((event.target as HTMLElement).closest("button, input, select, textarea, [role='button']")) return;
+
+                    const pressedAt = window.performance.now();
+                    const previousPress = lastAgendaCardPressRef.current;
+                    lastAgendaCardPressRef.current = { reservationId: res.id, pressedAt };
+                    if (
+                      previousPress?.reservationId === res.id
+                      && pressedAt - previousPress.pressedAt <= 900
+                    ) {
+                      lastAgendaCardPressRef.current = null;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      openReservationUsage(res.id);
+                    }
+                  }}
                   onClick={(event) => {
                     // PC에서는 단일 클릭으로 카드가 다시 렌더링되면 두 번째 클릭 전에
                     // DOM이 교체되어 더블클릭 이동이 끊긴다. 펼치기는 모바일에서만 쓴다.
@@ -1706,13 +1734,8 @@ export default function CalendarPage() {
                     if ((event.target as HTMLElement).closest("button, input, select, textarea, [role='button']")) return;
                     event.preventDefault();
                     event.stopPropagation();
-                    replaceCalendarState(selectedDate, roomFilter, true);
-                    const params = new URLSearchParams({
-                      selected: res.id,
-                      fromDate: format(selectedDate, "yyyy-MM-dd"),
-                      fromRoom: roomFilter,
-                    });
-                    router.push(`/usage?${params.toString()}`);
+                    lastAgendaCardPressRef.current = null;
+                    openReservationUsage(res.id);
                   }}
                   title="더블클릭하면 이용현황에서 수정"
                   className={cn(
