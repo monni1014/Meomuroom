@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import {
+  cancelAllOnTimeExitSchedules,
+  cancelOnTimeExitAt,
   cancelOnTimeExitWithGuide,
+  scheduleOnTimeExitAt,
   scheduleOnTimeExitWithGuide,
   sendManualOnTimeExitMessage,
 } from "@/lib/on-time-exit-notifications";
@@ -24,11 +27,16 @@ export async function POST(request: Request) {
     let result;
     if (action === "SCHEDULE_WITH_GUIDE") {
       result = await scheduleOnTimeExitWithGuide(reservationId);
+    } else if (action === "SCHEDULE_AT") {
+      const time = typeof body.time === "string" ? body.time.trim() : "";
+      result = await scheduleOnTimeExitAt(reservationId, time);
     } else if (action === "CANCEL_GUIDE_SCHEDULE") {
       result = await cancelOnTimeExitWithGuide(reservationId);
+    } else if (action === "CANCEL_TIMED_SCHEDULE") {
+      result = await cancelOnTimeExitAt(reservationId);
     } else if (action === "SEND_NOW") {
       result = await sendManualOnTimeExitMessage(reservationId);
-      await cancelOnTimeExitWithGuide(reservationId);
+      await cancelAllOnTimeExitSchedules(reservationId);
     } else {
       return NextResponse.json(
         { success: false, error: "지원하지 않는 정시퇴실 문자 작업입니다." },

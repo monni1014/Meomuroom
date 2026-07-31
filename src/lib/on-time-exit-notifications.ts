@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAdminAlert, resolveAdminAlertByDedupeKey } from "@/lib/admin-alerts";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
-import { getKstDayRange, getKstDateKey, getKstDateParts } from "@/lib/kst-time";
+import { createKstDate, getKstDayRange, getKstDateKey, getKstDateParts } from "@/lib/kst-time";
 import { resolveOnTimeExitTargets } from "@/lib/on-time-exit-policy";
 import { getSituationMessageTemplates } from "@/lib/situation-message-templates";
 import { lookupReservationReminderDelivery, sendReservationSituationMessage } from "@/lib/solapi-sms";
@@ -11,6 +11,7 @@ import { lookupReservationReminderDelivery, sendReservationSituationMessage } fr
 const SITUATION_TYPE = "ON_TIME_EXIT_REMINDER";
 const MESSAGE_PREFIX = "situation:on-time-exit:";
 const GUIDE_SCHEDULE_PREFIX = "on-time-exit-with-guide:";
+const TIMED_SCHEDULE_PREFIX = "on-time-exit-at:";
 const ATTEMPT_PREFIX = "attempt:";
 const ALERT_PREFIX = "on-time-exit-notification:";
 const RECOVERY_WAIT_MS = 2 * 60 * 1000;
@@ -24,6 +25,15 @@ function messageDedupeKey(reservationId: string) {
 export function onTimeExitGuideScheduleKey(reservationId: string) {
   return `${GUIDE_SCHEDULE_PREFIX}${reservationId}`;
 }
+
+export function onTimeExitTimedScheduleKey(reservationId: string) {
+  return `${TIMED_SCHEDULE_PREFIX}${reservationId}`;
+}
+
+export type TimedOnTimeExitSchedule = {
+  reservationId: string;
+  scheduledAt: Date;
+};
 
 export async function getScheduledOnTimeExitReservationIds(reservationIds?: string[]) {
   if (reservationIds && reservationIds.length === 0) return new Set<string>();
@@ -40,6 +50,61 @@ export async function getScheduledOnTimeExitReservationIds(reservationIds?: stri
   });
 
   return new Set(settings.map((setting) => setting.key.slice(GUIDE_SCHEDULE_PREFIX.length)));
+}
+
+export async function getTimedOnTimeExitSchedules(reservationIds?: string[]) {
+  if (reservationIds && reservationIds.length === 0) {
+    return new Map<string, TimedOnTimeExitSchedule>();
+  }
+
+  const settings = await prisma.appSetting.findMany({
+    where: {
+      key: {
+        ...(reservationIds
+          ? { in: reservationIds.map(onTimeExitTimedScheduleKey) }
+          : { startsWith: TIMED_SCHEDULE_PREFIX }),
+      },
+    },
+    select: { key: true, value: true },
+  });
+
+  const schedules = new Map<string, TimedOnTimeExitSchedule>();
+  for (const setting of settings) {
+    const reservationId = setting.key.slice(TIMED_SCHEDULE_PREFIX.length);
+    try {
+      const parsed = JSON.parse(setting.value) as { scheduledAt?: unknown };
+      if (typeof parsed.scheduledAt !== "string") continue;
+      const scheduledAt = new Date(parsed.scheduledAt);
+      if (Number.isNaN(scheduledAt.getTime())) continue;
+      schedules.set(reservationId, { reservationId, scheduledAt });
+    } catch {
+      // Invalid legacy values are ignored and removed by the scheduler cleanup path.
+    }
+  }
+  return schedules;
+}
+
+export function resolveTimedOnTimeExitAt(
+  reservationStart: Date,
+  reservationEnd: Date,
+  time: string,
+  now = new Date(),
+) {
+  const match = /^(?:[01]\d|2[0-3]):[0-5]\d$/.exec(time);
+  if (!match) {
+    return { success: false as const, error: "발송 시간을 확인해 주세요." };
+  }
+
+  const [hour, minute] = time.split(":").map(Number);
+  const parts = getKstDateParts(reservationStart);
+  const scheduledAt = createKstDate(parts.year, parts.month, parts.day, hour, minute);
+  if (scheduledAt.getTime() <= now.getTime()) {
+    return { success: false as const, error: "이미 지난 시간에는 예약할 수 없습니다." };
+  }
+  if (scheduledAt.getTime() >= reservationEnd.getTime()) {
+    return { success: false as const, error: "예약 종료 전 시간으로 설정해 주세요." };
+  }
+  return { success: true as const, scheduledAt };
 }
 
 function alertDedupeKey(reservationId: string) {
@@ -140,13 +205,21 @@ export async function sendDueOnTimeExitMessages(now = new Date()) {
   const pipelineStartedAt = Date.now();
   const recovery = await recoverInterruptedMessages(now);
   const template = (await getSituationMessageTemplates()).find((item) => item.key === SITUATION_TYPE);
-  const scheduledReservationIds = [...await getScheduledOnTimeExitReservationIds()];
+  const [scheduledWithGuideIds, timedSchedules] = await Promise.all([
+    getScheduledOnTimeExitReservationIds(),
+    getTimedOnTimeExitSchedules(),
+  ]);
+  const scheduledReservationIds = [...new Set([
+    ...scheduledWithGuideIds,
+    ...timedSchedules.keys(),
+  ])];
   const scheduledReservations = scheduledReservationIds.length > 0
     ? await prisma.reservation.findMany({
         where: { id: { in: scheduledReservationIds } },
         select: {
           id: true,
           startTime: true,
+          endTime: true,
           status: true,
           isNoShow: true,
           notified: true,
@@ -163,7 +236,7 @@ export async function sendDueOnTimeExitMessages(now = new Date()) {
   let failedCount = 0;
   let skippedCount = 0;
 
-  for (const reservationId of scheduledReservationIds) {
+  for (const reservationId of scheduledWithGuideIds) {
     checkedCount += 1;
     const reservation = scheduledReservationById.get(reservationId);
     if (!reservation
@@ -180,6 +253,30 @@ export async function sendDueOnTimeExitMessages(now = new Date()) {
     if (!reservation.notified) continue;
 
     const result = await sendScheduledOnTimeExitWithGuide(reservationId, now);
+    if (result.success) {
+      if ("dryRun" in result && result.dryRun) dryRunCount += 1;
+      else sentCount += 1;
+    } else {
+      failedCount += 1;
+    }
+  }
+
+  for (const [reservationId, schedule] of timedSchedules) {
+    if (scheduledWithGuideIds.has(reservationId)) continue;
+    checkedCount += 1;
+    const reservation = scheduledReservationById.get(reservationId);
+    if (!reservation
+      || reservation.status !== "CONFIRMED"
+      || reservation.isNoShow
+      || schedule.scheduledAt.getTime() >= reservation.endTime.getTime()) {
+      await cancelOnTimeExitAt(reservationId);
+      skippedCount += 1;
+      continue;
+    }
+
+    if (schedule.scheduledAt.getTime() > now.getTime()) continue;
+
+    const result = await sendScheduledOnTimeExitAt(reservationId, now);
     if (result.success) {
       if ("dryRun" in result && result.dryRun) dryRunCount += 1;
       else sentCount += 1;
@@ -274,16 +371,21 @@ export async function scheduleOnTimeExitWithGuide(reservationId: string, now = n
     return { success: false, statusCode: 409, error: "정시퇴실 문자가 이미 처리된 예약입니다." };
   }
 
-  await prisma.appSetting.upsert({
-    where: { key: onTimeExitGuideScheduleKey(reservationId) },
-    create: {
-      key: onTimeExitGuideScheduleKey(reservationId),
-      value: JSON.stringify({ reservationId, scheduledAt: now.toISOString() }),
-    },
-    update: {
-      value: JSON.stringify({ reservationId, scheduledAt: now.toISOString() }),
-    },
-  });
+  await prisma.$transaction([
+    prisma.appSetting.deleteMany({
+      where: { key: onTimeExitTimedScheduleKey(reservationId) },
+    }),
+    prisma.appSetting.upsert({
+      where: { key: onTimeExitGuideScheduleKey(reservationId) },
+      create: {
+        key: onTimeExitGuideScheduleKey(reservationId),
+        value: JSON.stringify({ reservationId, scheduledAt: now.toISOString() }),
+      },
+      update: {
+        value: JSON.stringify({ reservationId, scheduledAt: now.toISOString() }),
+      },
+    }),
+  ]);
 
   return { success: true, statusCode: 200, scheduledWithGuide: true };
 }
@@ -293,6 +395,118 @@ export async function cancelOnTimeExitWithGuide(reservationId: string) {
     where: { key: onTimeExitGuideScheduleKey(reservationId) },
   });
   return { success: true, statusCode: 200, scheduledWithGuide: false };
+}
+
+export async function scheduleOnTimeExitAt(
+  reservationId: string,
+  time: string,
+  now = new Date(),
+) {
+  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
+  if (!reservation) {
+    return { success: false, statusCode: 404, error: "예약을 찾을 수 없습니다." };
+  }
+  if (reservation.status !== "CONFIRMED" || reservation.isNoShow) {
+    return { success: false, statusCode: 409, error: "취소 또는 노쇼 예약에는 발송 예약을 설정할 수 없습니다." };
+  }
+
+  const resolvedTime = resolveTimedOnTimeExitAt(
+    reservation.startTime,
+    reservation.endTime,
+    time,
+    now,
+  );
+  if (!resolvedTime.success) {
+    return { success: false, statusCode: 400, error: resolvedTime.error };
+  }
+
+  const dayRange = getKstDayRange(reservation.startTime);
+  const candidates = await prisma.reservation.findMany({
+    where: {
+      startTime: {
+        gte: dayRange.start,
+        lte: new Date(dayRange.end.getTime() + DAY_MS),
+      },
+      status: "CONFIRMED",
+      isNoShow: false,
+    },
+    orderBy: [{ startTime: "asc" }, { id: "asc" }],
+  });
+  const eligible = resolveOnTimeExitTargets(candidates)
+    .some((item) => item.leader.id === reservation.id);
+  if (!eligible) {
+    return {
+      success: false,
+      statusCode: 409,
+      error: "같은 공간에 다른 고객의 예약이 바로 이어지는 경우에만 예약할 수 있습니다.",
+    };
+  }
+  if (!isValidKoreanMobilePhone(normalizeKoreanPhone(reservation.phone))) {
+    return { success: false, statusCode: 400, error: "예약의 고객 전화번호를 확인해 주세요." };
+  }
+
+  const template = (await getSituationMessageTemplates()).find((item) => item.key === SITUATION_TYPE);
+  if (!template?.content.trim()) {
+    return { success: false, statusCode: 400, error: "설정에서 정시퇴실 문자 내용을 먼저 저장해 주세요." };
+  }
+
+  const existingMessage = await prisma.customerMessage.findUnique({
+    where: { dedupeKey: messageDedupeKey(reservationId) },
+    select: { id: true },
+  });
+  if (existingMessage) {
+    return { success: false, statusCode: 409, error: "정시퇴실 문자가 이미 처리된 예약입니다." };
+  }
+
+  await prisma.$transaction([
+    prisma.appSetting.deleteMany({
+      where: { key: onTimeExitGuideScheduleKey(reservationId) },
+    }),
+    prisma.appSetting.upsert({
+      where: { key: onTimeExitTimedScheduleKey(reservationId) },
+      create: {
+        key: onTimeExitTimedScheduleKey(reservationId),
+        value: JSON.stringify({
+          reservationId,
+          scheduledAt: resolvedTime.scheduledAt.toISOString(),
+          createdAt: now.toISOString(),
+        }),
+      },
+      update: {
+        value: JSON.stringify({
+          reservationId,
+          scheduledAt: resolvedTime.scheduledAt.toISOString(),
+          createdAt: now.toISOString(),
+        }),
+      },
+    }),
+  ]);
+
+  return {
+    success: true,
+    statusCode: 200,
+    scheduledAt: resolvedTime.scheduledAt.toISOString(),
+  };
+}
+
+export async function cancelOnTimeExitAt(reservationId: string) {
+  await prisma.appSetting.deleteMany({
+    where: { key: onTimeExitTimedScheduleKey(reservationId) },
+  });
+  return { success: true, statusCode: 200, scheduledAt: null };
+}
+
+export async function cancelAllOnTimeExitSchedules(reservationId: string) {
+  await prisma.appSetting.deleteMany({
+    where: {
+      key: {
+        in: [
+          onTimeExitGuideScheduleKey(reservationId),
+          onTimeExitTimedScheduleKey(reservationId),
+        ],
+      },
+    },
+  });
 }
 
 export async function sendScheduledOnTimeExitWithGuide(reservationId: string, now = new Date()) {
@@ -305,7 +519,28 @@ export async function sendScheduledOnTimeExitWithGuide(reservationId: string, no
   }
 
   const result = await sendManualOnTimeExitMessage(reservationId, now);
-  await cancelOnTimeExitWithGuide(reservationId);
+  await cancelAllOnTimeExitSchedules(reservationId);
+  return { ...result, scheduled: true };
+}
+
+export async function sendScheduledOnTimeExitAt(reservationId: string, now = new Date()) {
+  const schedules = await getTimedOnTimeExitSchedules([reservationId]);
+  const schedule = schedules.get(reservationId);
+  if (!schedule) {
+    return { success: true, statusCode: 200, scheduled: false, skipped: true };
+  }
+  if (schedule.scheduledAt.getTime() > now.getTime()) {
+    return {
+      success: true,
+      statusCode: 200,
+      scheduled: true,
+      pending: true,
+      scheduledAt: schedule.scheduledAt.toISOString(),
+    };
+  }
+
+  const result = await sendManualOnTimeExitMessage(reservationId, now);
+  await cancelAllOnTimeExitSchedules(reservationId);
   return { ...result, scheduled: true };
 }
 

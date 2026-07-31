@@ -51,6 +51,7 @@ type DeliveryEntry = {
     eligible: boolean;
     canScheduleWithGuide: boolean;
     scheduledWithGuide: boolean;
+    scheduledAt: string | null;
     status: string | null;
     resultAt: string | null;
   } | null;
@@ -152,6 +153,48 @@ function onTimeExitStatusLabel(status: string) {
   return "정시퇴실 발송됨";
 }
 
+function formatKstClock(value: string) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(value));
+}
+
+function formatKstTimeInput(value: Date) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(value);
+  const hour = parts.find((part) => part.type === "hour")?.value || "00";
+  const minute = parts.find((part) => part.type === "minute")?.value || "00";
+  return `${hour === "24" ? "00" : hour}:${minute}`;
+}
+
+function kstDateKey(value: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+function defaultOnTimeExitScheduleTime(entry: DeliveryEntry) {
+  const endTime = new Date(entry.endTime);
+  let target = new Date(endTime.getTime() - 20 * 60 * 1000);
+  const now = new Date();
+  if (target.getTime() <= now.getTime()
+    && kstDateKey(now) === kstDateKey(new Date(entry.startTime))) {
+    const rounded = Math.ceil((now.getTime() + 60_000) / (5 * 60_000)) * 5 * 60_000;
+    if (rounded < endTime.getTime()) target = new Date(rounded);
+  }
+  return formatKstTimeInput(target);
+}
+
 function OperationalWarningDetails({
   details,
   className,
@@ -216,6 +259,8 @@ export default function MessagesView({
   const [messageFilter, setMessageFilter] = useState<MessageFilter>("ALL");
   const [sendingOnTimeExitId, setSendingOnTimeExitId] = useState<string | null>(null);
   const [openOnTimeExitMenuId, setOpenOnTimeExitMenuId] = useState<string | null>(null);
+  const [openOnTimeExitScheduleId, setOpenOnTimeExitScheduleId] = useState<string | null>(null);
+  const [onTimeExitScheduleTimes, setOnTimeExitScheduleTimes] = useState<Record<string, string>>({});
   const [onTimeExitErrors, setOnTimeExitErrors] = useState<Record<string, string>>({});
   const [updatingGuideExclusionId, setUpdatingGuideExclusionId] = useState<string | null>(null);
   const [guideExclusionErrors, setGuideExclusionErrors] = useState<Record<string, string>>({});
@@ -298,12 +343,18 @@ export default function MessagesView({
 
   async function updateOnTimeExitMessage(
     entry: DeliveryEntry,
-    action: "SEND_NOW" | "SCHEDULE_WITH_GUIDE" | "CANCEL_GUIDE_SCHEDULE",
+    action: "SEND_NOW" | "SCHEDULE_AT" | "SCHEDULE_WITH_GUIDE" | "CANCEL_TIMED_SCHEDULE" | "CANCEL_GUIDE_SCHEDULE",
   ) {
     if (sendingOnTimeExitId) return;
     if (action === "SEND_NOW" && !entry.onTimeExitAction?.eligible) return;
+    if (action === "SCHEDULE_AT" && !entry.onTimeExitAction?.eligible) return;
     if (action === "SCHEDULE_WITH_GUIDE" && !entry.onTimeExitAction?.canScheduleWithGuide) return;
+    if (action === "CANCEL_TIMED_SCHEDULE" && !entry.onTimeExitAction?.scheduledAt) return;
     if (action === "CANCEL_GUIDE_SCHEDULE" && !entry.onTimeExitAction?.scheduledWithGuide) return;
+
+    const time = action === "SCHEDULE_AT"
+      ? onTimeExitScheduleTimes[entry.reservationId] || defaultOnTimeExitScheduleTime(entry)
+      : undefined;
 
     setSendingOnTimeExitId(entry.reservationId);
     setOpenOnTimeExitMenuId(null);
@@ -312,12 +363,13 @@ export default function MessagesView({
       const response = await fetch("/api/messages/on-time-exit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reservationId: entry.reservationId, action }),
+        body: JSON.stringify({ reservationId: entry.reservationId, action, time }),
       });
       const payload = await response.json().catch(() => ({})) as { success?: boolean; error?: string };
       if (!response.ok || !payload.success) {
         throw new Error(payload.error || "정시퇴실 문자 설정을 변경하지 못했습니다.");
       }
+      setOpenOnTimeExitScheduleId(null);
       router.refresh();
     } catch (error) {
       setOnTimeExitErrors((current) => ({
@@ -555,15 +607,24 @@ export default function MessagesView({
                       {entry.messageType === "GUIDE"
                         && entry.onTimeExitAction
                         && !entry.onTimeExitAction.status
-                        && (entry.onTimeExitAction.eligible || entry.onTimeExitAction.scheduledWithGuide) && (
-                        entry.onTimeExitAction.scheduledWithGuide ? (
+                        && (entry.onTimeExitAction.eligible
+                          || entry.onTimeExitAction.scheduledWithGuide
+                          || entry.onTimeExitAction.scheduledAt) && (
+                        entry.onTimeExitAction.scheduledWithGuide || entry.onTimeExitAction.scheduledAt ? (
                           <div className="mb-1.5 flex flex-wrap items-center justify-end gap-2">
                             <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-extrabold text-indigo-700 ring-1 ring-inset ring-indigo-200">
-                              이용안내 시 발송 예약됨
+                              {entry.onTimeExitAction.scheduledWithGuide
+                                ? "이용안내 시 발송 예약됨"
+                                : `${formatKstClock(entry.onTimeExitAction.scheduledAt!)} 예약 발송`}
                             </span>
                             <button
                               type="button"
-                              onClick={() => void updateOnTimeExitMessage(entry, "CANCEL_GUIDE_SCHEDULE")}
+                              onClick={() => void updateOnTimeExitMessage(
+                                entry,
+                                entry.onTimeExitAction?.scheduledWithGuide
+                                  ? "CANCEL_GUIDE_SCHEDULE"
+                                  : "CANCEL_TIMED_SCHEDULE",
+                              )}
                               disabled={Boolean(sendingOnTimeExitId)}
                               className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-200 disabled:cursor-wait disabled:opacity-60"
                             >
@@ -574,9 +635,12 @@ export default function MessagesView({
                           <div className="relative mb-1.5">
                             <button
                               type="button"
-                              onClick={() => setOpenOnTimeExitMenuId((current) => (
-                                current === entry.reservationId ? null : entry.reservationId
-                              ))}
+                              onClick={() => {
+                                setOpenOnTimeExitScheduleId(null);
+                                setOpenOnTimeExitMenuId((current) => (
+                                  current === entry.reservationId ? null : entry.reservationId
+                                ));
+                              }}
                               disabled={Boolean(sendingOnTimeExitId)}
                               className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-black ring-1 ring-inset transition disabled:cursor-wait ${
                                 sendingOnTimeExitId === entry.reservationId
@@ -601,12 +665,69 @@ export default function MessagesView({
                                 </button>
                                 <button
                                   type="button"
+                                  onClick={() => {
+                                    setOpenOnTimeExitMenuId(null);
+                                    setOnTimeExitScheduleTimes((current) => ({
+                                      ...current,
+                                      [entry.reservationId]: current[entry.reservationId]
+                                        || defaultOnTimeExitScheduleTime(entry),
+                                    }));
+                                    setOpenOnTimeExitScheduleId(entry.reservationId);
+                                  }}
+                                  className="block w-full rounded-lg px-3 py-2.5 text-left text-xs font-black text-slate-800 hover:bg-slate-100"
+                                >
+                                  예약 보내기
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => void updateOnTimeExitMessage(entry, "SCHEDULE_WITH_GUIDE")}
                                   disabled={!entry.onTimeExitAction.canScheduleWithGuide}
                                   className="block w-full rounded-lg px-3 py-2.5 text-left text-xs font-black text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
                                 >
                                   이용안내 시 보내기
                                 </button>
+                              </div>
+                            )}
+                            {openOnTimeExitScheduleId === entry.reservationId && (
+                              <div className="absolute right-0 top-full z-30 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+                                <label
+                                  htmlFor={`on-time-exit-time-${entry.reservationId}`}
+                                  className="block text-xs font-black text-slate-700"
+                                >
+                                  발송 시간
+                                </label>
+                                <input
+                                  id={`on-time-exit-time-${entry.reservationId}`}
+                                  type="time"
+                                  step={300}
+                                  value={onTimeExitScheduleTimes[entry.reservationId]
+                                    || defaultOnTimeExitScheduleTime(entry)}
+                                  onChange={(event) => setOnTimeExitScheduleTimes((current) => ({
+                                    ...current,
+                                    [entry.reservationId]: event.target.value,
+                                  }))}
+                                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                />
+                                <p className="mt-1.5 text-[11px] font-semibold text-slate-400">
+                                  예약 당일 시간으로 발송됩니다.
+                                </p>
+                                <div className="mt-3 flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setOpenOnTimeExitScheduleId(null)}
+                                    className="rounded-lg px-3 py-2 text-xs font-black text-slate-500 hover:bg-slate-100"
+                                  >
+                                    닫기
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void updateOnTimeExitMessage(entry, "SCHEDULE_AT")}
+                                    disabled={Boolean(sendingOnTimeExitId)}
+                                    className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-black text-white transition hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-60"
+                                  >
+                                    예약 저장
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </div>
