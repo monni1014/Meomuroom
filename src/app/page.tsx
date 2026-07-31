@@ -11,6 +11,8 @@ import DismissibleAdminAlerts from "@/components/DismissibleAdminAlerts";
 import { addKstMonths, createKstDate, getKstDateParts, getKstDayRange, startOfKstMonth } from "@/lib/kst-time";
 import { MobileAppLaunchRedirect } from "@/components/MobileAppLaunchRedirect";
 import { decorateDashboardReservationEvents } from "@/lib/dashboard-reservation-events";
+import { decorateDashboardCalendarScheduleEvents } from "@/lib/dashboard-calendar-schedule-events";
+import { parseCleaningRoomNames } from "@/lib/cleaning-schedule";
 
 export const dynamic = "force-dynamic";
 
@@ -148,6 +150,41 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
     startOfToday,
     endOfToday,
   );
+
+  const rawTodayCalendarSchedules = await prisma.cleaningSchedule.findMany({
+    where: {
+      OR: [
+        {
+          createdAt: {
+            gte: startOfToday,
+            lte: endOfToday,
+          },
+        },
+        {
+          updatedAt: {
+            gte: startOfToday,
+            lte: endOfToday,
+          },
+        },
+      ],
+    },
+  });
+  const todayCalendarSchedules = decorateDashboardCalendarScheduleEvents(
+    rawTodayCalendarSchedules,
+    startOfToday,
+    endOfToday,
+  );
+  const todayDashboardEvents = [
+    ...todayReservations.map((reservation) => ({
+      ...reservation,
+      dashboardItemType: "RESERVATION" as const,
+    })),
+    ...todayCalendarSchedules.map((schedule) => ({
+      ...schedule,
+      roomNames: parseCleaningRoomNames(schedule.roomName),
+      dashboardItemType: "CALENDAR_SCHEDULE" as const,
+    })),
+  ].sort((a, b) => Date.parse(b.dashboardEventAt) - Date.parse(a.dashboardEventAt));
 
   // Fetch selected month's reservations
   const thisMonthReservations = await prisma.reservation.findMany({
@@ -427,12 +464,12 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       {/* Today's Reservations */}
       <section className="order-1 space-y-3 md:order-2 md:pt-6">
         <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold text-slate-900">오늘 예약 변동 ({todayReservations.length}건)</h2>
-          <span className="text-xs text-slate-400">오늘 접수·취소</span>
+          <h2 className="text-lg font-semibold text-slate-900">오늘 일정 변동 ({todayDashboardEvents.length}건)</h2>
+          <span className="text-xs text-slate-400">예약·청소·사전답사</span>
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <TodayReservationsList reservations={todayReservations} />
+          <TodayReservationsList events={todayDashboardEvents} />
         </div>
       </section>
 

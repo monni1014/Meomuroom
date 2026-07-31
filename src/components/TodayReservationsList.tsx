@@ -6,7 +6,7 @@ import RpaStatusBadge from "@/components/RpaStatusBadge";
 import { getKstDateKey, getKstDateParts } from "@/lib/kst-time";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export default function TodayReservationsList({ reservations }: { reservations: any[] }) {
+export default function TodayReservationsList({ events }: { events: any[] }) {
   const router = useRouter();
 
   const getSourceDisplay = (source: string) => {
@@ -28,17 +28,70 @@ export default function TodayReservationsList({ reservations }: { reservations: 
     return `[${m}] ${startStr} - ${endStr}`;
   };
 
-  if (reservations.length === 0) {
+  if (events.length === 0) {
     return (
       <div className="lg:col-span-2 text-center py-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-slate-400 text-sm">
-        오늘 접수되거나 취소된 예약이 없습니다.<br />
+        오늘 접수·취소·변경된 일정이 없습니다.<br />
       </div>
     );
   }
 
   return (
     <>
-      {reservations.map((res) => {
+      {events.map((res) => {
+        if (res.dashboardItemType === "CALENDAR_SCHEDULE") {
+          const isSiteVisit = res.scheduleType === "SITE_VISIT";
+          const isUpdatedToday = res.dashboardEventType === "UPDATED_TODAY";
+          const scheduleLabel = `${isSiteVisit ? "사전답사" : "청소"} ${isUpdatedToday ? "변경" : "등록"}`;
+          const roomColors: Record<string, string> = {
+            "머무룸1": "bg-sky-50 text-sky-700",
+            "머무룸2": "bg-purple-50 text-purple-700",
+            "머무룸3": "bg-orange-50 text-orange-700",
+          };
+
+          return (
+            <div
+              key={`calendar-schedule-${res.id}`}
+              onDoubleClick={() => {
+                const dateStr = getKstDateKey(new Date(res.startTime));
+                router.push(`/calendar?date=${dateStr}&focus=agenda`);
+              }}
+              title="더블클릭하면 해당 날짜의 일정 상세 목록으로 이동합니다"
+              className={`cursor-pointer select-none rounded-xl border border-l-4 p-4 shadow-[0_2px_8px_rgba(0,0,0,0.02)] ${
+                isSiteVisit
+                  ? "border-cyan-100 border-l-cyan-400 bg-cyan-50/50"
+                  : "border-amber-100 border-l-amber-400 bg-amber-50/50"
+              }`}
+            >
+              <p className="text-sm font-semibold text-slate-900">
+                {formatTimeRange(new Date(res.startTime), new Date(res.endTime))}
+              </p>
+              <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                  isSiteVisit ? "bg-cyan-100 text-cyan-800" : "bg-amber-100 text-amber-800"
+                }`}>
+                  {isSiteVisit ? "🔭" : "🧹"} {scheduleLabel}
+                </span>
+                {res.roomNames.map((roomName: string) => (
+                  <span
+                    key={roomName}
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${roomColors[roomName] || "bg-slate-100 text-slate-700"}`}
+                  >
+                    {roomName}
+                  </span>
+                ))}
+                <strong className="text-slate-800">{res.cleanerName}</strong>
+                {isSiteVisit && (
+                  <span>{res.source === "spacecloud" ? "스클" : "네이버"}</span>
+                )}
+                {!isSiteVisit && res.cost > 0 && (
+                  <span>· 비용 {res.cost.toLocaleString()}원 · {res.isPaid ? "입금 완료" : "미입금"}</span>
+                )}
+              </p>
+            </div>
+          );
+        }
+
         const isCancelled = res.status === "CANCELLED";
         const isCancelledToday = res.dashboardEventType === "CANCELLED_TODAY";
         const borderColors = isCancelled
