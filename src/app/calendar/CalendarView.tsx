@@ -659,7 +659,9 @@ export default function CalendarPage() {
 
   const firstDay = startOfMonth(currentDate);
   const lastDay = endOfMonth(currentDate);
-  const daysInMonth = eachDayOfInterval({ start: firstDay, end: lastDay });
+  const calendarStart = addDays(firstDay, -firstDay.getDay());
+  const calendarEnd = addDays(lastDay, 6 - lastDay.getDay());
+  const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
   const nextMonth = () => {
     setCalendarSlideDirection("next");
@@ -1364,10 +1366,7 @@ export default function CalendarPage() {
 
         {/* Days of Month Grid */}
         <div className="grid grid-cols-7 gap-1 flex-1">
-          {Array.from({ length: firstDay.getDay() }).map((_, i) => (
-            <div key={`empty-${i}`} className="p-2" />
-          ))}
-          {daysInMonth.map((day) => {
+          {calendarDays.map((day) => {
             const isToday = isSameDay(day, new Date());
             const isSelected = isSameDay(day, selectedDate);
             const isSameMonthOfActive = isSameMonth(day, currentDate);
@@ -1395,7 +1394,7 @@ export default function CalendarPage() {
                     ? "ring-2 ring-inset ring-orange-500"
                     : isSelected && "ring-2 ring-inset ring-indigo-500",
                   isSelected && "sm:shadow-md sm:shadow-indigo-100",
-                  !isSameMonthOfActive && "opacity-30"
+                  !isSameMonthOfActive && "opacity-45"
                 )}
               >
                 <div className="relative inline-flex w-fit self-center items-center justify-center">
