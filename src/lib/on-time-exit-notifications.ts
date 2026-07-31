@@ -225,6 +225,10 @@ export async function scheduleOnTimeExitWithGuide(reservationId: string, now = n
   if (reservation.status !== "CONFIRMED" || reservation.isNoShow) {
     return { success: false, statusCode: 409, error: "취소 또는 노쇼 예약에는 발송 예약을 설정할 수 없습니다." };
   }
+  if (!["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "SENDING", "RECOVERING"]
+    .includes(reservation.notificationStatus || "PENDING")) {
+    return { success: false, statusCode: 409, error: "이용안내 발송 예정 상태인 예약만 함께 보내도록 설정할 수 있습니다." };
+  }
   if (reservation.notified || reservation.messages.length > 0) {
     return { success: false, statusCode: 409, error: "이용안내 문자가 이미 발송되어 함께 보내도록 예약할 수 없습니다." };
   }
