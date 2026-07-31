@@ -489,6 +489,7 @@ export default function CompetitorsView({
   const [isLandscapeMode, setIsLandscapeMode] = useState(false);
   const [orientationHint, setOrientationHint] = useState<string | null>(null);
   const [showMobileEditor, setShowMobileEditor] = useState(false);
+  const [mobileCompetitorGroup, setMobileCompetitorGroup] = useState<"synergy" | "triground">("synergy");
   const [mobileTimelineSelection, setMobileTimelineSelection] = useState<MobileTimelineSelection | null>(null);
 
   useEffect(() => {
@@ -534,6 +535,9 @@ export default function CompetitorsView({
   const visibleCompetitors = competitorFilter === "all"
     ? COMPETITORS
     : COMPETITORS.filter((competitor) => competitor.id === competitorFilter);
+  const mobileVisibleCompetitors = mobileCompetitorGroup === "synergy"
+    ? COMPETITORS.filter((competitor) => competitor.id === "synergy")
+    : COMPETITORS.filter((competitor) => competitor.id.startsWith("triground-"));
   const unreadEvents = snapshots.unreadEvents || [];
   const unreadBookings = unreadEvents.filter((event) => event.eventType === "BOOKED");
   const unreadCancellations = unreadEvents.filter((event) => event.eventType === "CANCELLED");
@@ -1077,26 +1081,22 @@ export default function CompetitorsView({
               </select>
             </label>
           </div>
-          <div className="grid grid-cols-4 gap-1.5">
-            {(["all", ...COMPETITORS.map((competitor) => competitor.id)] as const).map((id) => {
-              const label = id === "all"
-                ? "전체"
-                : id === "synergy"
-                  ? "시너지"
-                  : id === "triground-a"
-                    ? "트그A"
-                    : "트그B";
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { id: "synergy", label: "시너지" },
+              { id: "triground", label: "트라이그라운드" },
+            ] as const).map(({ id, label }) => {
               return (
                 <button
                   key={id}
                   type="button"
                   onClick={() => {
-                    setCompetitorFilter(id);
+                    setMobileCompetitorGroup(id);
                     setMobileTimelineSelection(null);
                   }}
                   className={cn(
-                    "h-9 rounded-lg border px-1 text-[11px] font-black",
-                    competitorFilter === id
+                    "h-10 rounded-xl border px-2 text-xs font-black transition-colors",
+                    mobileCompetitorGroup === id
                       ? "border-indigo-600 bg-indigo-600 text-white"
                       : "border-slate-200 bg-white text-slate-600",
                   )}
@@ -1137,7 +1137,7 @@ export default function CompetitorsView({
                     {format(day, "d")}
                   </div>
                   <div className="space-y-1">
-                    {visibleCompetitors.map((competitor) => {
+                    {mobileVisibleCompetitors.map((competitor) => {
                       const snapshot = snapshots.days[competitor.id]?.[dateKey];
                       const cancellations = snapshots.cancellations.filter((event) => (
                         event.competitorId === competitor.id && event.dateKey === dateKey
