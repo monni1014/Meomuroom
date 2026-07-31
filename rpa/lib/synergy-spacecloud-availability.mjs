@@ -1,6 +1,7 @@
 const KST_TIME_ZONE = "Asia/Seoul";
 const FIRST_TRACKED_HOUR = 8;
 const LAST_TRACKED_HOUR = 23;
+const SAME_DAY_BOOKING_LEAD_HOURS = 3;
 
 export function kstClockParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -46,9 +47,17 @@ export function parseSynergySpacecloudAvailability(payload, {
     for (let hour = FIRST_TRACKED_HOUR; hour <= LAST_TRACKED_HOUR; hour += 1) {
       let observedState = "UNKNOWN";
       let reason = "SPACECLOUD_SLOT_MISSING";
-      if (cursor < now.dateKey || (cursor === now.dateKey && hour <= now.hour)) {
+      if (
+        cursor < now.dateKey
+        || (
+          cursor === now.dateKey
+          && hour <= now.hour + SAME_DAY_BOOKING_LEAD_HOURS
+        )
+      ) {
         observedState = "POLICY_CLOSED";
-        reason = "PAST_OR_CURRENT_HOUR_NOT_USED_FOR_BOOKING_INFERENCE";
+        reason = cursor === now.dateKey && hour > now.hour
+          ? "SAME_DAY_THREE_HOUR_BOOKING_CUTOFF"
+          : "PAST_OR_CURRENT_HOUR_NOT_USED_FOR_BOOKING_INFERENCE";
       } else if (times.has(hour)) {
         observedState = times.get(hour)?.available === true ? "AVAILABLE" : "BOOKED";
         reason = observedState === "AVAILABLE"

@@ -18,6 +18,10 @@ import { competitorCancellationFeeRate } from "@/lib/competitor-cancellation";
 import { prisma } from "@/lib/prisma";
 import { sendPushNotification } from "@/lib/push-notifications";
 import { getRpaProxyCircuitState, isRpaPausedForProxy } from "@/lib/rpa-proxy-circuit";
+import {
+  crossCheckSynergySpacecloudWithNaver,
+  SPACECLOUD_ONLY_CLOSED_REASON,
+} from "@/lib/synergy-spacecloud-cross-check";
 
 const execFileAsync = promisify(execFile);
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
@@ -225,6 +229,28 @@ async function executeSynergySpacecloudScanner(startKey: string, endKey: string)
   return parseScannerResult(result.stdout);
 }
 
+async function verifySynergySpacecloudAgainstNaver(result: ScannerResult) {
+  const naverSlots = await prisma.competitorSlot.findMany({
+    where: {
+      competitorId: "synergy",
+      dateKey: { gte: result.startKey, lte: result.endKey },
+    },
+    select: {
+      dateKey: true,
+      hour: true,
+      state: true,
+    },
+  });
+
+  return {
+    ...result,
+    observations: crossCheckSynergySpacecloudWithNaver(
+      result.observations,
+      naverSlots,
+    ),
+  };
+}
+
 const EVIDENCE_REASON_LABELS: Record<string, string> = {
   SLOT_READ_UNCERTAIN: "시간 슬롯 일부를 읽지 못했습니다.",
   CANCELLATION_PENDING_CONFIRMATION: "기존 예약 시간이 열려 보여 취소 여부를 다시 확인해야 합니다.",
@@ -414,7 +440,26 @@ function resolveState(current: ExistingSlot | undefined, observation: ScannerObs
   let eventType: "BOOKED" | "CANCELLED" | null = null;
   let eventObservedAt = checkedAt;
 
-  if (observation.observedState === "POLICY_CLOSED") {
+  const isSpacecloudOnlyClosed = observation.observedState === "POLICY_CLOSED"
+    && observation.reason === SPACECLOUD_ONLY_CLOSED_REASON;
+
+  if (isSpacecloudOnlyClosed && current?.state === "BOOKED") {
+    const previousPendingCount = current.pendingState === "POLICY_CLOSED"
+      ? current.pendingCount
+      : 0;
+    if (previousPendingCount < 1) {
+      state = "BOOKED";
+      pendingState = "POLICY_CLOSED";
+      pendingCount = 1;
+      pendingSince = checkedAt;
+      reason = "SPACECLOUD_BOOKING_REMOVAL_PENDING_NAVER_CONFIRMATION";
+    } else {
+      state = "POLICY_CLOSED";
+      eventType = "CANCELLED";
+      eventObservedAt = current.pendingSince || checkedAt;
+      reason = "SPACECLOUD_BOOKING_REMOVAL_CONFIRMED_BY_NAVER_COMPARISON";
+    }
+  } else if (observation.observedState === "POLICY_CLOSED") {
     if (current?.state === "BOOKED") {
       state = "BOOKED";
       reason = "POLICY_CLOSED_PRESERVED_BOOKING";
@@ -1066,7 +1111,9 @@ async function runSynergySpacecloudDailyScan(): Promise<CompetitorScanResult> {
   });
 
   try {
-    const scannerResult = await executeSynergySpacecloudScanner(startKey, endKey);
+    const scannerResult = await verifySynergySpacecloudAgainstNaver(
+      await executeSynergySpacecloudScanner(startKey, endKey),
+    );
     const changes = await persistScannerResult(scan.id, scannerResult, []);
 
     const pendingCancellationDates = await prisma.competitorSlot.findMany({
@@ -1074,7 +1121,7 @@ async function runSynergySpacecloudDailyScan(): Promise<CompetitorScanResult> {
         competitorId: "synergy-spacecloud",
         dateKey: { gte: startKey, lte: endKey },
         state: "BOOKED",
-        pendingState: "AVAILABLE",
+        pendingState: { in: ["AVAILABLE", "POLICY_CLOSED"] },
         pendingCount: { gte: 1 },
       },
       distinct: ["dateKey"],
@@ -1088,9 +1135,11 @@ async function runSynergySpacecloudDailyScan(): Promise<CompetitorScanResult> {
     let confirmationChanges = { changedSlots: 0, bookingEvents: 0, cancellationEvents: 0 };
     if (confirmationRange) {
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
-      confirmationResult = await executeSynergySpacecloudScanner(
-        confirmationRange.startKey,
-        confirmationRange.endKey,
+      confirmationResult = await verifySynergySpacecloudAgainstNaver(
+        await executeSynergySpacecloudScanner(
+          confirmationRange.startKey,
+          confirmationRange.endKey,
+        ),
       );
       confirmationChanges = await persistScannerResult(scan.id, confirmationResult, []);
     }
