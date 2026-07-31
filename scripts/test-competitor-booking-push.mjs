@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   buildSynergyBookingPushes,
+  buildSynergySpacecloudPushes,
   detectSynergyOneHourReschedules,
 } from "../src/lib/competitor-booking-push-policy.ts";
 import { selectPushSubscriptions } from "../src/lib/push-subscription-selection.ts";
@@ -85,5 +86,25 @@ assert.deepEqual(
     "https://push.example/desktop",
   ],
 );
+
+assert.deepEqual(buildSynergySpacecloudPushes([
+  { scanId: "scan-sc", competitorId: "synergy-spacecloud", dateKey: "2026-08-03", hour: 13, eventType: "BOOKED" },
+  { scanId: "scan-sc", competitorId: "synergy-spacecloud", dateKey: "2026-08-03", hour: 14, eventType: "BOOKED" },
+  { scanId: "scan-sc", competitorId: "synergy-spacecloud", dateKey: "2026-08-04", hour: 18, eventType: "CANCELLED", cancellationFeeRate: 70 },
+  { scanId: "scan-sc", competitorId: "synergy-spacecloud", dateKey: "2026-08-04", hour: 19, eventType: "CANCELLED", cancellationFeeRate: 70 },
+]), [
+  {
+    title: "시너지 스클 신규 예약",
+    body: "8월 3일 / 13시~15시",
+    url: "/competitors?year=2026&month=8",
+    tag: "competitor-synergy-spacecloud-booked-2026-08-03-13-15",
+  },
+  {
+    title: "시너지 스클 예약 취소",
+    body: "8월 4일 / 18시~20시 · 취소수수료 70%",
+    url: "/competitors?year=2026&month=8",
+    tag: "competitor-synergy-spacecloud-cancelled-2026-08-04-18-20",
+  },
+]);
 
 console.log("Competitor booking push tests passed.");

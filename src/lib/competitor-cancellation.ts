@@ -22,7 +22,7 @@ export function competitorCancellationFeeRate(
   if (competitorId.startsWith("triground-") && bookingDurationHours <= 1) return 0;
 
   const remainingDays = daysBetween(kstDateKey(checkedAt), useDateKey);
-  if (competitorId === "synergy") {
+  if (competitorId === "synergy" || competitorId === "synergy-spacecloud") {
     if (remainingDays >= 7) return 0;
     if (remainingDays === 6) return 30;
     if (remainingDays === 5) return 50;

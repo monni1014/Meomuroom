@@ -25,12 +25,12 @@ export function detectSynergyOneHourReschedules(
   ranges: CompetitorChangeRange[],
 ): CompetitorReschedule[] {
   const bookings = ranges.filter((range) => (
-    range.competitorId === "synergy"
+    ["synergy", "synergy-spacecloud"].includes(range.competitorId)
     && range.eventType === "BOOKED"
     && range.endHour - range.startHour === 1
   ));
   const cancellations = ranges.filter((range) => (
-    range.competitorId === "synergy"
+    ["synergy", "synergy-spacecloud"].includes(range.competitorId)
     && range.eventType === "CANCELLED"
     && range.endHour - range.startHour === 1
   ));
@@ -38,7 +38,11 @@ export function detectSynergyOneHourReschedules(
   const candidates: Array<CompetitorReschedule & { distance: number }> = [];
   for (const booking of bookings) {
     for (const cancellation of cancellations) {
-      if (booking.scanId !== cancellation.scanId || booking.dateKey !== cancellation.dateKey) continue;
+      if (
+        booking.scanId !== cancellation.scanId
+        || booking.competitorId !== cancellation.competitorId
+        || booking.dateKey !== cancellation.dateKey
+      ) continue;
 
       if (booking.endHour <= cancellation.startHour) {
         const duration = cancellation.startHour - booking.startHour;
@@ -108,6 +112,7 @@ export type CompetitorBookingEventForPush = {
   dateKey: string;
   hour: number;
   eventType: string;
+  cancellationFeeRate?: number | null;
 };
 
 export type SynergyBookingPush = {
@@ -212,6 +217,83 @@ export function buildSynergyBookingPushes(
       previousHour = hour;
     }
     appendPush(previousHour + 1);
+  }
+
+  return pushes;
+}
+
+function groupSpacecloudEvents(events: CompetitorBookingEventForPush[]) {
+  const sorted = events
+    .filter((event) => (
+      event.competitorId === "synergy-spacecloud"
+      && ["BOOKED", "CANCELLED"].includes(event.eventType)
+    ))
+    .sort((left, right) => (
+      left.dateKey.localeCompare(right.dateKey)
+      || left.eventType.localeCompare(right.eventType)
+      || left.hour - right.hour
+    ));
+  const ranges: CompetitorChangeRange[] = [];
+  for (const event of sorted) {
+    const eventType = event.eventType === "CANCELLED" ? "CANCELLED" : "BOOKED";
+    const scanId = event.scanId || "current-scan";
+    const previous = ranges.at(-1);
+    if (
+      previous
+      && previous.scanId === scanId
+      && previous.dateKey === event.dateKey
+      && previous.eventType === eventType
+      && previous.endHour === event.hour
+    ) {
+      previous.endHour = event.hour + 1;
+      continue;
+    }
+    ranges.push({
+      key: `${scanId}:${event.dateKey}:${eventType}:${event.hour}`,
+      scanId,
+      competitorId: event.competitorId,
+      dateKey: event.dateKey,
+      eventType,
+      startHour: event.hour,
+      endHour: event.hour + 1,
+    });
+  }
+  return ranges;
+}
+
+export function buildSynergySpacecloudPushes(
+  events: CompetitorBookingEventForPush[],
+): SynergyBookingPush[] {
+  const ranges = groupSpacecloudEvents(events);
+  const reschedules = detectSynergyOneHourReschedules(ranges);
+  const matchedKeys = new Set(reschedules.flatMap((match) => [match.bookedKey, match.cancelledKey]));
+  const eventByHour = new Map(
+    events.map((event) => [`${event.scanId || "current-scan"}:${event.dateKey}:${event.eventType}:${event.hour}`, event]),
+  );
+
+  const pushes: SynergyBookingPush[] = reschedules.map((match) => ({
+    title: "시너지 스클 예약 시간 변경 추정",
+    body: `${formatDate(match.dateKey)} / ${formatHour(match.oldStartHour)}~${formatHour(match.oldEndHour)} → ${formatHour(match.newStartHour)}~${formatHour(match.newEndHour)}`,
+    url: `/competitors?year=${match.dateKey.slice(0, 4)}&month=${Number(match.dateKey.slice(5, 7))}`,
+    tag: `competitor-synergy-spacecloud-rescheduled-${match.dateKey}-${match.oldStartHour}-${match.oldEndHour}-${match.newStartHour}-${match.newEndHour}`,
+  }));
+
+  for (const range of ranges) {
+    if (matchedKeys.has(range.key)) continue;
+    const sourceEvents = [];
+    for (let hour = range.startHour; hour < range.endHour; hour += 1) {
+      const event = eventByHour.get(`${range.scanId}:${range.dateKey}:${range.eventType}:${hour}`);
+      if (event) sourceEvents.push(event);
+    }
+    const feeRate = sourceEvents.find((event) => event.cancellationFeeRate !== null)?.cancellationFeeRate;
+    pushes.push({
+      title: range.eventType === "BOOKED" ? "시너지 스클 신규 예약" : "시너지 스클 예약 취소",
+      body: range.eventType === "CANCELLED" && feeRate !== null && feeRate !== undefined
+        ? `${formatDate(range.dateKey)} / ${formatHour(range.startHour)}~${formatHour(range.endHour)} · 취소수수료 ${feeRate}%`
+        : `${formatDate(range.dateKey)} / ${formatHour(range.startHour)}~${formatHour(range.endHour)}`,
+      url: `/competitors?year=${range.dateKey.slice(0, 4)}&month=${Number(range.dateKey.slice(5, 7))}`,
+      tag: `competitor-synergy-spacecloud-${range.eventType.toLowerCase()}-${range.dateKey}-${range.startHour}-${range.endHour}`,
+    });
   }
 
   return pushes;

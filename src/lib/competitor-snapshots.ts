@@ -4,6 +4,7 @@ import { shouldDisplayZeroFeeCancellationAsNew } from "@/lib/competitor-cancella
 import { detectSynergyOneHourReschedules } from "@/lib/competitor-booking-push-policy";
 
 const COMPETITOR_IDS = ["synergy", "triground-a", "triground-b"] as const;
+const SOURCE_COMPETITOR_IDS = [...COMPETITOR_IDS, "synergy-spacecloud"];
 
 function monthRange(year: number, month: number) {
   if (year < 2025 || year > 2100 || month < 1 || month > 12) throw new Error("Invalid year or month");
@@ -92,7 +93,7 @@ export async function getCompetitorSnapshots(year: number, month: number) {
   const [slots, slotEvents, latestScan, evidence] = await Promise.all([
     prisma.competitorSlot.findMany({
       where: {
-        competitorId: { in: [...COMPETITOR_IDS] },
+        competitorId: { in: SOURCE_COMPETITOR_IDS },
         dateKey: { gte: startKey, lte: endKey },
         hour: { gte: 8, lt: 24 },
       },
@@ -100,7 +101,7 @@ export async function getCompetitorSnapshots(year: number, month: number) {
     }),
     prisma.competitorSlotEvent.findMany({
       where: {
-        competitorId: { in: [...COMPETITOR_IDS] },
+        competitorId: { in: SOURCE_COMPETITOR_IDS },
         eventType: { in: ["BOOKED", "CANCELLED"] },
         OR: [
           { dateKey: { gte: startKey, lte: endKey } },
@@ -120,9 +121,13 @@ export async function getCompetitorSnapshots(year: number, month: number) {
         acknowledgedAt: true,
       },
     }),
-    prisma.competitorScan.findFirst({ orderBy: { startedAt: "desc" } }),
+    prisma.competitorScan.findFirst({
+      where: { mode: { not: "synergy-spacecloud-daily" } },
+      orderBy: { startedAt: "desc" },
+    }),
     prisma.competitorEvidence.findMany({
       where: {
+        competitorId: { in: [...COMPETITOR_IDS] },
         dismissedAt: null,
         OR: [
           { dateKey: { gte: startKey, lte: endKey } },
@@ -155,12 +160,13 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       bookingNumber: number | null;
       bookingGroup: string | null;
       firstDetectedAt: string | null;
+      spacecloudBooked: boolean;
     }>;
   }>> = {};
   const bookingGroupKeys = new Map<string, string>();
   for (const competitorId of COMPETITOR_IDS) days[competitorId] = {};
 
-  for (const slot of slots) {
+  for (const slot of slots.filter((item) => item.competitorId !== "synergy-spacecloud")) {
     const competitorDays = days[slot.competitorId] || (days[slot.competitorId] = {});
     const day = competitorDays[slot.dateKey] || (competitorDays[slot.dateKey] = { checkedAt: null, slots: {} });
     if (!day.checkedAt || new Date(day.checkedAt) < slot.lastCheckedAt) day.checkedAt = slot.lastCheckedAt.toISOString();
@@ -173,10 +179,34 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       // lastBookedAt records the first time monitoring discovered this booking,
       // including bookings found when a new scan horizon is introduced.
       firstDetectedAt: slot.lastBookedAt?.toISOString() || null,
+      spacecloudBooked: false,
     };
     bookingGroupKeys.set(
       `${slot.competitorId}|${slot.dateKey}|${slot.hour}`,
       slot.lastBookedAt?.toISOString() || "baseline",
+    );
+  }
+
+  for (const slot of slots.filter((item) => item.competitorId === "synergy-spacecloud")) {
+    if (slot.state !== "BOOKED") continue;
+    const competitorDays = days.synergy;
+    const day = competitorDays[slot.dateKey] || (competitorDays[slot.dateKey] = { checkedAt: null, slots: {} });
+    if (!day.checkedAt || new Date(day.checkedAt) < slot.lastCheckedAt) {
+      day.checkedAt = slot.lastCheckedAt.toISOString();
+    }
+    const existing = day.slots[String(slot.hour)];
+    day.slots[String(slot.hour)] = {
+      state: "closed",
+      opportunityLostRooms: existing?.opportunityLostRooms || [],
+      cancellationPending: slot.pendingState === "AVAILABLE",
+      bookingNumber: null,
+      bookingGroup: null,
+      firstDetectedAt: slot.lastBookedAt?.toISOString() || existing?.firstDetectedAt || null,
+      spacecloudBooked: true,
+    };
+    bookingGroupKeys.set(
+      `synergy|${slot.dateKey}|${slot.hour}`,
+      `spacecloud:${slot.lastBookedAt?.toISOString() || "baseline"}`,
     );
   }
 
@@ -302,7 +332,10 @@ export async function getCompetitorSnapshots(year: number, month: number) {
   const displayEvents = [
     ...groupedEvents.filter((event) => !matchedGroupIds.has(event.id)),
     ...rescheduleEvents,
-  ].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  ].map((event) => ({
+    ...event,
+    competitorId: event.competitorId === "synergy-spacecloud" ? "synergy" : event.competitorId,
+  })).sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
   const unreadGroups = displayEvents.filter((event) => !event.acknowledged);
   const supersededBookingIds = new Set<string>();
   const unreadEvents = unreadGroups.map((event) => {

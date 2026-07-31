@@ -46,6 +46,7 @@ interface SlotSnapshot {
   bookingNumber: number | null;
   bookingGroup: string | null;
   firstDetectedAt: string | null;
+  spacecloudBooked: boolean;
 }
 
 interface CompetitorDaySnapshot {
@@ -293,6 +294,9 @@ function slotStatusLabel(slot: SlotSnapshot | undefined) {
 
 function slotClass(slot: SlotSnapshot | undefined, isWeekend: boolean) {
   if (slot?.state === "closed") {
+    if (slot.spacecloudBooked) {
+      return isWeekend ? "bg-[#C65911] text-white" : "bg-[#2F75B5] text-white";
+    }
     return isWeekend ? "bg-[#FCE4D6] text-slate-950" : "bg-[#DDEBF7] text-slate-950";
   }
   if (slot?.state === "policy_closed") return "bg-slate-100 text-slate-400";

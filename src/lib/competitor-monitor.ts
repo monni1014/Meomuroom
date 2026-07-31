@@ -10,7 +10,10 @@ import {
   type CompetitorScanMode,
 } from "@/lib/competitor-scan-range";
 import { shouldCreateBookingDiscoveryEvent } from "@/lib/competitor-booking-discovery";
-import { buildSynergyBookingPushes } from "@/lib/competitor-booking-push-policy";
+import {
+  buildSynergyBookingPushes,
+  buildSynergySpacecloudPushes,
+} from "@/lib/competitor-booking-push-policy";
 import { competitorCancellationFeeRate } from "@/lib/competitor-cancellation";
 import { prisma } from "@/lib/prisma";
 import { sendPushNotification } from "@/lib/push-notifications";
@@ -19,6 +22,8 @@ import { getRpaProxyCircuitState, isRpaPausedForProxy } from "@/lib/rpa-proxy-ci
 const execFileAsync = promisify(execFile);
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
 const ALERT_TYPE = "COMPETITOR_MONITOR";
+const SYNERGY_SPACECLOUD_ALERT_TYPE = "COMPETITOR_SYNERGY_SPACECLOUD_MONITOR";
+const VISIBLE_COMPETITOR_IDS = ["synergy", "triground-a", "triground-b"];
 const STALE_SCAN_MINUTES = 15;
 const SCAN_LOCK_PATH = resolve("rpa/.locks/competitor-monitor.lock");
 
@@ -160,7 +165,10 @@ function parseScannerResult(stdout: string) {
 
 async function executeScanner(startKey: string, endKey: string) {
   const previousStates = await prisma.competitorSlot.findMany({
-    where: { dateKey: { gte: startKey, lte: endKey } },
+    where: {
+      competitorId: { in: VISIBLE_COMPETITOR_IDS },
+      dateKey: { gte: startKey, lte: endKey },
+    },
     select: {
       competitorId: true,
       dateKey: true,
@@ -197,6 +205,24 @@ async function executeScanner(startKey: string, endKey: string) {
   } finally {
     await unlink(stateFile).catch(() => undefined);
   }
+}
+
+async function executeSynergySpacecloudScanner(startKey: string, endKey: string) {
+  const result = await execFileAsync(
+    process.execPath,
+    [
+      "rpa/synergy-spacecloud-scan.mjs",
+      `--start=${startKey}`,
+      `--end=${endKey}`,
+    ],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      timeout: 2 * 60 * 1000,
+      maxBuffer: 1024 * 1024 * 4,
+    },
+  );
+  return parseScannerResult(result.stdout);
 }
 
 const EVIDENCE_REASON_LABELS: Record<string, string> = {
@@ -463,9 +489,14 @@ function opportunityDetectionTime(slot: OpportunitySlot) {
  * Repairs only missing competitor judgements. A stored result is never recalculated,
  * because opportunity loss must describe the Memoroom calendar at first discovery.
  */
-async function reconcileMissingOpportunityLoss(startKey: string, endKey: string) {
+async function reconcileMissingOpportunityLoss(
+  startKey: string,
+  endKey: string,
+  competitorIds = VISIBLE_COMPETITOR_IDS,
+) {
   const bookedSlots = await prisma.competitorSlot.findMany({
     where: {
+      competitorId: { in: competitorIds },
       dateKey: { gte: startKey, lte: endKey },
       state: "BOOKED",
     },
@@ -615,9 +646,14 @@ async function withDatabaseWriteRetry<T>(label: string, operation: () => Promise
   throw new Error(`${label} failed without an error`);
 }
 
-async function persistScannerResult(scanId: string, result: ScannerResult) {
+async function persistScannerResult(
+  scanId: string,
+  result: ScannerResult,
+  opportunityCompetitorIds = VISIBLE_COMPETITOR_IDS,
+) {
   const existingRows = await prisma.competitorSlot.findMany({
     where: {
+      competitorId: { in: [...new Set(result.observations.map((item) => item.competitorId))] },
       dateKey: { gte: result.startKey, lte: result.endKey },
     },
   });
@@ -784,7 +820,13 @@ async function persistScannerResult(scanId: string, result: ScannerResult) {
     });
   }
 
-  await reconcileMissingOpportunityLoss(result.startKey, result.endKey);
+  if (opportunityCompetitorIds.length > 0) {
+    await reconcileMissingOpportunityLoss(
+      result.startKey,
+      result.endKey,
+      opportunityCompetitorIds,
+    );
+  }
 
   return { changedSlots, bookingEvents, cancellationEvents };
 }
@@ -814,6 +856,32 @@ async function sendSynergyBookingDiscoveryPushes(scanId: string) {
   }
 }
 
+async function sendSynergySpacecloudPushes(scanId: string) {
+  const events = await prisma.competitorSlotEvent.findMany({
+    where: {
+      scanId,
+      competitorId: "synergy-spacecloud",
+      eventType: { in: ["BOOKED", "CANCELLED"] },
+    },
+    select: {
+      scanId: true,
+      competitorId: true,
+      dateKey: true,
+      hour: true,
+      eventType: true,
+      cancellationFeeRate: true,
+    },
+  });
+  const pushes = buildSynergySpacecloudPushes(events);
+
+  for (const push of pushes) {
+    const result = await sendPushNotification(push, { excludeAppleWebPush: true });
+    console.log(
+      `[Competitor] Synergy SpaceCloud push sent: tag=${push.tag}, sent=${result.sent}, failed=${result.failed}, apple-excluded=true`,
+    );
+  }
+}
+
 async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
   const range = resolveCompetitorScanRange(options);
 
@@ -832,6 +900,7 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
   if (options.skipIfRecentMinutes && options.skipIfRecentMinutes > 0) {
     const recent = await prisma.competitorScan.findFirst({
       where: {
+        mode: { not: "synergy-spacecloud-daily" },
         status: "COMPLETED",
         startedAt: { gte: new Date(Date.now() - options.skipIfRecentMinutes * 60_000) },
         targetStartKey: { lte: range.startKey },
@@ -858,6 +927,7 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
 
     const pendingCancellationDates = await prisma.competitorSlot.findMany({
       where: {
+        competitorId: { in: VISIBLE_COMPETITOR_IDS },
         dateKey: { gte: range.startKey, lte: range.endKey },
         state: "BOOKED",
         pendingState: "AVAILABLE",
@@ -960,6 +1030,153 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
   }
 }
 
+function endOfNextMonthKey(todayKey: string) {
+  const [year, month] = todayKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month + 1, 0));
+  return date.toISOString().slice(0, 10);
+}
+
+async function runSynergySpacecloudDailyScan(): Promise<CompetitorScanResult> {
+  const startKey = kstDateKey();
+  const endKey = endOfNextMonthKey(startKey);
+  const kstMidnight = new Date(`${startKey}T00:00:00+09:00`);
+  const recent = await prisma.competitorScan.findFirst({
+    where: {
+      mode: "synergy-spacecloud-daily",
+      status: "COMPLETED",
+      startedAt: { gte: kstMidnight },
+    },
+    orderBy: { startedAt: "desc" },
+  });
+  if (recent) return { skipped: true, scanId: recent.id, status: recent.status };
+
+  const existingHiddenSlots = await prisma.competitorSlot.count({
+    where: {
+      competitorId: "synergy-spacecloud",
+      dateKey: { gte: startKey, lte: endKey },
+    },
+  });
+  const baseline = existingHiddenSlots === 0;
+  const scan = await prisma.competitorScan.create({
+    data: {
+      mode: "synergy-spacecloud-daily",
+      targetStartKey: startKey,
+      targetEndKey: endKey,
+    },
+  });
+
+  try {
+    const scannerResult = await executeSynergySpacecloudScanner(startKey, endKey);
+    const changes = await persistScannerResult(scan.id, scannerResult, []);
+
+    const pendingCancellationDates = await prisma.competitorSlot.findMany({
+      where: {
+        competitorId: "synergy-spacecloud",
+        dateKey: { gte: startKey, lte: endKey },
+        state: "BOOKED",
+        pendingState: "AVAILABLE",
+        pendingCount: { gte: 1 },
+      },
+      distinct: ["dateKey"],
+      orderBy: { dateKey: "asc" },
+      select: { dateKey: true },
+    });
+    const confirmationRange = resolveCancellationConfirmationRange(
+      pendingCancellationDates.map((item) => item.dateKey),
+    );
+    let confirmationResult: ScannerResult | null = null;
+    let confirmationChanges = { changedSlots: 0, bookingEvents: 0, cancellationEvents: 0 };
+    if (confirmationRange) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
+      confirmationResult = await executeSynergySpacecloudScanner(
+        confirmationRange.startKey,
+        confirmationRange.endKey,
+      );
+      confirmationChanges = await persistScannerResult(scan.id, confirmationResult, []);
+    }
+
+    const allObservations = [
+      ...scannerResult.observations,
+      ...(confirmationResult?.observations || []),
+    ];
+    const allErrors = [
+      ...scannerResult.errors,
+      ...(confirmationResult?.errors || []),
+    ];
+    const uncertainSlots = allObservations.filter(
+      (observation) => observation.observedState === "UNKNOWN",
+    ).length;
+    const status = allObservations.length === 0
+      ? "FAILED"
+      : allErrors.length > 0 || uncertainSlots > 0
+        ? "PARTIAL"
+        : "COMPLETED";
+    const issueMessages = allErrors.map((item) => `${item.competitorId}: ${item.message}`);
+    if (uncertainSlots > 0) issueMessages.push(`${uncertainSlots} slot(s) could not be read`);
+    const errorMessage = issueMessages.length > 0 ? issueMessages.join(" / ").slice(0, 2000) : null;
+
+    await prisma.competitorScan.update({
+      where: { id: scan.id },
+      data: {
+        status,
+        checkedSlots: allObservations.length,
+        changedSlots: changes.changedSlots + confirmationChanges.changedSlots,
+        error: errorMessage,
+        finishedAt: new Date(),
+      },
+    });
+
+    if (status === "COMPLETED") {
+      await resolveAdminAlertsByType(SYNERGY_SPACECLOUD_ALERT_TYPE);
+    } else {
+      await createAdminAlert({
+        type: SYNERGY_SPACECLOUD_ALERT_TYPE,
+        severity: status === "FAILED" ? "CRITICAL" : "WARNING",
+        title: status === "FAILED" ? "시너지 스클 일정 점검 실패" : "시너지 스클 일정 일부 확인 필요",
+        message: errorMessage || "시너지 스클 공개 예약표에서 일부 시간 정보를 읽지 못했습니다.",
+        dedupeKey: "competitor-synergy-spacecloud-scan-error",
+      });
+    }
+
+    if (baseline) {
+      await prisma.competitorSlotEvent.updateMany({
+        where: { scanId: scan.id, competitorId: "synergy-spacecloud" },
+        data: { acknowledgedAt: new Date() },
+      });
+      console.log("[Competitor] Synergy SpaceCloud baseline stored without discovery pushes.");
+    } else {
+      await sendSynergySpacecloudPushes(scan.id);
+    }
+
+    return {
+      skipped: false,
+      scanId: scan.id,
+      status,
+      checkedSlots: allObservations.length,
+      changedSlots: changes.changedSlots + confirmationChanges.changedSlots,
+      bookingEvents: changes.bookingEvents + confirmationChanges.bookingEvents,
+      cancellationEvents: changes.cancellationEvents + confirmationChanges.cancellationEvents,
+      startKey,
+      endKey,
+      errors: allErrors,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await prisma.competitorScan.update({
+      where: { id: scan.id },
+      data: { status: "FAILED", error: message.slice(0, 2000), finishedAt: new Date() },
+    });
+    await createAdminAlert({
+      type: SYNERGY_SPACECLOUD_ALERT_TYPE,
+      severity: "CRITICAL",
+      title: "시너지 스클 일정 점검 실패",
+      message,
+      dedupeKey: "competitor-synergy-spacecloud-scan-error",
+    });
+    throw error;
+  }
+}
+
 export function runCompetitorScan(options: RunOptions): Promise<CompetitorScanResult> {
   if (isRpaPausedForProxy()) {
     const circuit = getRpaProxyCircuitState();
@@ -988,6 +1205,33 @@ export function runCompetitorScan(options: RunOptions): Promise<CompetitorScanRe
     }
     try {
       return await runScan(options);
+    } finally {
+      await releaseLock();
+    }
+  })().finally(() => {
+    delete globalState.__competitorScanPromise;
+  });
+  return globalState.__competitorScanPromise;
+}
+
+export function runSynergySpacecloudScan(): Promise<CompetitorScanResult> {
+  if (isRpaPausedForProxy()) {
+    const circuit = getRpaProxyCircuitState();
+    return Promise.resolve({
+      skipped: true,
+      status: "PROXY_PAUSED",
+      reason: circuit.reason,
+    });
+  }
+
+  const globalState = globalThis as MonitorGlobal;
+  if (globalState.__competitorScanPromise) return globalState.__competitorScanPromise;
+
+  globalState.__competitorScanPromise = (async () => {
+    const releaseLock = await acquireMonitorLock();
+    if (!releaseLock) return { skipped: true, status: "RUNNING" };
+    try {
+      return await runSynergySpacecloudDailyScan();
     } finally {
       await releaseLock();
     }

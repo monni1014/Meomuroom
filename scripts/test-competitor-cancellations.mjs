@@ -25,6 +25,11 @@ assert.equal(
   100,
   "Synergy keeps its own cancellation policy.",
 );
+assert.equal(competitorCancellationFeeRate("synergy-spacecloud", "2026-07-29", dayBefore, 2), 0);
+assert.equal(competitorCancellationFeeRate("synergy-spacecloud", "2026-07-27", dayBefore, 2), 30);
+assert.equal(competitorCancellationFeeRate("synergy-spacecloud", "2026-07-26", dayBefore, 2), 50);
+assert.equal(competitorCancellationFeeRate("synergy-spacecloud", "2026-07-25", dayBefore, 2), 70);
+assert.equal(competitorCancellationFeeRate("synergy-spacecloud", "2026-07-24", dayBefore, 2), 100);
 assert.equal(cancellationEquivalentHours(2, 50), 1);
 assert.equal(cancellationEquivalentHours(3, 30), 0.9);
 assert.equal(cancellationEquivalentHours(1, 0), 0);
