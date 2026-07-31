@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { eachDayOfInterval, endOfMonth, format, startOfMonth } from "date-fns";
 import Image from "next/image";
-import { Camera, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Maximize2, RefreshCw, RotateCcw, Save, StickyNote, Undo2, X } from "lucide-react";
+import { Camera, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Maximize2, RefreshCw, RotateCcw, Save, Undo2, X } from "lucide-react";
 import { EditableTableCellInput } from "@/components/EditableTableCellInput";
 import {
   MONTHLY_GRID_BODY_ROW_CLASS,
@@ -1240,9 +1240,9 @@ export default function CompetitorsView({
                                   <span
                                     title={`취소수수료율 ${visibleCancellation.feeRate ?? 0}%`}
                                     aria-label={`취소수수료율 ${visibleCancellation.feeRate ?? 0}% 메모`}
-                                    className="absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded border border-slate-500 bg-white text-slate-700 shadow-sm"
+                                    className="absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded border border-amber-700 bg-white text-amber-800 shadow-sm"
                                   >
-                                    <StickyNote aria-hidden="true" className="h-2.5 w-2.5" />
+                                    <CalendarClock aria-hidden="true" className="h-2.5 w-2.5" />
                                   </span>
                                 )}
                                 {opportunity && <span title={`${opportunity.full}${manualLost.length > 0 ? " (수동)" : ""}`} aria-label={`${opportunity.full}${manualLost.length > 0 ? " 수동 표시" : ""}`} className="absolute right-0.5 top-0.5 z-10 rounded-sm bg-red-600 px-1 text-[9px] font-black leading-4 text-white">{opportunity.short}✓</span>}
