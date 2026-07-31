@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Check, Copy, MessageSquareText, Phone, UserPlus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +37,7 @@ export default function PhoneActionLink({
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pressStartRef = useRef<{ x: number; y: number } | null>(null);
   const didLongPressRef = useRef(false);
+  const menuHistoryId = useId();
   const digits = useMemo(() => phoneDigits(phone), [phone]);
   const displayName = contactName?.trim() || "머무룸 고객";
   const contactFileHref = useMemo(() => {
@@ -58,16 +59,36 @@ export default function PhoneActionLink({
     }
   };
 
-  const openMenu = () => {
+  const openMenu = useCallback(() => {
     didLongPressRef.current = true;
     setCopied(false);
-    setIsOpen(true);
-  };
+    const currentState = window.history.state && typeof window.history.state === "object"
+      ? window.history.state as Record<string, unknown>
+      : {};
 
-  const closeMenu = () => {
+    if (currentState.memoroomPhoneAction !== menuHistoryId) {
+      window.history.pushState(
+        { ...currentState, memoroomPhoneAction: menuHistoryId },
+        "",
+        window.location.href,
+      );
+    }
+    setIsOpen(true);
+  }, [menuHistoryId]);
+
+  const closeMenu = useCallback(() => {
     didLongPressRef.current = false;
+    const currentState = window.history.state;
+    if (
+      currentState
+      && typeof currentState === "object"
+      && currentState.memoroomPhoneAction === menuHistoryId
+    ) {
+      window.history.back();
+      return;
+    }
     setIsOpen(false);
-  };
+  }, [menuHistoryId]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLAnchorElement>) => {
     if (event.button !== 0) return;
@@ -114,16 +135,31 @@ export default function PhoneActionLink({
   useEffect(() => {
     if (!isOpen) return;
 
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+    const handlePopState = (event: PopStateEvent) => {
+      const historyState = event.state;
+      if (
+        !historyState
+        || typeof historyState !== "object"
+        || historyState.memoroomPhoneAction !== menuHistoryId
+      ) {
         didLongPressRef.current = false;
         setIsOpen(false);
       }
     };
 
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
     window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [isOpen]);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [closeMenu, isOpen, menuHistoryId]);
 
   useEffect(() => () => {
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
