@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronRight, Plus, Clock, User, Trash2, X, Wallet, Copy, Pencil, Star, SprayCan, MessageSquareText, Binoculars } from "lucide-react";
 import { format, addDays, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -279,7 +279,6 @@ function ContactSuggestionMenu({
 }
 
 export default function CalendarPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
   const shouldFocusAgenda = searchParams.get("focus") === "agenda";
@@ -424,7 +423,12 @@ export default function CalendarPage() {
       fromDate: format(selectedDate, "yyyy-MM-dd"),
       fromRoom: roomFilter,
     });
-    router.push(`/usage?${params.toString()}`);
+    // A full browser navigation is intentional here. Calendar cards can be
+    // re-rendered between the first and second click, which made a client-side
+    // router transition intermittently disappear on desktop browsers.
+    // `assign` keeps the calendar entry in history, so Back still restores the
+    // same date and agenda state.
+    window.location.assign(`/usage?${params.toString()}`);
   };
 
   const openMobileAgenda = useCallback(() => {
