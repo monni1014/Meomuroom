@@ -8,7 +8,7 @@ type PushConfig = {
   publicKey: string | null;
 };
 
-const SERVICE_WORKER_URL = "/sw.js?v=20260724-9";
+const SERVICE_WORKER_URL = "/sw.js?v=20260731-1";
 const SERVICE_WORKER_OPTIONS: RegistrationOptions = {
   scope: "/",
   updateViaCache: "none",

@@ -1700,8 +1700,10 @@ export default function CalendarPage() {
                     if (isExpanded && (event.target as HTMLElement).closest('[data-agenda-detail="true"]')) return;
                     setExpandedReservationId(isExpanded ? null : res.id);
                   }}
-                  onDoubleClick={(event) => {
-                    if ((event.target as HTMLElement).closest("button, a, input, select, textarea, [role='button']")) return;
+                  onDoubleClickCapture={(event) => {
+                    // 캡처 단계에서 처리해야 전화번호처럼 내부 요소가 더블클릭을
+                    // 가로채더라도 PC 카드 이동이 빠지지 않는다. 실제 조작 버튼만 제외한다.
+                    if ((event.target as HTMLElement).closest("button, input, select, textarea, [role='button']")) return;
                     event.preventDefault();
                     event.stopPropagation();
                     replaceCalendarState(selectedDate, roomFilter, true);
