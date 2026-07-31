@@ -134,6 +134,16 @@ interface CancellationRangeStart {
   hour: number;
 }
 
+interface MobileTimelineSelection {
+  competitorId: string;
+  dateKey: string;
+  startHour: number;
+  endHour: number;
+  status: string;
+  source: string | null;
+  bookingNumber: number | null;
+}
+
 type LockableScreenOrientation = ScreenOrientation & {
   lock?: (orientation: "landscape") => Promise<void>;
   unlock?: () => void;
@@ -337,6 +347,110 @@ function competitorDisplayName(competitorId: string) {
   return COMPETITORS.find((competitor) => competitor.id === competitorId)?.displayName || competitorId;
 }
 
+function competitorShortName(competitorId: string) {
+  if (competitorId === "synergy") return "시";
+  if (competitorId === "triground-a") return "A";
+  return "B";
+}
+
+function mobileTimelineCell(
+  competitorId: string,
+  day: Date,
+  hour: number,
+  snapshot: CompetitorDaySnapshot | undefined,
+  manualCells: Record<string, CompetitorManualCellData>,
+  cancellations: CancellationSnapshot[],
+) {
+  const slot = snapshot?.slots[String(hour)];
+  const manual = manualCells[manualCellKey(competitorId, day, `hour-${hour}`)] || emptyCompetitorManualCell();
+  const cancellation = cancellationAtHour(cancellations, hour);
+  const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+  const isManualCancellation = manual.color === MANUAL_CANCELLATION_COLOR;
+  const manualClass = isManualCancellation
+    ? "bg-[#BFBFBF]"
+    : manualColorClass(manual.color);
+  const visibleSlot = manual.hideAuto ? undefined : slot;
+  const visibleCancellation = manual.hideAuto ? undefined : cancellation;
+  const showCancellation = Boolean(
+    visibleCancellation
+    && visibleSlot?.state !== "closed"
+    && !manualClass,
+  );
+
+  let signature = "available";
+  let className = "bg-slate-50";
+  let status = "예약 가능";
+  let source: string | null = null;
+  let bookingNumber: number | null = null;
+
+  if (isManualCancellation || showCancellation) {
+    signature = isManualCancellation
+      ? "manual-cancellation"
+      : `cancellation:${visibleCancellation?.startHour}-${visibleCancellation?.endHour}`;
+    className = "bg-[#BFBFBF]";
+    status = "취소 발견";
+  } else if (manualClass) {
+    signature = `manual:${manual.color}`;
+    className = manualClass;
+    status = "수동 예약 표시";
+    source = manual.color?.startsWith("spacecloud") ? "스클" : "네이버";
+  } else if (visibleSlot?.state === "closed") {
+    signature = `closed:${visibleSlot.spacecloudBooked ? "spacecloud" : "naver"}:${visibleSlot.bookingGroup || "baseline"}`;
+    className = slotClass(visibleSlot, isWeekend);
+    status = "예약 있음";
+    source = visibleSlot.spacecloudBooked ? "스클" : "네이버";
+    bookingNumber = visibleSlot.bookingNumber;
+  } else if (visibleSlot?.state === "policy_closed") {
+    signature = "policy-closed";
+    className = "bg-slate-200";
+    status = "시스템 마감";
+  } else if (visibleSlot?.state === "need_check") {
+    signature = "need-check";
+    className = "bg-rose-200";
+    status = "확인 필요";
+  } else if (visibleSlot?.state === "not_collected") {
+    signature = "not-collected";
+    className = "bg-slate-100";
+    status = "미확인";
+  }
+
+  return { signature, className, status, source, bookingNumber };
+}
+
+function mobileTimelineSelectionForHour(
+  competitorId: string,
+  day: Date,
+  hour: number,
+  snapshot: CompetitorDaySnapshot | undefined,
+  manualCells: Record<string, CompetitorManualCellData>,
+  cancellations: CancellationSnapshot[],
+): MobileTimelineSelection {
+  const selected = mobileTimelineCell(competitorId, day, hour, snapshot, manualCells, cancellations);
+  let startHour = hour;
+  let endHour = hour + 1;
+
+  while (startHour > HOURS[0]) {
+    const previous = mobileTimelineCell(competitorId, day, startHour - 1, snapshot, manualCells, cancellations);
+    if (previous.signature !== selected.signature) break;
+    startHour -= 1;
+  }
+  while (endHour <= HOURS.at(-1)!) {
+    const next = mobileTimelineCell(competitorId, day, endHour, snapshot, manualCells, cancellations);
+    if (next.signature !== selected.signature) break;
+    endHour += 1;
+  }
+
+  return {
+    competitorId,
+    dateKey: format(day, "yyyy-MM-dd"),
+    startHour,
+    endHour,
+    status: selected.status,
+    source: selected.source,
+    bookingNumber: selected.bookingNumber,
+  };
+}
+
 function evidenceTimeLabel(evidence: EvidenceSnapshot) {
   if (evidence.startHour === null || evidence.endHour === null) return "시간 확인 필요";
   return `${String(evidence.startHour).padStart(2, "0")}:00-${String(evidence.endHour).padStart(2, "0")}:00`;
@@ -374,6 +488,8 @@ export default function CompetitorsView({
   const [dismissingEvidenceId, setDismissingEvidenceId] = useState<string | null>(null);
   const [isLandscapeMode, setIsLandscapeMode] = useState(false);
   const [orientationHint, setOrientationHint] = useState<string | null>(null);
+  const [showMobileEditor, setShowMobileEditor] = useState(false);
+  const [mobileTimelineSelection, setMobileTimelineSelection] = useState<MobileTimelineSelection | null>(null);
 
   useEffect(() => {
     const controls = controlsRef.current;
@@ -937,10 +1053,199 @@ export default function CompetitorsView({
         </section>
       )}
 
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:hidden">
+        <div className="space-y-3 border-b border-slate-100 p-3">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[11px] font-black text-slate-500">
+              연도
+              <select
+                value={currentYear}
+                onChange={(event) => moveToMonth(Number(event.target.value), currentMonth)}
+                className="mt-1 block h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-800"
+              >
+                {yearOptions.map((year) => <option key={year} value={year}>{year}년</option>)}
+              </select>
+            </label>
+            <label className="text-[11px] font-black text-slate-500">
+              월
+              <select
+                value={currentMonth}
+                onChange={(event) => moveToMonth(currentYear, Number(event.target.value))}
+                className="mt-1 block h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-800"
+              >
+                {MONTHS.map((month) => <option key={month} value={month}>{month}월</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {(["all", ...COMPETITORS.map((competitor) => competitor.id)] as const).map((id) => {
+              const label = id === "all"
+                ? "전체"
+                : id === "synergy"
+                  ? "시너지"
+                  : id === "triground-a"
+                    ? "트그A"
+                    : "트그B";
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setCompetitorFilter(id);
+                    setMobileTimelineSelection(null);
+                  }}
+                  className={cn(
+                    "h-9 rounded-lg border px-1 text-[11px] font-black",
+                    competitorFilter === id
+                      ? "border-indigo-600 bg-indigo-600 text-white"
+                      : "border-slate-200 bg-white text-slate-600",
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-bold text-slate-500">
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#DDEBF7] ring-1 ring-slate-300" />네이버</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#2F75B5]" />스클</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#BFBFBF]" />취소</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-rose-200" />확인 필요</span>
+          </div>
+        </div>
+
+        <div className="p-2.5">
+          <div className="grid grid-cols-[34px_1fr] items-end gap-1 border-b border-slate-200 pb-1">
+            <div className="text-center text-[9px] font-black text-slate-400">날짜</div>
+            <div className="grid grid-cols-[18px_1fr] gap-1">
+              <div />
+              <div className="grid grid-cols-9 text-[8px] font-black text-slate-400">
+                {[8, 10, 12, 14, 16, 18, 20, 22, 24].map((hour) => (
+                  <span key={hour} className="text-center">{hour}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="divide-y divide-slate-100">
+            {monthDays.map((day) => {
+              const dateKey = format(day, "yyyy-MM-dd");
+              const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+              return (
+                <div key={dateKey} className="grid min-h-8 grid-cols-[34px_1fr] items-center gap-1 py-1">
+                  <div className={cn("text-center text-[10px] font-black text-slate-700", isWeekend && "text-rose-500")}>
+                    {format(day, "d")}
+                  </div>
+                  <div className="space-y-1">
+                    {visibleCompetitors.map((competitor) => {
+                      const snapshot = snapshots.days[competitor.id]?.[dateKey];
+                      const cancellations = snapshots.cancellations.filter((event) => (
+                        event.competitorId === competitor.id && event.dateKey === dateKey
+                      ));
+                      return (
+                        <div key={`${dateKey}-${competitor.id}`} className="grid grid-cols-[18px_1fr] items-center gap-1">
+                          <span className={cn(
+                            "text-center text-[8px] font-black",
+                            competitor.id === "synergy"
+                              ? "text-violet-700"
+                              : competitor.id === "triground-a"
+                                ? "text-emerald-700"
+                                : "text-sky-700",
+                          )}>
+                            {competitorShortName(competitor.id)}
+                          </span>
+                          <div className="grid grid-cols-[repeat(17,minmax(0,1fr))] overflow-hidden rounded-sm border border-slate-200">
+                            {HOURS.map((hour) => {
+                              const cell = mobileTimelineCell(
+                                competitor.id,
+                                day,
+                                hour,
+                                snapshot,
+                                manualCells,
+                                cancellations,
+                              );
+                              const isSelected = mobileTimelineSelection?.competitorId === competitor.id
+                                && mobileTimelineSelection.dateKey === dateKey
+                                && hour >= mobileTimelineSelection.startHour
+                                && hour < mobileTimelineSelection.endHour;
+                              return (
+                                <button
+                                  key={hour}
+                                  type="button"
+                                  title={`${competitor.displayName} ${format(day, "M월 d일")} ${hour}시 · ${cell.status}`}
+                                  aria-label={`${competitor.displayName} ${format(day, "M월 d일")} ${hour}시 ${cell.status}`}
+                                  onClick={() => setMobileTimelineSelection(mobileTimelineSelectionForHour(
+                                    competitor.id,
+                                    day,
+                                    hour,
+                                    snapshot,
+                                    manualCells,
+                                    cancellations,
+                                  ))}
+                                  className={cn(
+                                    "h-2.5 border-r border-white/60 last:border-r-0",
+                                    cell.className,
+                                    isSelected && "relative z-10 ring-2 ring-inset ring-indigo-600",
+                                  )}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {mobileTimelineSelection && (
+          <div className="fixed inset-x-3 bottom-20 z-[70] rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black text-slate-900">
+                  {competitorDisplayName(mobileTimelineSelection.competitorId)} · {mobileTimelineSelection.dateKey.slice(5).replace("-", "/")}
+                </p>
+                <p className="mt-0.5 text-sm font-black text-indigo-800">
+                  {mobileTimelineSelection.startHour}시~{mobileTimelineSelection.endHour}시 · {mobileTimelineSelection.status}
+                </p>
+                <p className="mt-0.5 text-[10px] font-bold text-slate-500">
+                  {[mobileTimelineSelection.source, mobileTimelineSelection.bookingNumber ? `예약 ${mobileTimelineSelection.bookingNumber}` : null]
+                    .filter(Boolean)
+                    .join(" · ") || "상세 기록 없음"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileTimelineSelection(null)}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm"
+                aria-label="선택 정보 닫기"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="border-t border-slate-100 p-2.5">
+          <button
+            type="button"
+            onClick={() => setShowMobileEditor((previous) => !previous)}
+            className="h-9 w-full rounded-lg border border-slate-300 bg-white text-xs font-black text-slate-700"
+          >
+            {showMobileEditor ? "상세 수정표 닫기" : "상세 수정표 열기"}
+          </button>
+        </div>
+      </section>
+
       <section
         ref={controlsRef}
         className={cn(
           "space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm",
+          showMobileEditor ? "block" : "hidden",
+          "lg:block",
           competitorFilter !== "all" && "z-40 bg-white/95 backdrop-blur xl:sticky xl:top-0 xl:max-h-[calc(100vh-1rem)] xl:overflow-y-auto",
         )}
       >
@@ -1061,7 +1366,7 @@ export default function CompetitorsView({
         </div>
       </section>
 
-      <div className="space-y-6">
+      <div className={cn("space-y-6", showMobileEditor ? "block" : "hidden", "lg:block")}>
         {visibleCompetitors.map((competitor) => {
           const competitorDays = snapshots.days[competitor.id] || {};
           const monthMetrics = monthDays.reduce((total, date) => {
