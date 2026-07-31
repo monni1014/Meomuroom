@@ -15,6 +15,10 @@ import {
   resolveAdditionalPeople,
 } from "@/lib/reservation-extra-people-push";
 import { sendPushNotification } from "@/lib/push-notifications";
+import {
+  buildReservationDeletionLogData,
+  normalizeDeletionSource,
+} from "@/lib/reservation-deletion-log";
 
 const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
 
@@ -342,17 +346,48 @@ export async function DELETE(
 ) {
   try {
     const { id } = await context.params;
-
-    // Delete associated details first. We can do this with transact or clean up
-    await prisma.usageLog.deleteMany({
-      where: { reservationId: id },
-    });
-
-    const deleted = await prisma.reservation.delete({
+    const reservation = await prisma.reservation.findUnique({
       where: { id },
+      include: {
+        usageLog: true,
+        messages: true,
+      },
     });
 
-    return NextResponse.json({ success: true, deleted });
+    if (!reservation) {
+      return NextResponse.json({ error: "Reservation not found" }, { status: 404 });
+    }
+
+    const deletedFrom = normalizeDeletionSource(
+      request.headers.get("x-memoroom-client"),
+      request.headers.get("user-agent"),
+    );
+    const deletionLogData = buildReservationDeletionLogData(
+      reservation,
+      deletedFrom,
+    );
+
+    const result = await prisma.$transaction(async (tx) => {
+      const deletionLog = await tx.reservationDeletionLog.create({
+        data: deletionLogData,
+      });
+
+      await tx.usageLog.deleteMany({
+        where: { reservationId: id },
+      });
+
+      const deleted = await tx.reservation.delete({
+        where: { id },
+      });
+
+      return { deletionLog, deleted };
+    });
+
+    return NextResponse.json({
+      success: true,
+      deleted: result.deleted,
+      deletionLogId: result.deletionLog.id,
+    });
   } catch (error) {
     console.error("DELETE reservation error:", error);
     return NextResponse.json({ error: "Failed to delete reservation" }, { status: 500 });

@@ -1001,6 +1001,11 @@ export default function CalendarPage() {
       setIsDeletingReservation(true);
       const res = await fetch(`/api/reservations/${pendingDeleteReservationId}`, {
         method: "DELETE",
+        headers: {
+          "X-Memoroom-Client": window.matchMedia("(max-width: 640px)").matches
+            ? "mobile-calendar"
+            : "desktop-calendar",
+        },
       });
       if (res.ok) {
         setPendingDeleteReservationId(null);
@@ -1966,7 +1971,7 @@ export default function CalendarPage() {
                       <button
                         onClick={(e) => { e.stopPropagation(); setPendingDeleteReservationId(res.id); }}
                         className="p-2 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 transition active:scale-95"
-                        title="예약 및 로그 완전 삭제"
+                        title="예약 삭제 (삭제 기록 보관)"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -2066,10 +2071,10 @@ export default function CalendarPage() {
               <Trash2 className="h-5 w-5" />
             </div>
             <h2 id="delete-reservation-title" className="text-lg font-black text-slate-900">
-              예약을 완전히 삭제할까요?
+              예약을 삭제할까요?
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              예약과 관련 로그가 함께 삭제되며, 삭제한 뒤에는 되돌릴 수 없습니다.
+              캘린더에서는 사라지지만 예약 원본, 이용현황, 문자 연결 정보와 삭제 시각은 별도 기록으로 보관됩니다.
             </p>
             <div className="mt-6 grid grid-cols-2 gap-2">
               <button
@@ -2086,7 +2091,7 @@ export default function CalendarPage() {
                 disabled={isDeletingReservation}
                 className="rounded-xl bg-rose-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
               >
-                {isDeletingReservation ? "삭제 중" : "완전 삭제"}
+                {isDeletingReservation ? "삭제 중" : "삭제"}
               </button>
             </div>
           </section>

@@ -77,7 +77,8 @@
     "test:dawn-booking-notifications": "node --experimental-strip-types scripts/test-dawn-booking-notifications.mjs",
     "test:on-time-exit-notifications": "node --experimental-strip-types scripts/test-on-time-exit-notifications.mjs",
     "test:forced-notification-link": "node scripts/test-forced-notification-reservation-link.mjs",
-    "test:guide-notification-exclusion": "node --experimental-strip-types scripts/test-guide-notification-exclusion.mjs"
+    "test:guide-notification-exclusion": "node --experimental-strip-types scripts/test-guide-notification-exclusion.mjs",
+    "test:reservation-deletion-log": "node --experimental-strip-types scripts/test-reservation-deletion-log.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",

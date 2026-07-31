@@ -48,13 +48,32 @@ model Reservation {
   messages CustomerMessage[]
 }
 
+model ReservationDeletionLog {
+  id                  String   @id @default(cuid())
+  reservationId       String
+  source              String
+  roomName            String
+  customerName        String?
+  phone               String?
+  startTime           DateTime
+  endTime             DateTime
+  reservationSnapshot String
+  usageLogSnapshot    String?
+  messageSnapshot     String?
+  deletedFrom         String?
+  deletedAt           DateTime @default(now())
+
+  @@index([reservationId, deletedAt])
+  @@index([deletedAt])
+}
+
 model CleaningSchedule {
   id           String   @id @default(cuid())
   roomName     String   @default("전체")
   cleanerName  String
   scheduleType String   @default("CLEANING") // "CLEANING" | "SITE_VISIT"
   contactPhone String?
-  source       String?  // 사전답사 유입 경로: "naver" | "spacecloud"
+  source       String? // 사전답사 유입 경로: "naver" | "spacecloud"
   startTime    DateTime
   endTime      DateTime
   cost         Int      @default(0)
