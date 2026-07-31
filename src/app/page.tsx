@@ -10,6 +10,7 @@ import MonthFilter from "@/components/MonthFilter";
 import DismissibleAdminAlerts from "@/components/DismissibleAdminAlerts";
 import { addKstMonths, createKstDate, getKstDateParts, getKstDayRange, startOfKstMonth } from "@/lib/kst-time";
 import { MobileAppLaunchRedirect } from "@/components/MobileAppLaunchRedirect";
+import { decorateDashboardReservationEvents } from "@/lib/dashboard-reservation-events";
 
 export const dynamic = "force-dynamic";
 
@@ -120,21 +121,33 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
     take: 5,
   });
 
-  // Fetch today's reservations (오늘 들어온 예약 — 메일 자동연동 + 수동 예약 모두 포함)
-  const todayReservations = await prisma.reservation.findMany({
+  // 오늘 새로 접수된 예약과, 과거 접수 건 중 오늘 취소된 예약을 함께 표시한다.
+  const rawTodayReservations = await prisma.reservation.findMany({
     where: {
-      createdAt: {
-        gte: startOfToday,
-        lte: endOfToday
-      }
-    },
-    orderBy: {
-      createdAt: "desc"
+      OR: [
+        {
+          createdAt: {
+            gte: startOfToday,
+            lte: endOfToday,
+          },
+        },
+        {
+          cancelledAt: {
+            gte: startOfToday,
+            lte: endOfToday,
+          },
+        },
+      ],
     },
     include: {
-      usageLog: true
-    }
+      usageLog: true,
+    },
   });
+  const todayReservations = decorateDashboardReservationEvents(
+    rawTodayReservations,
+    startOfToday,
+    endOfToday,
+  );
 
   // Fetch selected month's reservations
   const thisMonthReservations = await prisma.reservation.findMany({
@@ -414,8 +427,8 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
       {/* Today's Reservations */}
       <section className="order-1 space-y-3 md:order-2 md:pt-6">
         <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold text-slate-900">오늘 접수 예약 ({todayReservations.length}건)</h2>
-          <span className="text-xs text-slate-400">오늘 접수된 예약</span>
+          <h2 className="text-lg font-semibold text-slate-900">오늘 예약 변동 ({todayReservations.length}건)</h2>
+          <span className="text-xs text-slate-400">오늘 접수·취소</span>
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">

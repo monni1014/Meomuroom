@@ -1,5 +1,6 @@
 import type { ParsedReservation } from "./email-parser";
 import { prisma } from "./prisma";
+import { resolveReservationCancellationState } from "./reservation-cancellation";
 
 export const RPA_PENDING_MARKER = "[RPA_PENDING]";
 export const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
@@ -84,6 +85,7 @@ export async function ensureRpaPendingReservation(
       where: { id: existing.id },
       data: {
         status,
+        ...resolveReservationCancellationState(existing, status, receivedAt || new Date()),
         price: parsed.isCancelled ? price : (existing.price > 0 ? existing.price : price),
         discount: parsed.discount ?? existing.discount,
         ...(parsed.visitorReviewRequested ? { visitorReviewRequested: true } : {}),
@@ -111,6 +113,7 @@ export async function ensureRpaPendingReservation(
       visitorReviewRequested: parsed.visitorReviewRequested ?? false,
       blogReviewRequested: parsed.blogReviewRequested ?? false,
       status,
+      cancelledAt: status === "CANCELLED" ? (receivedAt || new Date()) : null,
       paymentMethod: "온라인",
       isPaid: parsed.isCancelled ? price > 0 : true,
       memo,

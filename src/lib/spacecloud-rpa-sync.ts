@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { prisma } from "./prisma";
+import { resolveReservationCancellationState } from "./reservation-cancellation";
 import type { ParsedReservation } from "./email-parser";
 import { clearRpaPendingForReservation, RPA_PENDING_MARKER } from "./rpa-reservation-state";
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts";
@@ -410,6 +411,7 @@ export async function processSpaceCloudEmailWithRpa({
         ...timeState,
         price: item.status === "CANCELLED" ? item.refundFee : item.price,
         status: item.status,
+        ...resolveReservationCancellationState(existing, item.status, receivedAt || new Date()),
         paymentMethod: "온라인",
         isPaid: item.status === "CANCELLED" ? item.refundFee > 0 : true,
         usageLog: existing.usageLog
@@ -467,6 +469,7 @@ export async function processSpaceCloudEmailWithRpa({
       createdAt: receivedAt || new Date(),
       price: item.status === "CANCELLED" ? item.refundFee : item.price,
       status: item.status,
+      cancelledAt: item.status === "CANCELLED" ? (receivedAt || new Date()) : null,
       paymentMethod: "온라인",
       isPaid: item.status === "CANCELLED" ? item.refundFee > 0 : true,
       usageLog: {

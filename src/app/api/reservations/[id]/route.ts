@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { resolveReservationCancellationState } from "@/lib/reservation-cancellation";
 import { normalizeCustomerType } from "@/lib/customer-types";
 import { reservationNotificationEditPolicy } from "@/lib/reservation-notification-edit-policy";
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
@@ -167,7 +168,13 @@ export async function PATCH(
     if (blogReviewRequested !== undefined) updateData.blogReviewRequested = Boolean(blogReviewRequested);
     if (blogReviewCompleted !== undefined) updateData.blogReviewCompleted = Boolean(blogReviewCompleted);
     if (blogReviewRefunded !== undefined) updateData.blogReviewRefunded = Boolean(blogReviewRefunded);
-    if (status !== undefined) updateData.status = status; // CONFIRMED ↔ CANCELLED (취소 되살리기 등)
+    if (status !== undefined) {
+      updateData.status = status; // CONFIRMED ↔ CANCELLED (취소 되살리기 등)
+      Object.assign(
+        updateData,
+        resolveReservationCancellationState(existing, status, new Date()),
+      );
+    }
     if (isNoShow !== undefined) updateData.isNoShow = Boolean(isNoShow); // 노쇼 표기 (취소의 하위 구분)
 
     const nextStartTime = parsedStartTime;

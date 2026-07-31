@@ -31,7 +31,7 @@ export default function TodayReservationsList({ reservations }: { reservations: 
   if (reservations.length === 0) {
     return (
       <div className="lg:col-span-2 text-center py-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-slate-400 text-sm">
-        오늘 들어온 예약 일정이 없습니다.<br />
+        오늘 접수되거나 취소된 예약이 없습니다.<br />
       </div>
     );
   }
@@ -40,6 +40,7 @@ export default function TodayReservationsList({ reservations }: { reservations: 
     <>
       {reservations.map((res) => {
         const isCancelled = res.status === "CANCELLED";
+        const isCancelledToday = res.dashboardEventType === "CANCELLED_TODAY";
         const borderColors = isCancelled
           ? "border-l-slate-300"
           : res.source === "naver" ? "border-l-green-500" :
@@ -69,7 +70,7 @@ export default function TodayReservationsList({ reservations }: { reservations: 
               <p className="text-xs text-slate-500 mt-1.5 flex items-center gap-1.5 flex-wrap">
                 {isCancelled && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-600">
-                    🚫 취소됨
+                    🚫 {isCancelledToday ? "오늘 취소" : "취소됨"}
                   </span>
                 )}
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${labelColors}`}>

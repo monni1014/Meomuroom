@@ -391,6 +391,7 @@ export async function syncEmails(): Promise<{ processed: number; newReservations
             where: { id: target.id },
             data: {
               status: "CANCELLED",
+              cancelledAt: parsedMail.date || new Date(),
               price: reservationData.refundFee ?? 0,
             },
           });

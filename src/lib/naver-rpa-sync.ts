@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { prisma } from "./prisma";
+import { resolveReservationCancellationState } from "./reservation-cancellation";
 import type { ParsedReservation } from "./email-parser";
 import { clearRpaPendingForReservation, RPA_PENDING_MARKER } from "./rpa-reservation-state";
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts";
@@ -492,6 +493,7 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
         price: item.price,
         discount: item.discount,
         status: item.status,
+        ...resolveReservationCancellationState(existing, item.status, receivedAt || new Date()),
         paymentMethod: item.paymentMethod,
         isPaid: item.isPaid,
         ...(item.visitorReviewRequested ? { visitorReviewRequested: true } : {}),
@@ -523,6 +525,7 @@ async function upsertNaverReservation(item: NormalizedNaverReservation, messageI
       price: item.price,
       discount: item.discount,
       status: item.status,
+      cancelledAt: item.status === "CANCELLED" ? (receivedAt || new Date()) : null,
       paymentMethod: item.paymentMethod,
       isPaid: item.isPaid,
       visitorReviewRequested: item.visitorReviewRequested ?? false,
@@ -632,6 +635,7 @@ async function cancelNaverReservation(
         timeLocked: timeState.timeLocked || operationalTimeLocked,
         price: cancellationPrice,
         status: "CANCELLED",
+        ...resolveReservationCancellationState(existing, "CANCELLED", receivedAt || new Date()),
         paymentMethod: item.paymentMethod,
         isPaid: cancellationPrice > 0,
         usageLog: existing.usageLog
@@ -661,6 +665,7 @@ async function cancelNaverReservation(
       createdAt: receivedAt || new Date(),
       price: cancellationPrice,
       status: "CANCELLED",
+      cancelledAt: receivedAt || new Date(),
       paymentMethod: item.paymentMethod,
       isPaid: cancellationPrice > 0,
       usageLog: {

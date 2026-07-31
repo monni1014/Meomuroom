@@ -80,7 +80,8 @@
     "test:on-time-exit-notifications": "node --experimental-strip-types scripts/test-on-time-exit-notifications.mjs",
     "test:forced-notification-link": "node scripts/test-forced-notification-reservation-link.mjs",
     "test:guide-notification-exclusion": "node --experimental-strip-types scripts/test-guide-notification-exclusion.mjs",
-    "test:reservation-deletion-log": "node --experimental-strip-types scripts/test-reservation-deletion-log.mjs"
+    "test:reservation-deletion-log": "node --experimental-strip-types scripts/test-reservation-deletion-log.mjs",
+    "test:dashboard-cancellations": "node --experimental-strip-types scripts/test-dashboard-cancellation-events.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",
