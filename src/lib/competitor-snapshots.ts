@@ -122,7 +122,9 @@ export async function getCompetitorSnapshots(year: number, month: number) {
       },
     }),
     prisma.competitorScan.findFirst({
-      where: { mode: { not: "synergy-spacecloud-daily" } },
+      where: {
+        mode: { notIn: ["synergy-spacecloud-daily", "synergy-spacecloud-followup"] },
+      },
       orderBy: { startedAt: "desc" },
     }),
     prisma.competitorEvidence.findMany({

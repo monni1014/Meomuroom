@@ -68,6 +68,12 @@ type RunOptions = {
   skipIfRecentMinutes?: number;
 };
 
+type SynergySpacecloudRunOptions = {
+  startKey?: string;
+  endKey?: string;
+  mode?: "synergy-spacecloud-daily" | "synergy-spacecloud-followup";
+};
+
 type MonitorGlobal = typeof globalThis & {
   __competitorScanPromise?: Promise<CompetitorScanResult>;
 };
@@ -945,7 +951,7 @@ async function runScan(options: RunOptions): Promise<CompetitorScanResult> {
   if (options.skipIfRecentMinutes && options.skipIfRecentMinutes > 0) {
     const recent = await prisma.competitorScan.findFirst({
       where: {
-        mode: { not: "synergy-spacecloud-daily" },
+        mode: { notIn: ["synergy-spacecloud-daily", "synergy-spacecloud-followup"] },
         status: "COMPLETED",
         startedAt: { gte: new Date(Date.now() - options.skipIfRecentMinutes * 60_000) },
         targetStartKey: { lte: range.startKey },
@@ -1081,19 +1087,12 @@ function endOfNextMonthKey(todayKey: string) {
   return date.toISOString().slice(0, 10);
 }
 
-async function runSynergySpacecloudDailyScan(): Promise<CompetitorScanResult> {
-  const startKey = kstDateKey();
-  const endKey = endOfNextMonthKey(startKey);
-  const kstMidnight = new Date(`${startKey}T00:00:00+09:00`);
-  const recent = await prisma.competitorScan.findFirst({
-    where: {
-      mode: "synergy-spacecloud-daily",
-      status: "COMPLETED",
-      startedAt: { gte: kstMidnight },
-    },
-    orderBy: { startedAt: "desc" },
-  });
-  if (recent) return { skipped: true, scanId: recent.id, status: recent.status };
+async function runSynergySpacecloudRangeScan(
+  options: SynergySpacecloudRunOptions = {},
+): Promise<CompetitorScanResult> {
+  const startKey = options.startKey || kstDateKey();
+  const endKey = options.endKey || endOfNextMonthKey(startKey);
+  const mode = options.mode || "synergy-spacecloud-daily";
 
   const existingHiddenSlots = await prisma.competitorSlot.count({
     where: {
@@ -1104,7 +1103,7 @@ async function runSynergySpacecloudDailyScan(): Promise<CompetitorScanResult> {
   const baseline = existingHiddenSlots === 0;
   const scan = await prisma.competitorScan.create({
     data: {
-      mode: "synergy-spacecloud-daily",
+      mode,
       targetStartKey: startKey,
       targetEndKey: endKey,
     },
@@ -1253,7 +1252,27 @@ export function runCompetitorScan(options: RunOptions): Promise<CompetitorScanRe
       };
     }
     try {
-      return await runScan(options);
+      const result = await runScan(options);
+      if (
+        !result.skipped
+        && result.status === "COMPLETED"
+        && result.startKey
+        && result.endKey
+      ) {
+        try {
+          const spacecloudResult = await runSynergySpacecloudRangeScan({
+            startKey: result.startKey,
+            endKey: result.endKey,
+            mode: "synergy-spacecloud-followup",
+          });
+          console.log(
+            `[Competitor] Synergy SpaceCloud follow-up ${spacecloudResult.skipped ? "skipped" : "done"}: status ${spacecloudResult.status || "-"}, checked ${spacecloudResult.checkedSlots || 0}, changed ${spacecloudResult.changedSlots || 0}`,
+          );
+        } catch (error) {
+          console.error("[Competitor] Synergy SpaceCloud follow-up failed after Naver scan:", error);
+        }
+      }
+      return result;
     } finally {
       await releaseLock();
     }
@@ -1280,7 +1299,7 @@ export function runSynergySpacecloudScan(): Promise<CompetitorScanResult> {
     const releaseLock = await acquireMonitorLock();
     if (!releaseLock) return { skipped: true, status: "RUNNING" };
     try {
-      return await runSynergySpacecloudDailyScan();
+      return await runSynergySpacecloudRangeScan();
     } finally {
       await releaseLock();
     }

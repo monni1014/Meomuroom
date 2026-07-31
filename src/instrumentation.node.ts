@@ -28,7 +28,7 @@ export async function registerNodeInstrumentation() {
   const { sendDueReservationEndReminders } = await import("@/lib/reservation-end-reminders");
   const { runReservationContactPreflight } = await import("@/lib/reservation-contact-preflight");
   const { syncUpcomingReservationContacts } = await import("@/lib/google-people");
-  const { runCompetitorScan, runSynergySpacecloudScan } = await import("@/lib/competitor-monitor");
+  const { runCompetitorScan } = await import("@/lib/competitor-monitor");
   const { resolveCompetitorStartupMode } = await import("@/lib/competitor-scan-range");
   const { runRpaUiHealthChecks } = await import("@/lib/rpa-ui-monitor");
   const { checkTailscaleDevicesAndAlert } = await import("@/lib/tailscale-device-monitor");
@@ -42,7 +42,6 @@ export async function registerNodeInstrumentation() {
   let contactPreflightRunning = false;
   let googlePeopleSyncRunning = false;
   let competitorScanRunning = false;
-  let synergySpacecloudScanPending = false;
   let rpaUiHealthRunning = false;
   let tailscaleDeviceMonitorRunning = false;
   let rpaSessionExpiryRunning = false;
@@ -223,36 +222,6 @@ export async function registerNodeInstrumentation() {
       console.error(`[Cron] Competitor scan failed (${label}):`, error);
     } finally {
       competitorScanRunning = false;
-      if (synergySpacecloudScanPending) {
-        synergySpacecloudScanPending = false;
-        setTimeout(() => void runSynergySpacecloudMonitor("queued after competitor scan"), 1_000);
-      }
-    }
-  }
-
-  async function runSynergySpacecloudMonitor(label: string) {
-    if (isRpaPausedForProxy()) {
-      synergySpacecloudScanPending = true;
-      console.warn(`[Cron] Synergy SpaceCloud scan held until proxy recovery (${label}).`);
-      return;
-    }
-
-    if (competitorScanRunning) {
-      synergySpacecloudScanPending = true;
-      console.log(`[Cron] Competitor scan is busy. Queued Synergy SpaceCloud scan (${label}).`);
-      return;
-    }
-
-    competitorScanRunning = true;
-    try {
-      const result = await runSynergySpacecloudScan();
-      console.log(
-        `[Cron] Synergy SpaceCloud scan ${result.skipped ? "skipped" : "done"} (${label}): status ${result.status || "-"}, checked ${result.checkedSlots || 0}, changed ${result.changedSlots || 0}`,
-      );
-    } catch (error) {
-      console.error(`[Cron] Synergy SpaceCloud scan failed (${label}):`, error);
-    } finally {
-      competitorScanRunning = false;
     }
   }
 
@@ -332,11 +301,6 @@ export async function registerNodeInstrumentation() {
       );
     }
 
-    if (synergySpacecloudScanPending) {
-      synergySpacecloudScanPending = false;
-      await runSynergySpacecloudMonitor("proxy recovery");
-    }
-
     if (rpaUiHealthPending) {
       rpaUiHealthPending = false;
       await runRpaUiHealthMonitor("proxy recovery");
@@ -371,10 +335,6 @@ export async function registerNodeInstrumentation() {
     const startupMode = resolveCompetitorStartupMode();
     void runCompetitorMonitor(`startup catch-up (${startupMode})`, startupMode, 120);
   }, 60_000);
-
-  setTimeout(() => {
-    void runSynergySpacecloudMonitor("startup daily catch-up");
-  }, 75_000);
 
   setTimeout(() => {
     void runTailscaleDeviceMonitor("startup");
@@ -466,12 +426,6 @@ export async function registerNodeInstrumentation() {
     timezone: "Asia/Seoul",
   });
 
-  schedule("10 7 * * *", async () => {
-    await runSynergySpacecloudMonitor("07:10 daily public availability check");
-  }, {
-    timezone: "Asia/Seoul",
-  });
-
   console.log("[Cron] Email auto sync started (15 second interval)");
   console.log("[Cron] Reservation notification monitor started (30 second interval, immediate after email changes, dawn booking enabled, on-time-exit is manual-only)");
   console.log("[Cron] Reservation end reminder monitor started (10 minutes before end, 30 second interval, startup recovery)");
@@ -482,6 +436,5 @@ export async function registerNodeInstrumentation() {
   console.log("[Cron] RPA UI health monitor started (02:20/08:20/14:20/20:20 read-only checks)");
   console.log("[Cron] Tailscale device monitor started (5 minute interval, alert after 15 continuous offline minutes)");
   console.log("[Cron] Naver/SpaceCloud login expiry monitor started (21:00 daily, warnings at 3/2/1 days before expiry)");
-  console.log("[Cron] Competitor monitor started (07:00 today+tomorrow, 12:00/15:00/18:00 today+7 days, 23:00 tomorrow through month-end or next-month day 15 in the final 7 days, monthly baseline at 07:00 on day 1)");
-  console.log("[Cron] Synergy SpaceCloud public availability monitor started (07:10 daily, today through next month-end)");
+  console.log("[Cron] Competitor monitor started (each run: Naver Synergy/Tryground, then Synergy SpaceCloud cross-check; 07:00 today+tomorrow, 12:00/15:00/18:00 today+7 days, 23:00 tomorrow through month-end or next-month day 15 in the final 7 days, monthly baseline at 07:00 on day 1)");
 }
