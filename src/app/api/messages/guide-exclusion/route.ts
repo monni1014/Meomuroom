@@ -6,6 +6,7 @@ import {
   isManualGuideNotificationExclusion,
 } from "@/lib/guide-notification-exclusion";
 import { prisma } from "@/lib/prisma";
+import { onTimeExitGuideScheduleKey } from "@/lib/on-time-exit-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -83,7 +84,14 @@ export async function POST(request: Request) {
         }
 
         await tx.appSetting.deleteMany({
-          where: { key: `notification.sendAttempt.${reservationId}` },
+          where: {
+            key: {
+              in: [
+                `notification.sendAttempt.${reservationId}`,
+                onTimeExitGuideScheduleKey(reservationId),
+              ],
+            },
+          },
         });
         return { statusCode: 200, excluded: true };
       }

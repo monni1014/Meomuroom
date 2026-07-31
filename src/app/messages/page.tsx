@@ -7,6 +7,7 @@ import { getSolapiDailyUsage } from "@/lib/solapi-daily-usage";
 import { buildReservationNotificationGroups } from "@/lib/reservation-notification-grouping";
 import { customerMessageDisplay } from "@/lib/customer-message-display";
 import { resolveOnTimeExitTargets } from "@/lib/on-time-exit-policy";
+import { getScheduledOnTimeExitReservationIds } from "@/lib/on-time-exit-notifications";
 import {
   canExcludeGuideNotification,
   isManualGuideNotificationExclusion,
@@ -179,6 +180,7 @@ export default async function MessagesPage({
       message.reservationId ? [[message.reservationId, message] as const] : []
     )),
   );
+  const scheduledOnTimeExitReservationIds = await getScheduledOnTimeExitReservationIds(reservationIds);
 
   const notificationGroups = buildReservationNotificationGroups(reservations);
   const groupLeaderByFollowerId = new Map<string, (typeof reservations)[number]>();
@@ -240,11 +242,23 @@ export default async function MessagesPage({
         manuallyExcluded,
         canRestore: manuallyExcluded && reservation.startTime.getTime() > now.getTime(),
       },
-      onTimeExitAction: onTimeExitTargetIds.has(reservation.id) || onTimeExitMessage
+      onTimeExitAction: onTimeExitTargetIds.has(reservation.id)
+        || onTimeExitMessage
+        || scheduledOnTimeExitReservationIds.has(reservation.id)
         ? {
             eligible: onTimeExitTargetIds.has(reservation.id)
               && isValidKoreanMobilePhone(phone)
               && !onTimeExitMessage,
+            canScheduleWithGuide: onTimeExitTargetIds.has(reservation.id)
+              && isValidKoreanMobilePhone(phone)
+              && !onTimeExitMessage
+              && !message
+              && !reservation.notified
+              && !manuallyExcluded
+              && reservation.startTime.getTime() > now.getTime()
+              && ["PENDING", "WAITING_CONTACT", "WAITING_CONTACT_SYNC", "SENDING", "RECOVERING"]
+                .includes(reservation.notificationStatus),
+            scheduledWithGuide: scheduledOnTimeExitReservationIds.has(reservation.id),
             status: onTimeExitMessage?.status || null,
             resultAt: onTimeExitMessage?.updatedAt.toISOString() || null,
           }

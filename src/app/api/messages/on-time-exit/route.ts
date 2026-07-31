@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { sendManualOnTimeExitMessage } from "@/lib/on-time-exit-notifications";
+import {
+  cancelOnTimeExitWithGuide,
+  scheduleOnTimeExitWithGuide,
+  sendManualOnTimeExitMessage,
+} from "@/lib/on-time-exit-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +20,21 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await sendManualOnTimeExitMessage(reservationId);
+    const action = typeof body.action === "string" ? body.action : "SEND_NOW";
+    let result;
+    if (action === "SCHEDULE_WITH_GUIDE") {
+      result = await scheduleOnTimeExitWithGuide(reservationId);
+    } else if (action === "CANCEL_GUIDE_SCHEDULE") {
+      result = await cancelOnTimeExitWithGuide(reservationId);
+    } else if (action === "SEND_NOW") {
+      result = await sendManualOnTimeExitMessage(reservationId);
+      await cancelOnTimeExitWithGuide(reservationId);
+    } else {
+      return NextResponse.json(
+        { success: false, error: "지원하지 않는 정시퇴실 문자 작업입니다." },
+        { status: 400 },
+      );
+    }
     return NextResponse.json(result, { status: result.statusCode });
   } catch (error) {
     console.error("Manual on-time exit notification error:", error);

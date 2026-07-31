@@ -19,6 +19,7 @@ import {
   isReservationAutoSendActive,
   reservationNotificationRolloutStartsAt,
 } from "@/lib/reservation-notification-rollout";
+import { sendScheduledOnTimeExitWithGuide } from "@/lib/on-time-exit-notifications";
 
 const ALERT_TYPE = "NOTIFICATION_DELIVERY";
 const GOOGLE_PEOPLE_SYNC_ALERT_KEY = "google-people-sync";
@@ -451,6 +452,9 @@ export async function sendDueReservationReminders() {
         } else {
           await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
           await skipGroupedFollowers(reservation);
+          await sendScheduledOnTimeExitWithGuide(reservation.id, recovered.occurredAt).catch((error) => {
+            console.error("[ReservationNotification] Scheduled on-time exit send failed:", error);
+          });
           sentCount += 1;
         }
         continue;
@@ -514,6 +518,9 @@ export async function sendDueReservationReminders() {
       });
       await resolveAdminAlertByDedupeKey(notificationAlertKey(reservation.id));
       await skipGroupedFollowers(reservation);
+      await sendScheduledOnTimeExitWithGuide(reservation.id).catch((error) => {
+        console.error("[ReservationNotification] Scheduled on-time exit send failed:", error);
+      });
       sentCount += 1;
       continue;
     }
