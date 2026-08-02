@@ -8,6 +8,10 @@ export type ReservationNotificationGroupMember = {
   startTime: Date;
 };
 
+export type ReservationNotificationContinuityMember = ReservationNotificationGroupMember & {
+  endTime: Date;
+};
+
 export function reservationNotificationGroupKey(
   reservation: ReservationNotificationGroupMember,
 ) {
@@ -19,6 +23,21 @@ export function reservationNotificationGroupKey(
     reservation.roomName.trim(),
     phone,
   ].join("|");
+}
+
+export function isContiguousReservationNotificationExtension(
+  previous: ReservationNotificationContinuityMember,
+  next: ReservationNotificationContinuityMember,
+) {
+  const previousPhone = normalizeKoreanPhone(previous.phone);
+  const nextPhone = normalizeKoreanPhone(next.phone);
+  if (!isValidKoreanMobilePhone(previousPhone) || !isValidKoreanMobilePhone(nextPhone)) {
+    return false;
+  }
+
+  return previous.roomName.trim() === next.roomName.trim()
+    && previousPhone === nextPhone
+    && previous.endTime.getTime() === next.startTime.getTime();
 }
 
 export function buildReservationNotificationGroups<T extends ReservationNotificationGroupMember>(

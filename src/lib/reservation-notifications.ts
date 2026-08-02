@@ -13,6 +13,7 @@ import { buildReservationNotificationFailureAlert } from "@/lib/reservation-noti
 import { getKstDateParts, getKstDayRange } from "@/lib/kst-time";
 import {
   buildReservationNotificationGroups,
+  isContiguousReservationNotificationExtension,
   reservationNotificationGroupKey,
 } from "@/lib/reservation-notification-grouping";
 import {
@@ -24,6 +25,7 @@ import { sendScheduledOnTimeExitWithGuide } from "@/lib/on-time-exit-notificatio
 const ALERT_TYPE = "NOTIFICATION_DELIVERY";
 const GOOGLE_PEOPLE_SYNC_ALERT_KEY = "google-people-sync";
 const SEND_ATTEMPT_SETTING_PREFIX = "notification.sendAttempt.";
+const GROUPING_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 function notificationAlertKey(reservationId: string) {
   return `notification-delivery:${reservationId}`;
@@ -179,7 +181,10 @@ export async function sendDueReservationReminders() {
     ? await prisma.reservation.findMany({
         where: {
           startTime: {
-            gte: new Date(Math.min(...upcomingDayRanges.map((range) => range.start.getTime()))),
+            gte: new Date(
+              Math.min(...upcomingDayRanges.map((range) => range.start.getTime()))
+              - GROUPING_LOOKBACK_MS,
+            ),
             lte: new Date(Math.max(...upcomingDayRanges.map((range) => range.end.getTime()))),
           },
           status: "CONFIRMED",
@@ -189,6 +194,29 @@ export async function sendDueReservationReminders() {
       })
     : [];
   const notificationGroups = buildReservationNotificationGroups(groupCandidates);
+
+  const resolveGroupLeader = (reservation: (typeof upcomingReservations)[number]) => {
+    const groupKey = reservationNotificationGroupKey(reservation);
+    const sameDayMembers = groupKey ? notificationGroups.get(groupKey) || [] : [];
+    const sameDayLeader = sameDayMembers[0] || null;
+    if (!sameDayLeader || sameDayLeader.id !== reservation.id) return sameDayLeader;
+
+    const previousExtension = groupCandidates
+      .filter((candidate) => (
+        candidate.id !== reservation.id
+        && isContiguousReservationNotificationExtension(candidate, reservation)
+      ))
+      .sort((left, right) => (
+        right.startTime.getTime() - left.startTime.getTime()
+        || right.id.localeCompare(left.id)
+      ))[0];
+    if (!previousExtension) return sameDayLeader;
+
+    const previousGroupKey = reservationNotificationGroupKey(previousExtension);
+    return previousGroupKey
+      ? notificationGroups.get(previousGroupKey)?.[0] || previousExtension
+      : previousExtension;
+  };
 
   const results = [];
   let sentCount = 0;
@@ -207,7 +235,7 @@ export async function sendDueReservationReminders() {
     const followerIds = groupMembers.slice(1).map((member) => member.id);
     if (followerIds.length === 0) return;
 
-    const skipReason = `같은 날·같은 방·동일 고객 안내문자는 첫 예약 ${formatKstStartTime(leader.startTime)} 기준으로 한 번만 발송합니다.`;
+    const skipReason = `같은 고객·같은 공간의 연속 예약 안내문자는 첫 예약 ${formatKstStartTime(leader.startTime)} 기준으로 한 번만 발송합니다.`;
     const skipped = await prisma.reservation.updateMany({
       where: {
         id: { in: followerIds },
@@ -228,11 +256,9 @@ export async function sendDueReservationReminders() {
 
   const phoneReadyReservations = [];
   for (const reservation of upcomingReservations) {
-    const groupKey = reservationNotificationGroupKey(reservation);
-    const groupMembers = groupKey ? notificationGroups.get(groupKey) || [] : [];
-    const groupLeader = groupMembers[0] || null;
+    const groupLeader = resolveGroupLeader(reservation);
     if (groupLeader && groupLeader.id !== reservation.id) {
-      const skipReason = `같은 날·같은 방·동일 고객 안내문자는 첫 예약 ${formatKstStartTime(groupLeader.startTime)} 기준으로 한 번만 발송합니다.`;
+      const skipReason = `같은 고객·같은 공간의 연속 예약 안내문자는 첫 예약 ${formatKstStartTime(groupLeader.startTime)} 기준으로 한 번만 발송합니다.`;
       const skipped = await prisma.reservation.updateMany({
         where: {
           id: reservation.id,
