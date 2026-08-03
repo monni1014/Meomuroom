@@ -3,6 +3,7 @@ import {
   buildSynergyBookingPushes,
   buildSynergySpacecloudPushes,
   detectSynergyOneHourReschedules,
+  shouldSuppressSynergyNewBookingPush,
 } from "../src/lib/competitor-booking-push-policy.ts";
 import { selectPushSubscriptions } from "../src/lib/push-subscription-selection.ts";
 
@@ -106,5 +107,47 @@ assert.deepEqual(buildSynergySpacecloudPushes([
     tag: "competitor-synergy-spacecloud-cancelled-2026-08-04-18-20",
   },
 ]);
+
+const augustKst = new Date("2026-08-03T03:00:00.000Z");
+assert.equal(
+  shouldSuppressSynergyNewBookingPush(
+    { tag: "competitor-synergy-booked-2026-08-03-13-15" },
+    augustKst,
+  ),
+  true,
+  "Synergy Naver new booking pushes must be paused during August KST",
+);
+assert.equal(
+  shouldSuppressSynergyNewBookingPush(
+    { tag: "competitor-synergy-spacecloud-booked-2026-08-03-13-15" },
+    augustKst,
+  ),
+  true,
+  "Synergy SpaceCloud new booking pushes must be paused during August KST",
+);
+assert.equal(
+  shouldSuppressSynergyNewBookingPush(
+    { tag: "competitor-synergy-rescheduled-2026-08-03-14-16-13-15" },
+    augustKst,
+  ),
+  false,
+  "Synergy reschedule alerts must remain enabled",
+);
+assert.equal(
+  shouldSuppressSynergyNewBookingPush(
+    { tag: "competitor-synergy-spacecloud-cancelled-2026-08-03-13-15" },
+    augustKst,
+  ),
+  false,
+  "Synergy SpaceCloud cancellation alerts must remain enabled",
+);
+assert.equal(
+  shouldSuppressSynergyNewBookingPush(
+    { tag: "competitor-synergy-booked-2026-09-01-13-15" },
+    new Date("2026-08-31T15:00:00.000Z"),
+  ),
+  false,
+  "Synergy new booking pushes must resume at 2026-09-01 00:00 KST",
+);
 
 console.log("Competitor booking push tests passed.");

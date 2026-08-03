@@ -122,6 +122,27 @@ export type SynergyBookingPush = {
   tag: string;
 };
 
+// 2026년 8월에는 시너지 신규 예약 알림만 잠시 끕니다.
+// 경쟁사 수집, 화면의 N 표시, 취소·시간 변경·오류 알림은 계속 유지합니다.
+export const SYNERGY_NEW_BOOKING_PUSH_PAUSE_START = new Date("2026-07-31T15:00:00.000Z");
+export const SYNERGY_NEW_BOOKING_PUSH_RESUME_AT = new Date("2026-08-31T15:00:00.000Z");
+
+export function shouldSuppressSynergyNewBookingPush(
+  push: Pick<SynergyBookingPush, "tag">,
+  now = new Date(),
+) {
+  const isNewBooking = (
+    push.tag.startsWith("competitor-synergy-booked-")
+    || push.tag.startsWith("competitor-synergy-spacecloud-booked-")
+  );
+
+  return (
+    isNewBooking
+    && now >= SYNERGY_NEW_BOOKING_PUSH_PAUSE_START
+    && now < SYNERGY_NEW_BOOKING_PUSH_RESUME_AT
+  );
+}
+
 function formatHour(hour: number) {
   return `${hour}시`;
 }

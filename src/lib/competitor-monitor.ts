@@ -13,6 +13,7 @@ import { shouldCreateBookingDiscoveryEvent } from "@/lib/competitor-booking-disc
 import {
   buildSynergyBookingPushes,
   buildSynergySpacecloudPushes,
+  shouldSuppressSynergyNewBookingPush,
 } from "@/lib/competitor-booking-push-policy";
 import { competitorCancellationFeeRate } from "@/lib/competitor-cancellation";
 import { prisma } from "@/lib/prisma";
@@ -900,6 +901,12 @@ async function sendSynergyBookingDiscoveryPushes(scanId: string) {
   const pushes = buildSynergyBookingPushes(events);
 
   for (const push of pushes) {
+    if (shouldSuppressSynergyNewBookingPush(push)) {
+      console.log(
+        `[Competitor] Synergy new booking push paused until 2026-09-01 00:00 KST: tag=${push.tag}`,
+      );
+      continue;
+    }
     const result = await sendPushNotification(push, { excludeAppleWebPush: true });
     console.log(
       `[Competitor] Synergy booking push sent: tag=${push.tag}, sent=${result.sent}, failed=${result.failed}, apple-excluded=true`,
@@ -926,6 +933,12 @@ async function sendSynergySpacecloudPushes(scanId: string) {
   const pushes = buildSynergySpacecloudPushes(events);
 
   for (const push of pushes) {
+    if (shouldSuppressSynergyNewBookingPush(push)) {
+      console.log(
+        `[Competitor] Synergy SpaceCloud new booking push paused until 2026-09-01 00:00 KST: tag=${push.tag}`,
+      );
+      continue;
+    }
     const result = await sendPushNotification(push, { excludeAppleWebPush: true });
     console.log(
       `[Competitor] Synergy SpaceCloud push sent: tag=${push.tag}, sent=${result.sent}, failed=${result.failed}, apple-excluded=true`,
