@@ -1236,6 +1236,8 @@ export default function CompetitorsView({
                                 && mobileTimelineSelection.dateKey === dateKey
                                 && hour >= mobileTimelineSelection.startHour
                                 && hour < mobileTimelineSelection.endHour;
+                              const isSelectableBooking = cell.signature.startsWith("closed:")
+                                || cell.signature.startsWith("manual:");
                               const isUnreadBooking = mobileUnreadBookingKeys.has(`${competitor.id}|${dateKey}|${hour}`);
                               return (
                                 <button
@@ -1243,14 +1245,16 @@ export default function CompetitorsView({
                                   type="button"
                                   title={`${competitor.displayName} ${format(day, "M월 d일")} ${hour}시 · ${cell.status}${isUnreadBooking ? " · 신규 예약" : ""}`}
                                   aria-label={`${competitor.displayName} ${format(day, "M월 d일")} ${hour}시 ${cell.status}${isUnreadBooking ? " 신규 예약" : ""}`}
-                                  onClick={() => setMobileTimelineSelection(mobileTimelineSelectionForHour(
-                                    competitor.id,
-                                    day,
-                                    hour,
-                                    snapshot,
-                                    manualCells,
-                                    cancellations,
-                                  ))}
+                                  onClick={() => setMobileTimelineSelection(isSelectableBooking
+                                    ? mobileTimelineSelectionForHour(
+                                      competitor.id,
+                                      day,
+                                      hour,
+                                      snapshot,
+                                      manualCells,
+                                      cancellations,
+                                    )
+                                    : null)}
                                   className={cn(
                                     "relative h-2.5 border-r border-white/60 last:border-r-0",
                                     cell.className,
