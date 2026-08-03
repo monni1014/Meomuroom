@@ -1276,8 +1276,7 @@ export default function CompetitorsView({
             })}
           </div>
 
-          <div className="mt-2 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-700">
-            <span>{currentMonth}월 총 예약시간</span>
+          <div className="mt-2 flex items-center rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-700">
             <span>{mobileMonthlyTotalHours}시간</span>
           </div>
         </div>
