@@ -489,7 +489,9 @@ export default function CompetitorsView({
   const [isLandscapeMode, setIsLandscapeMode] = useState(false);
   const [orientationHint, setOrientationHint] = useState<string | null>(null);
   const [showMobileEditor, setShowMobileEditor] = useState(false);
-  const [mobileCompetitorGroup, setMobileCompetitorGroup] = useState<"synergy" | "triground">("synergy");
+  const [mobileCompetitorGroup, setMobileCompetitorGroup] = useState<
+    "synergy" | "triground-a" | "triground-b"
+  >("synergy");
   const [mobileTimelineSelection, setMobileTimelineSelection] = useState<MobileTimelineSelection | null>(null);
 
   useEffect(() => {
@@ -535,9 +537,9 @@ export default function CompetitorsView({
   const visibleCompetitors = competitorFilter === "all"
     ? COMPETITORS
     : COMPETITORS.filter((competitor) => competitor.id === competitorFilter);
-  const mobileVisibleCompetitors = mobileCompetitorGroup === "synergy"
-    ? COMPETITORS.filter((competitor) => competitor.id === "synergy")
-    : COMPETITORS.filter((competitor) => competitor.id.startsWith("triground-"));
+  const mobileVisibleCompetitors = COMPETITORS.filter(
+    (competitor) => competitor.id === mobileCompetitorGroup,
+  );
   const unreadEvents = snapshots.unreadEvents || [];
   const unreadBookings = unreadEvents.filter((event) => event.eventType === "BOOKED");
   const unreadCancellations = unreadEvents.filter((event) => event.eventType === "CANCELLED");
@@ -1081,10 +1083,11 @@ export default function CompetitorsView({
               </select>
             </label>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-1.5">
             {([
               { id: "synergy", label: "시너지" },
-              { id: "triground", label: "트라이그라운드" },
+              { id: "triground-a", label: "트라이그라운드 A" },
+              { id: "triground-b", label: "트라이그라운드 B" },
             ] as const).map(({ id, label }) => {
               return (
                 <button
@@ -1095,7 +1098,7 @@ export default function CompetitorsView({
                     setMobileTimelineSelection(null);
                   }}
                   className={cn(
-                    "h-10 rounded-xl border px-2 text-xs font-black transition-colors",
+                    "min-h-10 rounded-xl border px-1.5 py-2 text-[11px] font-black leading-tight transition-colors",
                     mobileCompetitorGroup === id
                       ? "border-indigo-600 bg-indigo-600 text-white"
                       : "border-slate-200 bg-white text-slate-600",
