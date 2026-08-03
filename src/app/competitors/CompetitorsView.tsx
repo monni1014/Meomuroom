@@ -310,7 +310,7 @@ function slotClass(slot: SlotSnapshot | undefined, isWeekend: boolean) {
     return isWeekend ? "bg-[#FCE4D6] text-slate-950" : "bg-[#DDEBF7] text-slate-950";
   }
   if (slot?.state === "policy_closed") return "bg-slate-100 text-slate-400";
-  if (slot?.state === "need_check") return "bg-rose-100 text-rose-700";
+  if (slot?.state === "need_check") return "bg-[#F87171] text-white";
   return "bg-white text-slate-500";
 }
 
@@ -400,7 +400,7 @@ function mobileTimelineCell(
     status = "시스템 마감";
   } else if (visibleSlot?.state === "need_check") {
     signature = "need-check";
-    className = "bg-rose-200";
+    className = "bg-[#F87171]";
     status = "확인 필요";
   } else if (competitorId.startsWith("triground-") && hour >= 22) {
     signature = "outside-operating-hours";
@@ -1169,10 +1169,12 @@ export default function CompetitorsView({
             })}
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-bold text-slate-500">
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#DDEBF7] ring-1 ring-slate-300" />네이버</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#2F75B5]" />스클</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#DDEBF7] ring-1 ring-slate-300" />네이버 평일</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#FCE4D6] ring-1 ring-orange-200" />네이버 주말</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#2F75B5]" />스클 평일</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#C65911]" />스클 주말</span>
             <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-[#BFBFBF]" />취소</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-rose-200" />확인 필요</span>
+            <span className="inline-flex items-center gap-1 font-black text-red-600"><i className="h-2.5 w-2.5 rounded-sm bg-[#F87171]" />확인 필요</span>
           </div>
         </div>
 
