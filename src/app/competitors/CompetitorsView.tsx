@@ -590,6 +590,23 @@ export default function CompetitorsView({
   const layoutStyle = {
     "--competitor-header-top": competitorFilter === "all" ? "0px" : `${controlsHeight + 8}px`,
   } as CSSProperties;
+  const mobileMonthlyTotalHours = monthDays.reduce((monthTotal, day) => {
+    const dateKey = format(day, "yyyy-MM-dd");
+    const dayTotal = mobileVisibleCompetitors.reduce((total, competitor) => {
+      const snapshot = snapshots.days[competitor.id]?.[dateKey];
+      const cancellations = snapshots.cancellations.filter((event) => (
+        event.competitorId === competitor.id && event.dateKey === dateKey
+      ));
+      return total + mobileTimelineBookingSummary(
+        competitor.id,
+        day,
+        snapshot,
+        manualCells,
+        cancellations,
+      ).totalHours;
+    }, 0);
+    return monthTotal + dayTotal;
+  }, 0);
 
   const requestManualCells = useCallback(async (year: number, month: number) => {
     const response = await fetch(`/api/manual-table-cells?tableId=competitors&year=${year}&month=${month}`, {
@@ -1160,18 +1177,13 @@ export default function CompetitorsView({
         </div>
 
         <div className="p-2.5">
-          <div className="grid grid-cols-[34px_1fr] items-end gap-1 border-b border-slate-200 pb-1">
+          <div className="grid grid-cols-[34px_42px_1fr] items-end gap-1 border-b border-slate-200 pb-1">
             <div className="text-center text-[9px] font-black text-slate-400">날짜</div>
-            <div>
-              <div className="mb-0.5 flex items-center justify-between px-0.5 text-[8px] font-black text-slate-400">
-                <span>예약시간</span>
-                <span>총 예약시간</span>
-              </div>
-              <div className="grid grid-cols-9 text-[8px] font-black text-slate-400">
-                {[8, 10, 12, 14, 16, 18, 20, 22, 24].map((hour) => (
-                  <span key={hour} className="text-center">{hour}</span>
-                ))}
-              </div>
+            <div className="text-center text-[8px] font-black leading-tight text-slate-400">예약<br />합계</div>
+            <div className="grid grid-cols-9 text-[8px] font-black text-slate-400">
+              {[8, 10, 12, 14, 16, 18, 20, 22, 24].map((hour) => (
+                <span key={hour} className="text-center">{hour}</span>
+              ))}
             </div>
           </div>
 
@@ -1179,10 +1191,26 @@ export default function CompetitorsView({
             {monthDays.map((day) => {
               const dateKey = format(day, "yyyy-MM-dd");
               const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+              const dailyTotalHours = mobileVisibleCompetitors.reduce((total, competitor) => {
+                const snapshot = snapshots.days[competitor.id]?.[dateKey];
+                const cancellations = snapshots.cancellations.filter((event) => (
+                  event.competitorId === competitor.id && event.dateKey === dateKey
+                ));
+                return total + mobileTimelineBookingSummary(
+                  competitor.id,
+                  day,
+                  snapshot,
+                  manualCells,
+                  cancellations,
+                ).totalHours;
+              }, 0);
               return (
-                <div key={dateKey} className="grid min-h-8 grid-cols-[34px_1fr] items-center gap-1 py-1">
+                <div key={dateKey} className="grid min-h-8 grid-cols-[34px_42px_1fr] items-center gap-1 py-1">
                   <div className={cn("text-center text-[10px] font-black text-slate-700", isWeekend && "text-rose-500")}>
                     {format(day, "d")}
+                  </div>
+                  <div className="text-center text-[9px] font-black text-slate-600">
+                    {dailyTotalHours > 0 ? `${dailyTotalHours}시간` : "-"}
                   </div>
                   <div className="space-y-1">
                     {mobileVisibleCompetitors.map((competitor) => {
@@ -1190,24 +1218,8 @@ export default function CompetitorsView({
                       const cancellations = snapshots.cancellations.filter((event) => (
                         event.competitorId === competitor.id && event.dateKey === dateKey
                       ));
-                      const bookingSummary = mobileTimelineBookingSummary(
-                        competitor.id,
-                        day,
-                        snapshot,
-                        manualCells,
-                        cancellations,
-                      );
-                      const bookingRangeLabel = bookingSummary.ranges
-                        .map((range) => `${range.startHour}~${range.endHour}`)
-                        .join(", ");
                       return (
                         <div key={`${dateKey}-${competitor.id}`}>
-                          <div className="mb-0.5 flex min-w-0 items-center justify-between gap-2 px-0.5 text-[8px] font-bold text-slate-500">
-                            <span className="truncate">{bookingRangeLabel || "예약 없음"}</span>
-                            <span className="shrink-0 font-black text-slate-700">
-                              {bookingSummary.totalHours > 0 ? `총 ${bookingSummary.totalHours}시간` : "-"}
-                            </span>
-                          </div>
                           <div className="grid grid-cols-[repeat(17,minmax(0,1fr))] overflow-hidden rounded-sm border border-slate-200">
                             {HOURS.map((hour) => {
                               const cell = mobileTimelineCell(
@@ -1262,6 +1274,11 @@ export default function CompetitorsView({
                 </div>
               );
             })}
+          </div>
+
+          <div className="mt-2 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-700">
+            <span>{currentMonth}월 총 예약시간</span>
+            <span>{mobileMonthlyTotalHours}시간</span>
           </div>
         </div>
 
