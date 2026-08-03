@@ -1276,8 +1276,8 @@ export default function CompetitorsView({
             })}
           </div>
 
-          <div className="mt-2 flex items-center rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-700">
-            <span>{mobileMonthlyTotalHours}시간</span>
+          <div className="mt-2 grid grid-cols-[34px_52px_1fr] items-center gap-1 rounded-lg bg-slate-50 py-2 text-xs font-black text-slate-700">
+            <span className="col-start-2 text-center">{mobileMonthlyTotalHours}시간</span>
           </div>
         </div>
 
