@@ -544,6 +544,11 @@ export default function CompetitorsView({
   const unreadBookings = unreadEvents.filter((event) => event.eventType === "BOOKED");
   const unreadCancellations = unreadEvents.filter((event) => event.eventType === "CANCELLED");
   const unreadReschedules = unreadEvents.filter((event) => event.eventType === "RESCHEDULED");
+  const mobileUnreadBookingKeys = useMemo(() => new Set(
+    unreadBookings.map((event) => (
+      `${event.competitorId}|${event.dateKey}|${event.startHour + Math.floor((event.endHour - event.startHour) / 2)}`
+    )),
+  ), [unreadBookings]);
   const evidence = snapshots.evidence || [];
   const layoutStyle = {
     "--competitor-header-top": competitorFilter === "all" ? "0px" : `${controlsHeight + 8}px`,
@@ -1171,12 +1176,13 @@ export default function CompetitorsView({
                                 && mobileTimelineSelection.dateKey === dateKey
                                 && hour >= mobileTimelineSelection.startHour
                                 && hour < mobileTimelineSelection.endHour;
+                              const isUnreadBooking = mobileUnreadBookingKeys.has(`${competitor.id}|${dateKey}|${hour}`);
                               return (
                                 <button
                                   key={hour}
                                   type="button"
-                                  title={`${competitor.displayName} ${format(day, "M월 d일")} ${hour}시 · ${cell.status}`}
-                                  aria-label={`${competitor.displayName} ${format(day, "M월 d일")} ${hour}시 ${cell.status}`}
+                                  title={`${competitor.displayName} ${format(day, "M월 d일")} ${hour}시 · ${cell.status}${isUnreadBooking ? " · 신규 예약" : ""}`}
+                                  aria-label={`${competitor.displayName} ${format(day, "M월 d일")} ${hour}시 ${cell.status}${isUnreadBooking ? " 신규 예약" : ""}`}
                                   onClick={() => setMobileTimelineSelection(mobileTimelineSelectionForHour(
                                     competitor.id,
                                     day,
@@ -1186,11 +1192,20 @@ export default function CompetitorsView({
                                     cancellations,
                                   ))}
                                   className={cn(
-                                    "h-2.5 border-r border-white/60 last:border-r-0",
+                                    "relative h-2.5 border-r border-white/60 last:border-r-0",
                                     cell.className,
                                     isSelected && "relative z-10 ring-2 ring-inset ring-indigo-600",
                                   )}
-                                />
+                                >
+                                  {isUnreadBooking && (
+                                    <span
+                                      aria-hidden="true"
+                                      className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-emerald-600 text-[7px] font-black leading-none text-white"
+                                    >
+                                      N
+                                    </span>
+                                  )}
+                                </button>
                               );
                             })}
                           </div>
