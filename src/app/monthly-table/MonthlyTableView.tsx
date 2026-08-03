@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
 import { ChevronLeft, ChevronRight, MessageSquareText, RefreshCw, Save, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,11 @@ import {
 } from "@/lib/manual-table-colors";
 import { useDataChangePolling } from "@/hooks/useDataChangePolling";
 import { shouldDisplayReservationInMonthlyTable } from "@/lib/monthly-table-reservations";
+import {
+  getMonthlyTableDisplayHour,
+  getMonthlyTableOperationalDateKey,
+  isMonthlyTableCellWeekend,
+} from "@/lib/monthly-table-operational-time";
 
 interface UsageLog {
   id: string;
@@ -84,9 +89,7 @@ const FIRST_BUSINESS_YEAR = 2025;
 const ROOM3_GRAND_OPEN_DATE = "2026-07-15";
 
 function startHour(reservation: Reservation) {
-  const start = new Date(reservation.startTime);
-  const hour = start.getHours() + start.getMinutes() / 60;
-  return hour < 2 ? hour + 24 : hour;
+  return getMonthlyTableDisplayHour(new Date(reservation.startTime));
 }
 
 function endHour(reservation: Reservation) {
@@ -579,7 +582,9 @@ export default function MonthlyTableView() {
             const roomReservations = reservations
               .filter((reservation) => reservation.roomName === room)
               .filter(shouldDisplayReservationInMonthlyTable)
-              .filter((reservation) => isSameMonth(new Date(reservation.startTime), currentDate));
+              .filter((reservation) => getMonthlyTableOperationalDateKey(new Date(reservation.startTime)).startsWith(
+                `${currentYear}-${String(currentMonth).padStart(2, "0")}-`,
+              ));
             const monthHours = roomReservations
               .filter(countsAsTime)
               .reduce((sum, reservation) => sum + durationHours(reservation), 0);
@@ -591,29 +596,30 @@ export default function MonthlyTableView() {
                 : "bg-orange-100 text-orange-950";
 
             return (
-              <section key={room} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className={cn("border-b border-slate-300 px-4 py-2 text-center text-sm font-black", roomHeaderClass)}>
+              <section key={room} className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className={cn("rounded-t-2xl border-b border-slate-300 px-4 py-2 text-center text-sm font-black", roomHeaderClass)}>
                   {room}
                 </div>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto xl:overflow-visible">
                   <table className={MONTHLY_GRID_TABLE_CLASS}>
                     <MonthlyGridColGroup hours={HOURS} />
                     <thead>
                       <tr className={MONTHLY_GRID_HEADER_ROW_CLASS}>
-                        <th className="sticky left-0 z-20 border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle">날짜</th>
-                        <th className={cn("sticky z-20 border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle", MONTHLY_GRID_TOTAL_LEFT_CLASS)}>시간 합계</th>
+                        <th className="sticky left-0 top-auto z-30 border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle xl:top-0">날짜</th>
+                        <th className={cn("sticky top-auto z-30 border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle xl:top-0", MONTHLY_GRID_TOTAL_LEFT_CLASS)}>시간 합계</th>
                         {HOURS.map((hour) => (
-                          <th key={hour} className="border border-slate-300 px-1 py-0.5 text-center align-middle">
+                          <th key={hour} className="border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle xl:sticky xl:top-0 xl:z-20">
                             {hour}
                           </th>
                         ))}
-                        <th className={cn("sticky right-0 z-20 border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle", MONTHLY_GRID_END_DIVIDER_CLASS)}>일 매출액</th>
+                        <th className={cn("sticky right-0 top-auto z-30 border border-slate-300 bg-emerald-50 px-1 py-0.5 text-center align-middle xl:top-0", MONTHLY_GRID_END_DIVIDER_CLASS)}>일 매출액</th>
                       </tr>
                     </thead>
                     <tbody>
                       {monthDays.map((day) => {
+                        const dateKey = format(day, "yyyy-MM-dd");
                         const dayReservations = roomReservations
-                          .filter((reservation) => isSameDay(new Date(reservation.startTime), day))
+                          .filter((reservation) => getMonthlyTableOperationalDateKey(new Date(reservation.startTime)) === dateKey)
                           .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
                         const dayHours = dayReservations
                           .filter(countsAsTime)
@@ -622,7 +628,7 @@ export default function MonthlyTableView() {
                         const dayRevenueTitle = revenueTooltip(dayReservations);
                         const isWeekend = day.getDay() === 0 || day.getDay() === 6;
                         const isRoom3GrandOpening = room === "머무룸3"
-                          && format(day, "yyyy-MM-dd") === ROOM3_GRAND_OPEN_DATE;
+                          && dateKey === ROOM3_GRAND_OPEN_DATE;
                         const grandOpeningLabelStartHour = isRoom3GrandOpening
                           ? HOURS.slice(0, -1)
                               .filter((hour, index) => (
@@ -642,6 +648,7 @@ export default function MonthlyTableView() {
                               {dayHours > 0 ? Number(dayHours.toFixed(1)) : "-"}
                             </td>
                             {HOURS.map((hour) => {
+                              const isCellWeekend = isMonthlyTableCellWeekend(dateKey, hour);
                               const cellReservations = overlappingReservationsForCell(dayReservations, hour);
                               const primary = cellReservations[0];
                               const label = primary ? cellLabel(primary, hour) : "";
@@ -687,7 +694,7 @@ export default function MonthlyTableView() {
                                   className={cn(
                                     "relative h-6 overflow-visible border border-slate-300 p-0 text-center align-middle font-semibold",
                                     manualClass || (primary
-                                      ? cellStyle(primary, isWeekend)
+                                      ? cellStyle(primary, isCellWeekend)
                                       : isRoom3GrandOpening
                                         ? "bg-orange-100 text-orange-950"
                                         : "bg-white text-slate-500"),
