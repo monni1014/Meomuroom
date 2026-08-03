@@ -410,7 +410,7 @@ function mobileTimelineCell(
     status = "확인 필요";
   } else if (competitorId.startsWith("triground-") && hour >= 22) {
     signature = "outside-operating-hours";
-    className = "bg-white";
+    className = "bg-slate-50";
     status = "운영시간 외";
   } else if (visibleSlot?.state === "not_collected") {
     signature = "not-collected";
