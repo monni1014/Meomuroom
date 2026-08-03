@@ -408,6 +408,10 @@ function mobileTimelineCell(
     signature = "need-check";
     className = "bg-rose-200";
     status = "확인 필요";
+  } else if (competitorId.startsWith("triground-") && hour >= 22) {
+    signature = "outside-operating-hours";
+    className = "bg-white";
+    status = "운영시간 외";
   } else if (visibleSlot?.state === "not_collected") {
     signature = "not-collected";
     className = "bg-slate-100";
