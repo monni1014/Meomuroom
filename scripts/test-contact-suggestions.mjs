@@ -34,7 +34,7 @@ const contacts = buildContactSuggestions([
   { name: "번호없음", phone: null, usedAt: new Date(), context: "예약" },
 ]);
 
-assert.equal(contacts.length, 3, "마스킹·미지정·전화번호 없는 기록은 제외하고 중복 연락처는 합쳐야 합니다.");
+assert.equal(contacts.length, 4, "마스킹·미지정 기록은 제외하고 전화번호 없는 이름 기록은 추천에 남겨야 합니다.");
 
 const exactMatches = findContactSuggestions(contacts, "이동주");
 assert.equal(exactMatches.length, 2, "같은 이름에 다른 번호가 있으면 두 번호 모두 제안해야 합니다.");
@@ -43,6 +43,11 @@ assert.deepEqual(exactMatches[0].contexts.sort(), ["머무룸1 예약", "청소"
 
 const partialMatches = findContactSuggestions(contacts, "이동");
 assert.equal(partialMatches.length, 3, "이름 일부만 입력해도 관련 연락처를 제안해야 합니다.");
+
+const nameOnlyMatches = findContactSuggestions(contacts, "번호없");
+assert.equal(nameOnlyMatches.length, 1, "전화번호가 없어도 이전에 입력한 이름은 제안해야 합니다.");
+assert.equal(nameOnlyMatches[0].name, "번호없음");
+assert.equal(nameOnlyMatches[0].phone, "");
 
 assert.deepEqual(findContactSuggestions(contacts, ""), []);
 

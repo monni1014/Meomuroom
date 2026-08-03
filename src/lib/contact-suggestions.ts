@@ -56,9 +56,9 @@ export function buildContactSuggestions(entries: ContactHistoryEntry[]) {
 
   for (const entry of entries) {
     const name = normalizeName(entry.name);
-    if (!isUsableName(name) || !isValidMobilePhone(entry.phone)) continue;
+    if (!isUsableName(name)) continue;
 
-    const normalizedPhone = normalizePhone(entry.phone);
+    const normalizedPhone = isValidMobilePhone(entry.phone) ? normalizePhone(entry.phone) : "";
     const key = `${comparableName(name)}\0${normalizedPhone}`;
     const timestamp = usedAtTimestamp(entry.usedAt);
     const context = normalizeName(entry.context);
@@ -67,7 +67,7 @@ export function buildContactSuggestions(entries: ContactHistoryEntry[]) {
     if (!existing) {
       contacts.set(key, {
         name,
-        phone: formatPhone(normalizedPhone),
+        phone: normalizedPhone ? formatPhone(normalizedPhone) : "",
         lastUsedAt: timestamp,
         contexts: context ? [context] : [],
       });
@@ -81,7 +81,15 @@ export function buildContactSuggestions(entries: ContactHistoryEntry[]) {
     if (context && !existing.contexts.includes(context)) existing.contexts.push(context);
   }
 
-  return Array.from(contacts.values()).sort((left, right) => right.lastUsedAt - left.lastUsedAt);
+  const contactsWithPhones = new Set(
+    Array.from(contacts.values())
+      .filter((contact) => Boolean(contact.phone))
+      .map((contact) => comparableName(contact.name)),
+  );
+
+  return Array.from(contacts.values())
+    .filter((contact) => Boolean(contact.phone) || !contactsWithPhones.has(comparableName(contact.name)))
+    .sort((left, right) => right.lastUsedAt - left.lastUsedAt);
 }
 
 export function findContactSuggestions(

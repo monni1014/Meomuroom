@@ -271,7 +271,9 @@ function ContactSuggestionMenu({
               </span>
             )}
           </span>
-          <span className="shrink-0 text-sm font-semibold text-slate-600">{suggestion.phone}</span>
+          <span className="shrink-0 text-right text-sm font-semibold text-slate-600">
+            {suggestion.phone || <span className="text-[11px] text-slate-400">전화번호 기록 없음</span>}
+          </span>
         </button>
       ))}
     </div>
