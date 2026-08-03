@@ -347,12 +347,6 @@ function competitorDisplayName(competitorId: string) {
   return COMPETITORS.find((competitor) => competitor.id === competitorId)?.displayName || competitorId;
 }
 
-function competitorShortName(competitorId: string) {
-  if (competitorId === "synergy") return "시";
-  if (competitorId === "triground-a") return "A";
-  return "B";
-}
-
 function mobileTimelineCell(
   competitorId: string,
   day: Date,
@@ -452,6 +446,45 @@ function mobileTimelineSelectionForHour(
     status: selected.status,
     source: selected.source,
     bookingNumber: selected.bookingNumber,
+  };
+}
+
+function mobileTimelineBookingSummary(
+  competitorId: string,
+  day: Date,
+  snapshot: CompetitorDaySnapshot | undefined,
+  manualCells: Record<string, CompetitorManualCellData>,
+  cancellations: CancellationSnapshot[],
+) {
+  const ranges: Array<{ startHour: number; endHour: number }> = [];
+  let rangeStart: number | null = null;
+  let previousSignature: string | null = null;
+
+  for (const hour of HOURS) {
+    const cell = mobileTimelineCell(competitorId, day, hour, snapshot, manualCells, cancellations);
+    const isBooked = cell.signature.startsWith("closed:") || cell.signature.startsWith("manual:");
+
+    if (!isBooked) {
+      if (rangeStart !== null) ranges.push({ startHour: rangeStart, endHour: hour });
+      rangeStart = null;
+      previousSignature = null;
+      continue;
+    }
+
+    if (rangeStart === null) {
+      rangeStart = hour;
+    } else if (previousSignature !== cell.signature) {
+      ranges.push({ startHour: rangeStart, endHour: hour });
+      rangeStart = hour;
+    }
+    previousSignature = cell.signature;
+  }
+
+  if (rangeStart !== null) ranges.push({ startHour: rangeStart, endHour: HOURS.at(-1)! + 1 });
+
+  return {
+    ranges,
+    totalHours: ranges.reduce((total, range) => total + range.endHour - range.startHour, 0),
   };
 }
 
@@ -1129,8 +1162,11 @@ export default function CompetitorsView({
         <div className="p-2.5">
           <div className="grid grid-cols-[34px_1fr] items-end gap-1 border-b border-slate-200 pb-1">
             <div className="text-center text-[9px] font-black text-slate-400">날짜</div>
-            <div className="grid grid-cols-[18px_1fr] gap-1">
-              <div />
+            <div>
+              <div className="mb-0.5 flex items-center justify-between px-0.5 text-[8px] font-black text-slate-400">
+                <span>예약시간</span>
+                <span>총 예약시간</span>
+              </div>
               <div className="grid grid-cols-9 text-[8px] font-black text-slate-400">
                 {[8, 10, 12, 14, 16, 18, 20, 22, 24].map((hour) => (
                   <span key={hour} className="text-center">{hour}</span>
@@ -1154,18 +1190,24 @@ export default function CompetitorsView({
                       const cancellations = snapshots.cancellations.filter((event) => (
                         event.competitorId === competitor.id && event.dateKey === dateKey
                       ));
+                      const bookingSummary = mobileTimelineBookingSummary(
+                        competitor.id,
+                        day,
+                        snapshot,
+                        manualCells,
+                        cancellations,
+                      );
+                      const bookingRangeLabel = bookingSummary.ranges
+                        .map((range) => `${range.startHour}~${range.endHour}`)
+                        .join(", ");
                       return (
-                        <div key={`${dateKey}-${competitor.id}`} className="grid grid-cols-[18px_1fr] items-center gap-1">
-                          <span className={cn(
-                            "text-center text-[8px] font-black",
-                            competitor.id === "synergy"
-                              ? "text-violet-700"
-                              : competitor.id === "triground-a"
-                                ? "text-emerald-700"
-                                : "text-sky-700",
-                          )}>
-                            {competitorShortName(competitor.id)}
-                          </span>
+                        <div key={`${dateKey}-${competitor.id}`}>
+                          <div className="mb-0.5 flex min-w-0 items-center justify-between gap-2 px-0.5 text-[8px] font-bold text-slate-500">
+                            <span className="truncate">{bookingRangeLabel || "예약 없음"}</span>
+                            <span className="shrink-0 font-black text-slate-700">
+                              {bookingSummary.totalHours > 0 ? `총 ${bookingSummary.totalHours}시간` : "-"}
+                            </span>
+                          </div>
                           <div className="grid grid-cols-[repeat(17,minmax(0,1fr))] overflow-hidden rounded-sm border border-slate-200">
                             {HOURS.map((hour) => {
                               const cell = mobileTimelineCell(
