@@ -1177,9 +1177,9 @@ export default function CompetitorsView({
         </div>
 
         <div className="p-2.5">
-          <div className="grid grid-cols-[34px_42px_1fr] items-end gap-1 border-b border-slate-200 pb-1">
+          <div className="grid grid-cols-[34px_52px_1fr] items-end gap-1 border-b border-slate-200 pb-1">
             <div className="text-center text-[9px] font-black text-slate-400">날짜</div>
-            <div className="text-center text-[8px] font-black leading-tight text-slate-400">예약<br />합계</div>
+            <div className="text-center text-[8px] font-black text-slate-400">예약 합계</div>
             <div className="grid grid-cols-9 text-[8px] font-black text-slate-400">
               {[8, 10, 12, 14, 16, 18, 20, 22, 24].map((hour) => (
                 <span key={hour} className="text-center">{hour}</span>
@@ -1205,12 +1205,12 @@ export default function CompetitorsView({
                 ).totalHours;
               }, 0);
               return (
-                <div key={dateKey} className="grid min-h-8 grid-cols-[34px_42px_1fr] items-center gap-1 py-1">
+                <div key={dateKey} className="grid min-h-8 grid-cols-[34px_52px_1fr] items-center gap-1 py-1">
                   <div className={cn("text-center text-[10px] font-black text-slate-700", isWeekend && "text-rose-500")}>
                     {format(day, "d")}
                   </div>
                   <div className="text-center text-[9px] font-black text-slate-600">
-                    {dailyTotalHours > 0 ? `${dailyTotalHours}시간` : "-"}
+                    {dailyTotalHours > 0 ? dailyTotalHours : "-"}
                   </div>
                   <div className="space-y-1">
                     {mobileVisibleCompetitors.map((competitor) => {
