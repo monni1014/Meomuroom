@@ -3,7 +3,11 @@ import { rename, rm } from "node:fs/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
 import { optionalEnv } from "./lib/env.mjs";
-import { ensureParentDir, spaceCloudStorageStatePath } from "./lib/paths.mjs";
+import {
+  ensureParentDir,
+  secureAuthFileForService,
+  spaceCloudStorageStatePath,
+} from "./lib/paths.mjs";
 import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { saveScreenshot } from "./lib/screenshot.mjs";
 import { saveSpaceCloudSessionMeta } from "./lib/spacecloud-session.mjs";
@@ -89,6 +93,7 @@ async function main() {
     await context.storageState({ path: temporaryStatePath, indexedDB: true });
     await rm(spaceCloudStorageStatePath, { force: true });
     await rename(temporaryStatePath, spaceCloudStorageStatePath);
+    secureAuthFileForService(spaceCloudStorageStatePath);
     const sessionMeta = saveSpaceCloudSessionMeta({ useProxy });
     console.log(`\nSaved SpaceCloud login session: ${spaceCloudStorageStatePath}`);
     console.log(`SpaceCloud session network: ${sessionMeta.networkMode}`);

@@ -92,6 +92,18 @@ const detailSource = await readFile(
   new URL("../rpa/spacecloud-read-reservation-detail.mjs", import.meta.url),
   "utf8",
 );
+const loginSource = await readFile(
+  new URL("../rpa/spacecloud-login.mjs", import.meta.url),
+  "utf8",
+);
+const autoLoginSource = await readFile(
+  new URL("../rpa/spacecloud-login-auto.mjs", import.meta.url),
+  "utf8",
+);
+const sessionSource = await readFile(
+  new URL("../rpa/lib/spacecloud-session.mjs", import.meta.url),
+  "utf8",
+);
 
 for (const source of [externalSource, detailSource]) {
   assert.match(source, /ensureSpaceCloudAccessToken\(context\)/);
@@ -100,5 +112,8 @@ for (const source of [externalSource, detailSource]) {
 }
 assert.match(externalSource, /Official retry succeeded after/);
 assert.match(externalSource, /await throwIfSpaceCloudMutationFailed/);
+for (const source of [loginSource, autoLoginSource, sessionSource]) {
+  assert.match(source, /secureAuthFileForService/);
+}
 
 console.log("SpaceCloud session refresh tests passed.");

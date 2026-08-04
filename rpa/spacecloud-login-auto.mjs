@@ -1,7 +1,11 @@
 import { launchRpaBrowser, newRpaContext } from "./lib/browser.mjs";
 import { rename, rm } from "node:fs/promises";
 import { optionalEnv } from "./lib/env.mjs";
-import { ensureParentDir, spaceCloudStorageStatePath } from "./lib/paths.mjs";
+import {
+  ensureParentDir,
+  secureAuthFileForService,
+  spaceCloudStorageStatePath,
+} from "./lib/paths.mjs";
 import { saveSpaceCloudSessionMeta } from "./lib/spacecloud-session.mjs";
 
 const CHECK_INTERVAL_MS = 2000;
@@ -66,6 +70,7 @@ async function main() {
         await context.storageState({ path: temporaryStatePath, indexedDB: true });
         await rm(spaceCloudStorageStatePath, { force: true });
         await rename(temporaryStatePath, spaceCloudStorageStatePath);
+        secureAuthFileForService(spaceCloudStorageStatePath);
         saveSpaceCloudSessionMeta({ useProxy: true });
         console.log(`\nVerified SpaceCloud partner API access and saved login session: ${spaceCloudStorageStatePath}`);
         return;

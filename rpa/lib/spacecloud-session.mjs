@@ -8,6 +8,7 @@ import {
 import { randomUUID } from "node:crypto";
 import {
   ensureParentDir,
+  secureAuthFileForService,
   spaceCloudSessionMetaPath,
   spaceCloudStorageStatePath,
 } from "./paths.mjs";
@@ -44,6 +45,7 @@ export function saveSpaceCloudSessionMeta({ useProxy }) {
     savedAt: new Date().toISOString(),
   };
   writeFileSync(spaceCloudSessionMetaPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  secureAuthFileForService(spaceCloudSessionMetaPath);
   return value;
 }
 
@@ -210,6 +212,7 @@ function writeJsonAtomically(filePath, value) {
   } finally {
     rmSync(temporaryPath, { force: true });
   }
+  secureAuthFileForService(filePath);
 }
 
 function recordSessionCheckpoint(session, reason) {
