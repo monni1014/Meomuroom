@@ -7,6 +7,7 @@ import { clearRpaPendingForReservation, RPA_PENDING_MARKER } from "./rpa-reserva
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts";
 import { resolveRpaReservationPhoneState } from "./reservation-phone-lock";
 import { resolveRpaReservationTimeState } from "./reservation-time-lock";
+import { selectReservationMatch } from "./rpa-reservation-match-policy";
 
 const execFileAsync = promisify(execFile);
 const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
@@ -284,10 +285,14 @@ async function clearRpaCheckRequired(reservationId: string, shouldRemove?: (line
   });
 }
 
-function mergeDetail(parsed: ParsedReservation, detail?: SpaceCloudDetailResult | null) {
+function mergeDetail(
+  parsed: ParsedReservation,
+  detail?: SpaceCloudDetailResult | null,
+  existing?: { roomName: string } | null,
+) {
   return {
     source: "spacecloud",
-    roomName: parsed.roomName,
+    roomName: parsed.isCancelled && existing ? existing.roomName : parsed.roomName,
     customerName: pickCustomerName(parsed, detail),
     phone: normalizePhone(detail?.phone),
     startTime: parsed.startTime,
@@ -305,21 +310,31 @@ async function findExistingSpaceCloudReservation(parsed: ParsedReservation, book
     bookingNumber ? toSpaceCloudReservationEmailId(bookingNumber) : null,
   ].filter((value): value is string => Boolean(value));
 
-  return prisma.reservation.findFirst({
+  const candidates = await prisma.reservation.findMany({
     where: {
       source: "spacecloud",
       OR: [
         ...emailIds.map((emailId) => ({ emailId })),
         {
-          roomName: parsed.roomName,
           startTime: parsed.startTime,
           endTime: parsed.endTime,
-          customerName: parsed.customerName,
         },
       ],
     },
     include: { usageLog: true },
     orderBy: { createdAt: "asc" },
+  });
+
+  return selectReservationMatch(candidates, {
+    source: "spacecloud",
+    messageId: parsed.emailId,
+    canonicalEmailId: bookingNumber ? toSpaceCloudReservationEmailId(bookingNumber) : null,
+    roomName: parsed.roomName,
+    customerName: parsed.customerName,
+    startTime: parsed.startTime,
+    endTime: parsed.endTime,
+    isCancelled: Boolean(parsed.isCancelled),
+    allowUniqueCrossRoomCancellation: Boolean(parsed.isCancelled),
   });
 }
 
@@ -392,7 +407,7 @@ export async function processSpaceCloudEmailWithRpa({
     rpaError = "Could not find SpaceCloud host center URL in email.";
   }
 
-  const item = mergeDetail(parsedReservation, detail);
+  const item = mergeDetail(parsedReservation, detail, existing);
   existing = existing || await findExistingSpaceCloudReservation(parsedReservation, bookingNumber);
   const reservationEmailId = bookingNumber
     ? toSpaceCloudReservationEmailId(bookingNumber)

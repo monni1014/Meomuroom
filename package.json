@@ -82,6 +82,7 @@
     "test:guide-notification-exclusion": "node --experimental-strip-types scripts/test-guide-notification-exclusion.mjs",
     "test:reservation-deletion-log": "node --experimental-strip-types scripts/test-reservation-deletion-log.mjs",
     "test:dashboard-cancellations": "node --experimental-strip-types scripts/test-dashboard-cancellation-events.mjs",
+    "test:rpa-reservation-match": "node --experimental-strip-types scripts/test-rpa-reservation-match-policy.mjs",
     "test:dashboard-calendar-schedules": "node --experimental-strip-types scripts/test-dashboard-calendar-schedule-events.mjs"
   },
   "dependencies": {

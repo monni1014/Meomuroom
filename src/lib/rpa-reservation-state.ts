@@ -1,6 +1,7 @@
 import type { ParsedReservation } from "./email-parser";
 import { prisma } from "./prisma";
 import { resolveReservationCancellationState } from "./reservation-cancellation";
+import { selectReservationMatch } from "./rpa-reservation-match-policy";
 
 export const RPA_PENDING_MARKER = "[RPA_PENDING]";
 export const RPA_CHECK_MARKER = "[RPA_CHECK_REQUIRED]";
@@ -53,13 +54,12 @@ export async function clearRpaPendingForReservation(reservationId: string) {
 }
 
 async function findReservationForParsedEmail(parsed: ParsedReservation, messageId: string) {
-  return prisma.reservation.findFirst({
+  const candidates = await prisma.reservation.findMany({
     where: {
       OR: [
         { emailId: messageId },
         {
           source: parsed.source,
-          roomName: parsed.roomName,
           startTime: parsed.startTime,
           endTime: parsed.endTime,
         },
@@ -67,6 +67,17 @@ async function findReservationForParsedEmail(parsed: ParsedReservation, messageI
     },
     include: { usageLog: true },
     orderBy: { createdAt: "asc" },
+  });
+
+  return selectReservationMatch(candidates, {
+    source: parsed.source,
+    messageId,
+    roomName: parsed.roomName,
+    customerName: parsed.customerName,
+    startTime: parsed.startTime,
+    endTime: parsed.endTime,
+    isCancelled: Boolean(parsed.isCancelled),
+    allowUniqueCrossRoomCancellation: parsed.source === "spacecloud" && Boolean(parsed.isCancelled),
   });
 }
 

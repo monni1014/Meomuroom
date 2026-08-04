@@ -8,6 +8,7 @@ import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "./rpa-ui-alerts"
 import { resolveCancellationOperationalTimes } from "./reservation-operational-time";
 import { resolveRpaReservationPhoneState } from "./reservation-phone-lock";
 import { resolveRpaReservationTimeState } from "./reservation-time-lock";
+import { selectReservationMatch } from "./rpa-reservation-match-policy";
 
 const execFileAsync = promisify(execFile);
 
@@ -448,36 +449,69 @@ function isMaskedOrFallbackName(name: string | null | undefined) {
   return name.includes("*") || name.includes("네이버 예약");
 }
 
-async function findExistingReservationByParsedEmail(parsed: ParsedReservation) {
-  return prisma.reservation.findFirst({
+async function findExistingReservationByParsedEmail(
+  parsed: ParsedReservation,
+  messageId: string,
+  bookingNumber?: string | null,
+) {
+  const canonicalEmailId = bookingNumber && /^\d+$/.test(bookingNumber) ? `naver:${bookingNumber}` : null;
+  const candidates = await prisma.reservation.findMany({
     where: {
+      OR: [
+        { emailId: messageId },
+        ...(canonicalEmailId ? [{ emailId: canonicalEmailId }] : []),
+        {
+          source: "naver",
+          roomName: parsed.roomName,
+          startTime: parsed.startTime,
+          endTime: parsed.endTime,
+        },
+      ],
       source: "naver",
-      roomName: parsed.roomName,
-      startTime: parsed.startTime,
-      endTime: parsed.endTime,
     },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return selectReservationMatch(candidates, {
+    source: "naver",
+    messageId,
+    canonicalEmailId,
+    roomName: parsed.roomName,
+    customerName: parsed.customerName,
+    startTime: parsed.startTime,
+    endTime: parsed.endTime,
+    isCancelled: Boolean(parsed.isCancelled),
   });
 }
 
 async function upsertNaverReservation(item: NormalizedNaverReservation, messageId: string, receivedAt?: Date) {
   const reservationEmailId = /^\d+$/.test(item.bookingNumber) ? `naver:${item.bookingNumber}` : messageId;
-  const existing =
-    (await prisma.reservation.findFirst({
-      where: {
-        OR: [
-          { emailId: messageId },
-          { emailId: reservationEmailId },
-          {
-            source: "naver",
-            roomName: item.roomName,
-            startTime: item.startTime,
-            endTime: item.endTime,
-          },
-        ],
-      },
-      include: { usageLog: true },
-      orderBy: { createdAt: "asc" },
-    })) || null;
+  const candidates = await prisma.reservation.findMany({
+    where: {
+      source: "naver",
+      OR: [
+        { emailId: messageId },
+        { emailId: reservationEmailId },
+        {
+          roomName: item.roomName,
+          startTime: item.startTime,
+          endTime: item.endTime,
+        },
+      ],
+    },
+    include: { usageLog: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const existing = selectReservationMatch(candidates, {
+    source: "naver",
+    messageId,
+    canonicalEmailId: reservationEmailId,
+    roomName: item.roomName,
+    customerName: item.customerName,
+    startTime: item.startTime,
+    endTime: item.endTime,
+    isCancelled: item.status === "CANCELLED",
+  });
 
   if (existing) {
     const timeState = resolveRpaReservationTimeState(existing, item.startTime, item.endTime);
@@ -1538,7 +1572,7 @@ export async function processNaverEmailWithRpa({
     return { changed: result.changed, skipped: !result.changed, created: result.created, reservationId: result.reservation.id };
   }
 
-  const existingReservation = await findExistingReservationByParsedEmail(parsedReservation);
+  const existingReservation = await findExistingReservationByParsedEmail(parsedReservation, messageId, bookingId);
   if (existingReservation && !existingReservation.memo?.includes(RPA_PENDING_MARKER)) {
     console.log(`[NaverRPA] Reservation already exists. Skip RPA: ${existingReservation.id}`);
     return { changed: false, skipped: true, reservationId: existingReservation.id };
