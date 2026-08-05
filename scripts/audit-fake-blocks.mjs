@@ -2,6 +2,11 @@ import { spawn } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 
+// Automatic fake-booking detection is intentionally off. It may only be run
+// again after an operator explicitly opts in through the server environment.
+const FAKE_BLOCK_AUDIT_ENABLED =
+  String(process.env.FAKE_BLOCK_AUDIT_ENABLED || "").trim().toLowerCase() === "true";
+
 const prisma = new PrismaClient({
   adapter: new PrismaLibSql({ url: process.env.DATABASE_URL || "file:./dev.db" }),
 });
@@ -252,6 +257,11 @@ async function persistCandidates(month, candidates, fromDay, throughDay) {
 }
 
 async function main() {
+  if (!FAKE_BLOCK_AUDIT_ENABLED) {
+    console.log("FAKE_BLOCK_AUDIT_DISABLED=true");
+    return;
+  }
+
   const args = parseArgs(process.argv.slice(2));
   const month = validateMonth(args.month);
   const range = monthRange(month);
