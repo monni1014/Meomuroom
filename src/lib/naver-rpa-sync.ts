@@ -777,6 +777,7 @@ async function findConfirmedSlotOverlaps(item: NormalizedNaverReservation, reser
       id: { not: reservationId },
       roomName: item.roomName,
       status: "CONFIRMED",
+      reviewSlotSalesAllowed: false,
       startTime: { lt: item.endTime },
       endTime: { gt: item.startTime },
     },
@@ -827,6 +828,7 @@ function normalizeReservationForSlotRecheck(reservation: {
   paymentMethod: string | null;
   isPaid: boolean;
   isNoShow: boolean;
+  reviewSlotSalesAllowed?: boolean;
   usageLog: { reservedHeadCount: number; headCount: number } | null;
 }): NormalizedNaverReservation {
   const room = parseRoomFromRoomName(reservation.roomName);
@@ -1336,6 +1338,104 @@ async function syncNaverAndSpaceCloudSlots(
   return { naverSlot, spaceCloudSlot };
 }
 
+export async function applyReviewSlotSalesMode(reservationId: string, allowed: boolean) {
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    include: { usageLog: true },
+  });
+
+  if (!reservation) throw new Error("예약을 찾을 수 없습니다.");
+  if (!["naver", "spacecloud"].includes(reservation.source) || reservation.status !== "CONFIRMED") {
+    throw new Error("확정된 네이버·스클 예약만 리뷰용 슬롯 판매를 설정할 수 있습니다.");
+  }
+
+  const item = normalizeReservationForSlotRecheck(reservation);
+  if (allowed) {
+    const overlaps = await findConfirmedSlotOverlaps(item, reservation.id);
+    if (overlaps.length > 0) {
+      throw new Error("같은 시간에 다른 확정 예약이 있어 슬롯을 열 수 없습니다.");
+    }
+  }
+
+  await prisma.reservation.update({
+    where: { id: reservation.id },
+    data: {
+      reviewSlotSalesAllowed: allowed,
+      reviewSlotSalesStatus: allowed ? "OPENING" : "CLOSING",
+      reviewSlotSalesError: null,
+      reviewSlotSalesChangedAt: new Date(),
+    },
+  });
+
+  try {
+    const mode = allowed ? "open" : "close";
+    const result = reservation.source === "spacecloud"
+      ? await (async () => {
+          // 스클 출처 예약은 스클이 자체 소유한 슬롯이라 취소 전에는 열 수 없다.
+          // 리뷰용 판매 허용 시에는 머무룸이 막아둔 네이버 슬롯만 다시 연다.
+          const naverItems = await buildNaverSlotItems(item, mode, reservation.id);
+          const naverSlot = await runSlotItemBatch(
+            naverItems,
+            (slotItem) => setNaverSlot(slotItem, mode),
+            "Naver review slot",
+          );
+          if (naverSlot.ok) await clearRpaCheckRequired(reservation.id, isNaverSlotCheckLine);
+          else await markRpaCheckRequired(reservation.id, `Naver slot ${mode} failed: ${naverSlot.reason}`);
+          return {
+            naverSlot,
+            spaceCloudSlot: {
+              ok: true,
+              skipped: true,
+              reason: "스클 출처 예약은 스클 슬롯을 그대로 유지합니다.",
+            },
+          };
+        })()
+      : await syncNaverAndSpaceCloudSlots(
+          item,
+          mode,
+          reservation.id,
+          reservation.emailId || reservation.id,
+        );
+    const ok = result.naverSlot.ok && result.spaceCloudSlot.ok;
+    await prisma.reservation.update({
+      where: { id: reservation.id },
+      data: {
+        reviewSlotSalesStatus: ok ? (allowed ? "OPEN" : "BLOCKED") : "ERROR",
+        reviewSlotSalesError: ok
+          ? null
+          : [result.naverSlot.reason, result.spaceCloudSlot.reason].filter(Boolean).join(" / "),
+        reviewSlotSalesChangedAt: new Date(),
+      },
+    });
+    return { ok, ...result };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await prisma.reservation.update({
+      where: { id: reservation.id },
+      data: {
+        reviewSlotSalesStatus: "ERROR",
+        reviewSlotSalesError: reason,
+        reviewSlotSalesChangedAt: new Date(),
+      },
+    });
+    throw error;
+  }
+}
+
+export async function recoverPendingReviewSlotSalesModes(limit = 2) {
+  const pending = await prisma.reservation.findMany({
+    where: { reviewSlotSalesStatus: { in: ["OPENING", "CLOSING"] } },
+    orderBy: { reviewSlotSalesChangedAt: "asc" },
+    take: limit,
+  });
+  for (const reservation of pending) {
+    await applyReviewSlotSalesMode(reservation.id, reservation.reviewSlotSalesAllowed).catch((error) => {
+      console.error(`[Review slot sales] Recovery failed for ${reservation.id}:`, error);
+    });
+  }
+  return { checked: pending.length };
+}
+
 export async function recheckNaverSlotRpaIssues(limit = 1) {
   const cooldownMs = 10 * 60 * 1000;
   const now = Date.now();
@@ -1404,7 +1504,9 @@ export async function recheckNaverSlotRpaIssues(limit = 1) {
     }
 
     const item = normalizeReservationForSlotRecheck(reservation);
-    const mode = reservation.status === "CANCELLED" && !reservation.isNoShow ? "open" : "close";
+    const mode = (reservation.status === "CANCELLED" && !reservation.isNoShow) || reservation.reviewSlotSalesAllowed
+      ? "open"
+      : "close";
     console.log(`[NaverRPA] Recheck slot issue: ${reservation.id} ${item.dateValue} ${item.startClock}-${item.endClock} mode=${mode}`);
 
     const hasNaverIssue = hasCheckLine(reservation.memo, isNaverSlotCheckLine);
@@ -1416,7 +1518,10 @@ export async function recheckNaverSlotRpaIssues(limit = 1) {
     }
 
     if (hasSpaceCloudIssue) {
-      await runSpaceCloudSlotAction(item, mode, reservation.id);
+      const spaceCloudMode = reservation.source === "spacecloud" && reservation.reviewSlotSalesAllowed
+        ? "close"
+        : mode;
+      await runSpaceCloudSlotAction(item, spaceCloudMode, reservation.id);
     }
 
     checked += 1;

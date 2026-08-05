@@ -33,6 +33,7 @@ export async function registerNodeInstrumentation() {
   const { runRpaUiHealthChecks } = await import("@/lib/rpa-ui-monitor");
   const { checkTailscaleDevicesAndAlert } = await import("@/lib/tailscale-device-monitor");
   const { checkRpaSessionExpiryWarnings } = await import("@/lib/rpa-session-expiry-monitor");
+  const { recoverPendingReviewSlotSalesModes } = await import("@/lib/naver-rpa-sync");
 
   let running = false;
   let proxyStatusRunning = false;
@@ -45,6 +46,7 @@ export async function registerNodeInstrumentation() {
   let rpaUiHealthRunning = false;
   let tailscaleDeviceMonitorRunning = false;
   let rpaSessionExpiryRunning = false;
+  let reviewSlotSalesRecoveryRunning = false;
   const pendingCompetitorScans: Array<{
     label: string;
     mode: "today" | "today-next" | "today-plus-seven" | "night-month-horizon" | "next-week" | "daily" | "weekly" | "monthly";
@@ -115,6 +117,21 @@ export async function registerNodeInstrumentation() {
       console.error(`[Cron] Naver status reconcile failed (${label}):`, error);
     } finally {
       naverStatusReconcileRunning = false;
+    }
+  }
+
+  async function runReviewSlotSalesRecovery(label: string) {
+    if (reviewSlotSalesRecoveryRunning || isRpaPausedForProxy()) return;
+    reviewSlotSalesRecoveryRunning = true;
+    try {
+      const result = await recoverPendingReviewSlotSalesModes();
+      if (result.checked > 0) {
+        console.log(`[Cron] Review slot sales recovery (${label}): checked ${result.checked}`);
+      }
+    } catch (error) {
+      console.error(`[Cron] Review slot sales recovery failed (${label}):`, error);
+    } finally {
+      reviewSlotSalesRecoveryRunning = false;
     }
   }
 
@@ -344,6 +361,10 @@ export async function registerNodeInstrumentation() {
     void runRpaSessionExpiryMonitor("startup catch-up");
   }, 35_000);
 
+  setTimeout(() => {
+    void runReviewSlotSalesRecovery("startup recovery");
+  }, 45_000);
+
   schedule("*/15 * * * * *", async () => {
     await runEmailSync("cron");
   });
@@ -370,6 +391,10 @@ export async function registerNodeInstrumentation() {
 
   schedule("*/5 * * * *", async () => {
     await runTailscaleDeviceMonitor("cron");
+  });
+
+  schedule("*/1 * * * *", async () => {
+    await runReviewSlotSalesRecovery("cron");
   });
 
   schedule("0 21 * * *", async () => {

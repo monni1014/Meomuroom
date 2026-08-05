@@ -37,6 +37,13 @@ export const MANUAL_CELL_COLORS = [
     cellClass: "bg-[#E2E8F0] text-slate-950",
     monthlyOnly: true,
   },
+  {
+    key: "fake-block",
+    label: "뻥카",
+    swatchClass: "bg-[#E9D5FF]",
+    cellClass: "bg-[#E9D5FF] text-slate-950",
+    monthlyOnly: true,
+  },
 ] as const;
 
 export type ManualCellColor = (typeof MANUAL_CELL_COLORS)[number]["key"];

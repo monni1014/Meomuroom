@@ -44,6 +44,10 @@ model Reservation {
   blogReviewRequested    Boolean   @default(false)
   blogReviewCompleted    Boolean   @default(false)
   blogReviewRefunded     Boolean   @default(false)
+  reviewSlotSalesAllowed Boolean   @default(false)
+  reviewSlotSalesStatus  String    @default("BLOCKED") // BLOCKED | OPENING | OPEN | CLOSING | ERROR
+  reviewSlotSalesError   String?
+  reviewSlotSalesChangedAt DateTime?
 
   usageLog UsageLog?
   messages CustomerMessage[]
@@ -186,6 +190,20 @@ model AdminAlert {
 
   @@index([resolved, createdAt])
   @@index([type, createdAt])
+}
+
+model FakeBlockCandidate {
+  id          String   @id @default(cuid())
+  roomName    String
+  startTime   DateTime
+  endTime     DateTime
+  status      String   @default("PENDING") // PENDING | CONFIRMED | DISMISSED | RESOLVED
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @updatedAt
+  confirmedAt DateTime?
+
+  @@unique([roomName, startTime, endTime])
+  @@index([status, startTime])
 }
 
 model SmsBridgeDevice {
