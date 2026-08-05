@@ -327,6 +327,10 @@ export default async function DashboardPage(props: { searchParams?: Promise<any>
           id: alert.id,
           title: alert.title,
           message: alert.message,
+          type: alert.type,
+          candidateId: alert.dedupeKey?.startsWith("fake-block:")
+            ? alert.dedupeKey.slice("fake-block:".length)
+            : null,
         }))}
       />
 

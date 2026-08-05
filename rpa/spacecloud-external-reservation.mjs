@@ -103,6 +103,7 @@ function usage() {
     "  --claim-only optional, only attach identity to one exact unlabelled manual block; never create a new block",
     "  --new-start=HH:00 --new-end=HH:00 required with --mode=resize",
     "  --inspect-calendar optional, print the exact selected product/date cell and exit without editing",
+    "  --scan-month=YYYY-MM optional, read every visible calendar block in the month without editing",
     "  --inspect-save-request optional, inspect and block the final save request before it reaches SpaceCloud",
     "  --health-check optional, read-only UI contract check; opens and closes the add modal without saving",
     "  --apply       actually add/delete the SpaceCloud external reservation.",
@@ -2396,6 +2397,57 @@ async function findCalendarTimeEntry(page, { dateValue, startHour, endHour }) {
   }, { targetCell, startHour, endHour });
 }
 
+async function scanMonthCalendarEntries(page, monthValue) {
+  if (!/^\d{4}-\d{2}$/.test(monthValue)) {
+    throw new Error("--scan-month must be YYYY-MM");
+  }
+  const [year, month] = monthValue.split("-").map(Number);
+  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+  return page.evaluate(({ monthValue, firstWeekday, daysInMonth }) => {
+    function visible(element) {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    }
+
+    const weekdayNames = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
+    const table = [...document.querySelectorAll("table")]
+      .filter(visible)
+      .find((candidate) => {
+        const headers = [...candidate.querySelectorAll("thead th")]
+          .map((element) => (element.textContent || "").replace(/\s+/g, " ").trim());
+        return headers.length === 7 && headers.every((header, index) => header === weekdayNames[index]);
+      });
+    if (!table) throw new Error("[RPA_UI_CHANGE] SpaceCloud month scan could not find the calendar table.");
+
+    const cells = [...table.querySelectorAll("tbody td")];
+    const days = [];
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const cell = cells[firstWeekday + day - 1];
+      if (!cell) throw new Error(`[RPA_UI_CHANGE] SpaceCloud month scan could not find day ${day}.`);
+      const text = (cell.textContent || "").replace(/\s+/g, " ").trim();
+      const intervals = [];
+      const seen = new Set();
+      for (const match of text.matchAll(/(\d{1,2})(?::00)?\s*[~～-]\s*(\d{1,2})(?::00)?/g)) {
+        const start = Number(match[1]);
+        const end = Number(match[2]);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > 24 || start >= end) continue;
+        const key = `${start}-${end}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        intervals.push({ start, end });
+      }
+      days.push({
+        date: `${monthValue}-${String(day).padStart(2, "0")}`,
+        intervals: intervals.sort((a, b) => a.start - b.start || a.end - b.end),
+      });
+    }
+    return days;
+  }, { monthValue, firstWeekday, daysInMonth });
+}
+
 async function deleteExternalReservation(page, {
   room,
   dateValue,
@@ -2583,11 +2635,12 @@ async function main() {
   }
 
   const room = parseRoom(requiredArg(args, "room"));
-  const dateValue = requiredArg(args, "date");
-  const startHour = parseHour(requiredArg(args, "start"), "--start");
-  const endHour = parseHour(requiredArg(args, "end"), "--end", true);
+  const scanMonth = String(args["scan-month"] || "").trim();
+  const dateValue = scanMonth ? `${scanMonth}-01` : requiredArg(args, "date");
+  const startHour = scanMonth ? 8 : parseHour(requiredArg(args, "start"), "--start");
+  const endHour = scanMonth ? 24 : parseHour(requiredArg(args, "end"), "--end", true);
   const mode = args.mode || "close";
-  const bookingNumber = requiredArg(args, "booking-number");
+  const bookingNumber = scanMonth ? "__read_only_month_scan__" : requiredArg(args, "booking-number");
   const customerName = args["customer-name"] || "";
   const phone = args.phone || "";
   const apply = args.apply === "true";
@@ -2610,10 +2663,12 @@ async function main() {
     end: args.end,
     mode,
     apply,
+    scanMonth: scanMonth || null,
   });
 
   if (!["close", "open", "resize"].includes(mode)) throw new Error("--mode must be close, open, or resize");
   if (claimOnly && mode !== "close") throw new Error("--claim-only can only be used with --mode=close");
+  if (scanMonth && apply) throw new Error("--scan-month is read-only and cannot be combined with --apply");
   if (endHour <= startHour) throw new Error("--end must be after --start");
   if (mode === "resize" && newEndHour <= newStartHour) {
     throw new Error("--new-end must be after --new-start");
@@ -2806,6 +2861,19 @@ async function main() {
     );
     await saveScreenshot(page, "spacecloud-external-02-calendar");
     timer.mark("target-date-ready");
+
+    if (scanMonth) {
+      const days = await scanMonthCalendarEntries(page, scanMonth);
+      timer.mark("month-scan-completed", { status: "ok", days: days.length });
+      console.log(`SPACECLOUD_MONTH_SCAN_JSON=${JSON.stringify({
+        ok: true,
+        platform: "spacecloud",
+        room,
+        month: scanMonth,
+        days,
+      })}`);
+      return;
+    }
 
     if (inspectCalendar) {
       console.log(JSON.stringify({

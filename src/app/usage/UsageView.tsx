@@ -51,6 +51,9 @@ interface Reservation {
   blogReviewRequested: boolean;
   blogReviewCompleted: boolean;
   blogReviewRefunded: boolean;
+  reviewSlotSalesAllowed: boolean;
+  reviewSlotSalesStatus: string;
+  reviewSlotSalesError: string | null;
   usageLog: UsageLog | null;
 }
 
@@ -144,6 +147,7 @@ export default function UsagePage() {
   const [blogReviewCompleted, setBlogReviewCompleted] = useState(false);
   const [blogReviewRefunded, setBlogReviewRefunded] = useState(false);
   const [isReviewDetailsOpen, setIsReviewDetailsOpen] = useState(false);
+  const [isReviewSlotUpdating, setIsReviewSlotUpdating] = useState(false);
   const [isExtraPaid, setIsExtraPaid] = useState(false); // 추가 금액 결제 여부
   const [extraPaymentMethod, setExtraPaymentMethod] = useState<string>("계좌이체"); // 추가 금액 결제 수단
   const [extraTime, setExtraTime] = useState(0); // 추가된 시간 (시간 단위)
@@ -587,6 +591,41 @@ export default function UsagePage() {
     .slice(0, 5);
 
   const selectedRes = reservations.find((r) => r.id === selectedResId);
+
+  const handleReviewSlotSales = async () => {
+    if (!selectedRes || !["naver", "spacecloud"].includes(selectedRes.source) || selectedRes.status !== "CONFIRMED") return;
+    const allowed = !selectedRes.reviewSlotSalesAllowed;
+    const confirmed = window.confirm(
+      allowed
+        ? selectedRes.source === "spacecloud"
+          ? "이 스클 리뷰용 예약은 유지하고 네이버 슬롯만 다시 열어 판매를 허용할까요?\n스클 슬롯은 예약 취소 전까지 계속 막혀 있습니다."
+          : "이 네이버 리뷰용 예약은 유지하고 네이버·스클 슬롯을 다시 열어 판매를 허용할까요?\n다른 확정 예약과 겹치면 실행되지 않습니다."
+        : selectedRes.source === "spacecloud"
+          ? "리뷰용 슬롯 판매를 중단하고 네이버 슬롯을 다시 막을까요?"
+          : "리뷰용 슬롯 판매를 중단하고 네이버·스클 슬롯을 다시 막을까요?",
+    );
+    if (!confirmed) return;
+
+    setIsReviewSlotUpdating(true);
+    try {
+      const response = await fetch(`/api/reservations/${selectedRes.id}/review-slot-sales`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowed }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        window.alert(result.error || "리뷰용 슬롯 판매 설정에 실패했습니다.");
+        return;
+      }
+      await fetchReservations(selectedRes.id);
+    } catch (error) {
+      console.error(error);
+      window.alert("리뷰용 슬롯 판매 설정에 실패했습니다.");
+    } finally {
+      setIsReviewSlotUpdating(false);
+    }
+  };
   const reviewRequestedCount = Number(visitorReviewRequested) + Number(blogReviewRequested);
   const reviewCompletedCount = Number(visitorReviewCompleted) + Number(blogReviewCompleted);
   const reviewRefundedCount = Number(visitorReviewRefunded) + Number(blogReviewRefunded);
@@ -1125,6 +1164,34 @@ export default function UsagePage() {
               {reviewSummary}
               <ChevronDown className={`h-4 w-4 transition-transform ${isReviewDetailsOpen ? "rotate-180" : ""}`} />
             </button>
+            {selectedRes && selectedRes.status === "CONFIRMED" && ["naver", "spacecloud"].includes(selectedRes.source) && (
+              <button
+                type="button"
+                disabled={isReviewSlotUpdating || ["OPENING", "CLOSING"].includes(selectedRes.reviewSlotSalesStatus)}
+                onClick={() => void handleReviewSlotSales()}
+                className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition active:scale-95 disabled:cursor-wait disabled:opacity-60 ${
+                  selectedRes.reviewSlotSalesAllowed
+                    ? "border-cyan-400 bg-cyan-100 text-cyan-900"
+                    : "border-cyan-200 bg-cyan-50 text-cyan-800 hover:bg-cyan-100"
+                }`}
+                title={selectedRes.reviewSlotSalesError || (selectedRes.reviewSlotSalesAllowed
+                  ? "리뷰용 슬롯 판매를 중단하고 다시 마감"
+                  : selectedRes.source === "spacecloud"
+                    ? "스클 예약은 유지하고 네이버 슬롯만 다시 열기"
+                    : "네이버 예약은 유지하고 네이버·스클 슬롯을 다시 열기")}
+              >
+                <Tag className="h-4 w-4" />
+                {isReviewSlotUpdating || selectedRes.reviewSlotSalesStatus === "OPENING"
+                  ? "리뷰용 슬롯 여는 중"
+                  : selectedRes.reviewSlotSalesStatus === "CLOSING"
+                    ? "리뷰용 슬롯 막는 중"
+                    : selectedRes.reviewSlotSalesStatus === "ERROR"
+                      ? "리뷰용 슬롯 오류 · 재시도"
+                      : selectedRes.reviewSlotSalesAllowed
+                        ? "리뷰용 슬롯 판매 중"
+                        : "리뷰용 슬롯 판매 허용"}
+              </button>
+            )}
           </div>
 
           {isReviewDetailsOpen && (

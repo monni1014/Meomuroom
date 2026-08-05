@@ -78,6 +78,9 @@ function usage() {
     "  --product-url=... exact Naver product edit URL. Required for safety.",
     "  --apply       actually click toggles. Without this, it only navigates and validates.",
     "  --verify-only read and freshly recheck the requested state without clicking or saving.",
+    "  --scan-month=YYYY-MM read every 08:00~24:00 slot in the month without clicking or saving.",
+    "  --scan-start-day=1 optional first day for a read-only month scan.",
+    "  --scan-end-day=31 optional last day for a read-only month scan.",
     "  --health-check read-only UI contract check; opens tomorrow's slot panel but never changes or saves it.",
   ].join("\n");
 }
@@ -256,7 +259,8 @@ async function isSlotPanelOpen(page) {
       return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
     }
 
-    return [...document.querySelectorAll("body *")].some((element) => {
+    const elements = [...document.querySelectorAll("body *")];
+    const hasPanelTitle = elements.some((element) => {
       const text = (element.textContent || "").replace(/\s+/g, " ").trim();
       const rect = element.getBoundingClientRect();
       return visible(element)
@@ -264,18 +268,45 @@ async function isSlotPanelOpen(page) {
         && rect.x > window.innerWidth * 0.25
         && rect.y < 120;
     });
+
+    if (hasPanelTitle) return true;
+
+    const lowerPanelButtons = elements
+      .filter((element) => element.matches("button,[role='button']") && visible(element))
+      .map((element) => ({
+        text: (element.textContent || "").replace(/\s+/g, " ").trim(),
+        rect: element.getBoundingClientRect(),
+      }))
+      .filter(({ rect }) => rect.x > window.innerWidth * 0.25 && rect.y > window.innerHeight * 0.55);
+
+    return lowerPanelButtons.some(({ text }) => text === "\ucde8\uc18c")
+      && lowerPanelButtons.some(({ text }) => text === "\uc800\uc7a5");
   });
 }
 
 async function closeSlotPanelIfOpen(page) {
-  const hasOpenPanel = await isSlotPanelOpen(page);
-
-  if (!hasOpenPanel) return;
+  if (!(await isSlotPanelOpen(page))) return;
 
   console.log("Open slot panel detected. Closing it before date navigation.");
-  await humanDelay(page, "before escape existing panel", 700, 1500);
-  await page.keyboard.press("Escape");
-  await humanDelay(page, "after escape existing panel", 900, 2200);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const cancelButton = page.getByRole("button", { name: "\ucde8\uc18c", exact: true }).last();
+    const clickedCancel = await cancelButton
+      .click({ timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!clickedCancel) {
+      await page.keyboard.press("Escape").catch(() => {});
+    }
+
+    await page.waitForTimeout(450);
+    if (!(await isSlotPanelOpen(page))) {
+      console.log(`Slot panel closed. attempt=${attempt}`);
+      return;
+    }
+  }
+
+  throw new Error("Naver slot panel did not close after clicking cancel. Refusing to continue date navigation.");
 }
 
 async function findVisibleScheduleDayHeader(page, targetMonthDay) {
@@ -301,8 +332,10 @@ async function findVisibleScheduleDayHeader(page, targetMonthDay) {
       .filter(({ text, rect }) =>
         /^\d{1,2}\.\d{1,2}\([^)]+\)$/.test(text)
         && text.startsWith(`${target}(`)
-        && rect.y > 300
-        && rect.y < 390
+        && rect.bottom > 0
+        && rect.top < window.innerHeight
+        && rect.y > 150
+        && rect.y < 520
         && rect.x > 300
         && rect.x < 950
         && rect.width < 120
@@ -322,7 +355,9 @@ async function navigateToDate(page, dateValue) {
     throw new Error("Naver schedule grid did not load.");
   }
 
-  for (let i = 0; i < 12; i += 1) {
+  let inRangeHeaderMisses = 0;
+  for (let i = 0; i < 16; i += 1) {
+    await closeSlotPanelIfOpen(page);
     const visibleText = await page.locator("body").innerText({ timeout: 5_000 });
     const actualVisibleHeader = await findVisibleScheduleDayHeader(page, targetMonthDay);
 
@@ -339,10 +374,18 @@ async function navigateToDate(page, dateValue) {
     }
 
     if (targetMs >= currentRange.startMs && targetMs <= currentRange.endMs) {
+      inRangeHeaderMisses += 1;
+      if (inRangeHeaderMisses < 4) {
+        await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+        await page.waitForTimeout(500);
+        continue;
+      }
       throw new Error(
-        `Target ${targetLabel} is inside visible week ${currentRange.label}, but the day header was not found. Refusing to move weeks.`
+        `Target ${targetLabel} is inside visible week ${currentRange.label}, but the day header was not found after ${inRangeHeaderMisses} safe retries. Refusing to move weeks.`
       );
     }
+
+    inRangeHeaderMisses = 0;
 
     const direction = targetMs < currentRange.startMs ? "previous" : "next";
     console.log(`Target ${targetLabel} is not visible. Click ${direction}-week arrow from ${currentRange.label}.`);
@@ -353,7 +396,7 @@ async function navigateToDate(page, dateValue) {
 }
 
 async function clickWeekArrow(page, direction) {
-  const box = await page.evaluate((targetDirection) => {
+  const result = await page.evaluate((targetDirection) => {
     function visible(element) {
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -371,6 +414,9 @@ async function clickWeekArrow(page, direction) {
           height: rect.height,
           text: (element.textContent || "").replace(/\s+/g, " ").trim(),
           aria: element.getAttribute("aria-label") || "",
+          title: element.getAttribute("title") || "",
+          tag: element.tagName,
+          hasSvg: Boolean(element.querySelector("svg")),
         };
       })
       .filter((candidate) =>
@@ -383,9 +429,32 @@ async function clickWeekArrow(page, direction) {
       )
       .sort((a, b) => a.x - b.x);
 
-    if (candidates.length === 0) return null;
-    return targetDirection === "previous" ? candidates[0] : candidates[candidates.length - 1];
+    const semanticPattern = targetDirection === "previous"
+      ? /(\uC774\uC804|\uC9C0\uB09C|\uC804\uC77C|prev)/i
+      : /(\uB2E4\uC74C|\uB0B4\uC77C|next)/i;
+    const semantic = candidates.find((candidate) =>
+      semanticPattern.test(`${candidate.aria} ${candidate.title} ${candidate.text}`)
+    );
+    const arrowLike = candidates.filter((candidate) =>
+      candidate.hasSvg
+      && candidate.text.length === 0
+      && candidate.width <= 64
+      && candidate.height <= 64
+    );
+    const arrow = semantic || (targetDirection === "previous"
+      ? arrowLike[0]
+      : arrowLike[arrowLike.length - 1]);
+
+    return { arrow: arrow || null, candidates };
   }, direction);
+
+  const box = result?.arrow;
+  if (!box) {
+    const diagnostic = (result?.candidates || [])
+      .map((candidate) => JSON.stringify(candidate))
+      .join(" | ");
+    throw new Error(`Could not safely locate exact ${direction}-week arrow button. Candidates: ${diagnostic}`);
+  }
 
   const fallbackLocator = direction === "next"
     ? page.getByRole("button", { name: TEXT.next }).first()
@@ -422,8 +491,10 @@ async function openDaySlotPanel(page, dateValue, targetLabel, startHour, endHour
       }))
       .filter(({ text, rect }) =>
         /^\d{1,2}\.\d{1,2}\([^)]+\)$/.test(text)
-        && rect.y > 300
-        && rect.y < 390
+        && rect.bottom > 0
+        && rect.top < window.innerHeight
+        && rect.y > 150
+        && rect.y < 520
         && rect.x > 300
         && rect.x < 950
         && rect.width < 120
@@ -801,6 +872,44 @@ async function assertPanelHoursReadOnly(page, startHour, endHour, mode) {
   }
 }
 
+async function scanMonthSlotStates(page, monthValue, startDay = 1, endDay = null) {
+  if (!/^\d{4}-\d{2}$/.test(monthValue)) {
+    throw new Error("--scan-month must be YYYY-MM");
+  }
+
+  const [year, month] = monthValue.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const safeStartDay = Math.max(1, Math.min(daysInMonth, Number(startDay) || 1));
+  const safeEndDay = Math.max(safeStartDay, Math.min(daysInMonth, Number(endDay) || daysInMonth));
+  const days = [];
+
+  for (let day = safeStartDay; day <= safeEndDay; day += 1) {
+    const dateValue = `${monthValue}-${String(day).padStart(2, "0")}`;
+    const targetLabel = await navigateToDate(page, dateValue);
+    await openDaySlotPanel(page, dateValue, targetLabel, 8, 24);
+
+    const hours = {};
+    try {
+      for (let hour = 8; hour < 24; hour += 1) {
+        const state = await readHourToggleState(page, hour);
+        if (state !== "open" && state !== "close") {
+          throw new Error(`[RPA_UI_CHANGE] Naver month scan could not read ${dateValue} ${String(hour).padStart(2, "0")}:00.`);
+        }
+        hours[String(hour)] = state;
+      }
+    } finally {
+      await closeSlotPanelIfOpen(page);
+      await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+      await quickSlotDelay(page, "after restore schedule grid viewport", 200, 420);
+    }
+
+    days.push({ date: dateValue, hours });
+    console.log(`[Naver month scan] ${dateValue} completed.`);
+  }
+
+  return days;
+}
+
 async function assertSlotPanelUiContract(page, startHour, endHour) {
   for (let hour = startHour; hour < endHour; hour += 1) {
     const actualState = await readHourToggleState(page, hour);
@@ -971,9 +1080,12 @@ async function main() {
   }
 
   const room = parseRoom(requiredArg(args, "room"));
-  const dateValue = requiredArg(args, "date");
-  const startHour = parseHour(requiredArg(args, "start"), "--start");
-  const endHour = parseHour(requiredArg(args, "end"), "--end", true);
+  const scanMonth = String(args["scan-month"] || "").trim();
+  const scanStartDay = Number(args["scan-start-day"] || 1);
+  const scanEndDay = Number(args["scan-end-day"] || 0) || null;
+  const dateValue = scanMonth ? `${scanMonth}-01` : requiredArg(args, "date");
+  const startHour = scanMonth ? 8 : parseHour(requiredArg(args, "start"), "--start");
+  const endHour = scanMonth ? 24 : parseHour(requiredArg(args, "end"), "--end", true);
   const mode = args.mode || "close";
   const apply = args.apply === "true";
   const verifyOnly = args["verify-only"] === "true";
@@ -987,6 +1099,7 @@ async function main() {
     mode,
     apply,
     verifyOnly,
+    scanMonth: scanMonth || null,
   });
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
@@ -1000,6 +1113,9 @@ async function main() {
   }
   if (verifyOnly && apply) {
     throw new Error("--verify-only cannot be combined with --apply");
+  }
+  if (scanMonth && apply) {
+    throw new Error("--scan-month is read-only and cannot be combined with --apply");
   }
   if (!existsSync(naverStorageStatePath)) {
     throw new Error("Naver login session is missing. Run `npm run rpa:naver-login` first.");
@@ -1042,6 +1158,19 @@ async function main() {
     console.log("Open schedule tab");
     await openScheduleTab(page, { url, productName });
     timer.mark("schedule-ready");
+
+    if (scanMonth) {
+      const days = await scanMonthSlotStates(page, scanMonth, scanStartDay, scanEndDay);
+      timer.mark("month-scan-completed", { status: "ok", days: days.length });
+      console.log(`NAVER_MONTH_SCAN_JSON=${JSON.stringify({
+        ok: true,
+        platform: "naver",
+        room,
+        month: scanMonth,
+        days,
+      })}`);
+      return;
+    }
 
     if (healthCheck) {
       const targetLabel = await navigateToDate(page, dateValue);
