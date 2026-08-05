@@ -266,7 +266,7 @@ export default function MonthlyTableView() {
   const fetchReservations = useCallback(async (showLoading = true) => {
     try {
       if (showLoading) setIsLoading(true);
-      const res = await fetch("/api/reservations");
+      const res = await fetch("/api/reservations", { cache: "no-store" });
       if (res.ok) setReservations(await res.json());
     } catch (error) {
       console.error("Failed to load reservations:", error);

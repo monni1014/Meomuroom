@@ -391,8 +391,8 @@ export default function CalendarPage() {
   const fetchReservations = useCallback(async () => {
     try {
       const [reservationResponse, cleaningResponse] = await Promise.all([
-        fetch("/api/reservations"),
-        fetch("/api/cleaning-schedules"),
+        fetch("/api/reservations", { cache: "no-store" }),
+        fetch("/api/cleaning-schedules", { cache: "no-store" }),
       ]);
       if (reservationResponse.ok) setReservations(await reservationResponse.json());
       if (cleaningResponse.ok) setCleaningSchedules(await cleaningResponse.json());
@@ -849,6 +849,7 @@ export default function CalendarPage() {
 
     try {
       setIsSubmitting(true);
+      const savedDateKeys = [...formDates].sort();
 
       const buildPayload = (dateStr: string) => {
         const startDateTime = buildLocalDateTime(dateStr, formStartTime);
@@ -911,7 +912,16 @@ export default function CalendarPage() {
       setComplaints("");
       setFormSource("manual");
       setIsModalOpen(false);
-      fetchReservations();
+
+      // 저장 직후에도 기존에 보고 있던 월에 그대로 머물면 정상 저장된
+      // 미래 일정이 누락된 것처럼 보인다. 서버 응답을 다시 읽은 뒤
+      // 저장한 첫 날짜로 캘린더와 상세 목록을 함께 이동시킨다.
+      await fetchReservations();
+      const firstSavedDate = buildLocalDateTime(savedDateKeys[0], formStartTime);
+      setCurrentDate(firstSavedDate);
+      setSelectedDate(firstSavedDate);
+      setExpandedReservationId(null);
+      replaceCalendarState(firstSavedDate, roomFilter, isMobileAgendaOpen);
       alert("저장되었습니다.");
     } catch (error) {
       console.error("Save error:", error);

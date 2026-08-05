@@ -31,17 +31,10 @@ export const MANUAL_CELL_COLORS = [
     monthlyOnly: true,
   },
   {
-    key: "provisional-block",
-    label: "가예약 · 임시차단",
-    swatchClass: "bg-[#E2E8F0]",
-    cellClass: "bg-[#E2E8F0] text-slate-950",
-    monthlyOnly: true,
-  },
-  {
     key: "fake-block",
     label: "뻥카",
-    swatchClass: "bg-[#E9D5FF]",
-    cellClass: "bg-[#E9D5FF] text-slate-950",
+    swatchClass: "bg-[#E2E8F0]",
+    cellClass: "bg-[#E2E8F0] text-slate-950",
     monthlyOnly: true,
   },
 ] as const;
@@ -74,5 +67,7 @@ export function reconcileDirtyKey(previous: Set<string>, key: string, isDirty: b
 }
 
 export function manualColorClass(color?: string | null) {
+  // 예전 DB 백업을 복원해도 과거 가예약 색상은 뻥카의 연한 회색으로 표시한다.
+  if (color === "provisional-block") return "bg-[#E2E8F0] text-slate-950";
   return MANUAL_CELL_COLORS.find((item) => item.key === color)?.cellClass || null;
 }
