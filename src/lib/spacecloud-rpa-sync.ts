@@ -352,6 +352,13 @@ async function deleteDetachedPendingReservation(messageId: string, keptReservati
   ) return;
 
   await prisma.$transaction([
+    // Situation messages can be sent as soon as the mail parser creates the
+    // pending row.  Preserve their reservation link when the RPA later
+    // replaces that row with the canonical SpaceCloud reservation.
+    prisma.customerMessage.updateMany({
+      where: { reservationId: pending.id },
+      data: { reservationId: keptReservationId },
+    }),
     prisma.usageLog.deleteMany({ where: { reservationId: pending.id } }),
     prisma.reservation.deleteMany({
       where: {

@@ -615,6 +615,13 @@ async function deleteDetachedCancellationPending(messageId: string, keptReservat
   ) return;
 
   await prisma.$transaction([
+    // Keep every already-sent message attached to the canonical reservation
+    // before removing the temporary cancellation row.  Otherwise Prisma's
+    // onDelete:SetNull makes the message disappear from the status screen.
+    prisma.customerMessage.updateMany({
+      where: { reservationId: pending.id },
+      data: { reservationId: keptReservationId },
+    }),
     prisma.usageLog.deleteMany({ where: { reservationId: pending.id } }),
     prisma.reservation.deleteMany({
       where: {

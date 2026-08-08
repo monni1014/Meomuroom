@@ -38,6 +38,14 @@ const googlePeopleSource = await readFile(
   new URL("../src/lib/google-people.ts", import.meta.url),
   "utf8",
 );
+const spaceCloudRpaSource = await readFile(
+  new URL("../src/lib/spacecloud-rpa-sync.ts", import.meta.url),
+  "utf8",
+);
+const naverRpaSource = await readFile(
+  new URL("../src/lib/naver-rpa-sync.ts", import.meta.url),
+  "utf8",
+);
 
 assert.match(notificationSource, /createdAt: \{ gte: startsAt \}/);
 assert.match(notificationSource, /startTime: \{ gte: now \}/);
@@ -57,5 +65,15 @@ assert.match(
 );
 assert.match(googlePeopleSource, /reservationId[\s\S]*?id: reservationId[\s\S]*?status: "CONFIRMED"/);
 assert.match(googlePeopleSource, /if \(!reservationId\) \{[\s\S]*?activeMappingKeys/);
+assert.match(
+  spaceCloudRpaSource,
+  /deleteDetachedPendingReservation[\s\S]*?customerMessage\.updateMany\([\s\S]*?reservationId: keptReservationId[\s\S]*?reservation\.deleteMany/,
+  "SpaceCloud pending-row merge must preserve sent message links",
+);
+assert.match(
+  naverRpaSource,
+  /deleteDetachedCancellationPending[\s\S]*?customerMessage\.updateMany\([\s\S]*?reservationId: keptReservationId[\s\S]*?reservation\.deleteMany/,
+  "Naver pending-row merge must preserve sent message links",
+);
 
 console.log("Dawn booking notification tests passed.");
