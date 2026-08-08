@@ -6,7 +6,7 @@ import { reservationNotificationEditPolicy } from "@/lib/reservation-notificatio
 import { isValidKoreanMobilePhone, normalizeKoreanPhone } from "@/lib/phone-number";
 import { shouldLockManuallyEditedPhone } from "@/lib/reservation-phone-lock";
 import { shouldLockManuallyEditedTime } from "@/lib/reservation-time-lock";
-import { hasNewlyCompletedReview, validateReviewProgress } from "@/lib/review-event-policy";
+import { getReviewRefundAccountMessageDecision, validateReviewProgress } from "@/lib/review-event-policy";
 import {
   getReviewRefundAccountMessageReadiness,
   sendReviewRefundAccountRequest,
@@ -22,6 +22,7 @@ import {
 } from "@/lib/reservation-deletion-log";
 
 const VALID_ROOM_NAMES = new Set(["머무룸1", "머무룸2", "머무룸3"]);
+const VALID_REVIEW_REFUND_ACCOUNT_MESSAGE_ACTIONS = new Set(["SEND", "SKIP"]);
 
 function parseReservationDate(value: unknown) {
   const date = typeof value === "string" || value instanceof Date ? new Date(value) : new Date(Number.NaN);
@@ -35,7 +36,14 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await request.json();
-    const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, visitorReviewRequested, visitorReviewCompleted, visitorReviewRefunded, blogReviewRequested, blogReviewCompleted, blogReviewRefunded, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow, resendNotification, pushSubscriptionEndpoint } = body;
+    const { source, customerName, customerType, phone, startTime, endTime, price, paymentMethod, isPaid, memo, discount, headCount, reservedHeadCount, coffeeCount, purpose, detail, roomName, complaints, isCleanUpBad, visitorReviewRequested, visitorReviewCompleted, visitorReviewRefunded, blogReviewRequested, blogReviewCompleted, blogReviewRefunded, reviewRefundAccountMessageAction, extraPrice, isExtraPaid, extraPaymentMethod, extraTime, status, isNoShow, resendNotification, pushSubscriptionEndpoint } = body;
+
+    if (
+      reviewRefundAccountMessageAction !== undefined
+      && !VALID_REVIEW_REFUND_ACCOUNT_MESSAGE_ACTIONS.has(reviewRefundAccountMessageAction)
+    ) {
+      return NextResponse.json({ error: "Invalid review refund account message action" }, { status: 400 });
+    }
 
     if (typeof phone === "string" && phone.trim() && !isValidKoreanMobilePhone(phone)) {
       return NextResponse.json({ error: "Invalid phone number" }, { status: 400 });
@@ -89,7 +97,7 @@ export async function PATCH(
       }, { status: 400 });
     }
 
-    const shouldSendReviewRefundAccountRequest = hasNewlyCompletedReview(
+    const reviewRefundAccountMessageDecision = getReviewRefundAccountMessageDecision(
       {
         visitorReviewCompleted: existing.visitorReviewCompleted,
         blogReviewCompleted: existing.blogReviewCompleted,
@@ -98,8 +106,16 @@ export async function PATCH(
         visitorReviewCompleted: nextVisitorReviewCompleted,
         blogReviewCompleted: nextBlogReviewCompleted,
       },
+      reviewRefundAccountMessageAction,
     );
-    if (shouldSendReviewRefundAccountRequest) {
+    if (reviewRefundAccountMessageDecision === "ACTION_REQUIRED") {
+      return NextResponse.json({
+        error: "리뷰 작성 완료 시 계좌 요청 문자 발송 여부를 선택해 주세요.",
+        code: "REVIEW_REFUND_ACCOUNT_MESSAGE_ACTION_REQUIRED",
+      }, { status: 409 });
+    }
+    const shouldActuallySendReviewRefundAccountRequest = reviewRefundAccountMessageDecision === "SEND";
+    if (shouldActuallySendReviewRefundAccountRequest) {
       const readiness = await getReviewRefundAccountMessageReadiness(
         typeof phone === "string" ? phone : existing.phone,
       );
@@ -290,8 +306,10 @@ export async function PATCH(
       });
     }
 
-    const reviewRefundAccountMessage = shouldSendReviewRefundAccountRequest
+    const reviewRefundAccountMessage = shouldActuallySendReviewRefundAccountRequest
       ? await sendReviewRefundAccountRequest(updated.id)
+      : reviewRefundAccountMessageDecision === "SKIP"
+        ? { success: true, skipped: true }
       : null;
 
     const previousAdditionalPeople = resolveAdditionalPeople({

@@ -57,6 +57,8 @@ interface Reservation {
   usageLog: UsageLog | null;
 }
 
+type ReviewRefundAccountMessageAction = "SEND" | "SKIP";
+
 const CALENDAR_ROOM_FILTERS = ["all", "머무룸1", "머무룸2", "머무룸3"] as const;
 type CalendarRoomFilter = (typeof CALENDAR_ROOM_FILTERS)[number];
 
@@ -156,6 +158,7 @@ export default function UsagePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
+  const [isReviewMessageChoiceOpen, setIsReviewMessageChoiceOpen] = useState(false);
 
   // ISO → 날짜/시간 입력값 (로컬 기준)
   const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -432,7 +435,7 @@ export default function UsagePage() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (reviewRefundAccountMessageAction?: ReviewRefundAccountMessageAction) => {
     if (!selectedResId) return alert("기록할 예약을 먼저 선택하세요.");
 
     // 종료 00:00은 같은 날의 시작이 아니라 다음 날 자정(24:00)으로 저장한다.
@@ -488,6 +491,7 @@ export default function UsagePage() {
           blogReviewRequested,
           blogReviewCompleted,
           blogReviewRefunded,
+          ...(reviewRefundAccountMessageAction ? { reviewRefundAccountMessageAction } : {}),
           // 시간 수정 (26시 등은 익일로 변환)
           ...(editDate && editStart ? { startTime: buildISO(editDate, editStart) } : {}),
           ...(editDate && normalizedEditEnd ? { endTime: buildISO(editDate, normalizedEditEnd) } : {}),
@@ -500,13 +504,16 @@ export default function UsagePage() {
             success?: boolean;
             dryRun?: boolean;
             alreadyProcessed?: boolean;
+            skipped?: boolean;
             error?: string;
           } | null;
         } | null;
         const reviewMessage = responseBody?.reviewRefundAccountMessage;
         setSuccessMsg("이용 기록이 안전하게 저장되었습니다.");
         setTimeout(() => setSuccessMsg(""), 3000);
-        if (reviewMessage?.success && !reviewMessage.alreadyProcessed && !reviewMessage.dryRun) {
+        if (reviewMessage?.success && reviewMessage.skipped) {
+          alert("저장되었습니다. 계좌 요청 문자는 보내지 않았습니다.");
+        } else if (reviewMessage?.success && !reviewMessage.alreadyProcessed && !reviewMessage.dryRun) {
           alert("저장되었습니다. 리뷰 환급 계좌 요청 문자도 발송했습니다.");
         } else if (reviewMessage?.success && reviewMessage.dryRun) {
           alert("저장되었습니다. 리뷰 환급 계좌 요청 문자는 테스트 상태로 기록했습니다.");
@@ -526,7 +533,11 @@ export default function UsagePage() {
           router.push(buildCalendarReturnUrl(editDate, returnRoom));
         }
       } else {
-        const errorBody = await response.json().catch(() => null) as { error?: string } | null;
+        const errorBody = await response.json().catch(() => null) as { error?: string; code?: string } | null;
+        if (errorBody?.code === "REVIEW_REFUND_ACCOUNT_MESSAGE_ACTION_REQUIRED") {
+          setIsReviewMessageChoiceOpen(true);
+          return;
+        }
         alert(errorBody?.error || "이용 기록 저장에 실패했습니다.");
       }
     } catch (err) {
@@ -591,6 +602,27 @@ export default function UsagePage() {
     .slice(0, 5);
 
   const selectedRes = reservations.find((r) => r.id === selectedResId);
+
+  const handleSaveRequest = () => {
+    if (!selectedResId) {
+      alert("기록할 예약을 먼저 선택하세요.");
+      return;
+    }
+    const hadCompletedReview = Boolean(
+      selectedRes?.visitorReviewCompleted || selectedRes?.blogReviewCompleted,
+    );
+    const hasCompletedReview = visitorReviewCompleted || blogReviewCompleted;
+    if (!hadCompletedReview && hasCompletedReview) {
+      setIsReviewMessageChoiceOpen(true);
+      return;
+    }
+    void handleSave();
+  };
+
+  const saveReviewCompletion = (action: ReviewRefundAccountMessageAction) => {
+    setIsReviewMessageChoiceOpen(false);
+    void handleSave(action);
+  };
 
   const handleReviewSlotSales = async () => {
     if (!selectedRes || !["naver", "spacecloud"].includes(selectedRes.source) || selectedRes.status !== "CONFIRMED") return;
@@ -1286,7 +1318,7 @@ export default function UsagePage() {
           )}
 
           <button
-            onClick={handleSave}
+            onClick={handleSaveRequest}
             disabled={isSubmitting}
             className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition active:scale-[0.98] flex justify-center items-center gap-2"
           >
@@ -1295,6 +1327,56 @@ export default function UsagePage() {
           </button>
         </div>
       </section>
+
+      {isReviewMessageChoiceOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/45 p-3 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="review-message-choice-title"
+          onClick={() => setIsReviewMessageChoiceOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-5">
+              <h2 id="review-message-choice-title" className="text-lg font-black text-slate-900">
+                리뷰 작성 완료
+              </h2>
+              <p className="mt-2 text-sm font-medium leading-6 text-slate-600">
+                리뷰 작성 상태를 저장합니다. 계좌 요청 문자도 보낼까요?
+              </p>
+            </div>
+            <div className="grid gap-2.5">
+              <button
+                type="button"
+                onClick={() => saveReviewCompletion("SEND")}
+                disabled={isSubmitting}
+                className="rounded-2xl bg-slate-900 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-slate-800 active:scale-[0.99] disabled:opacity-50"
+              >
+                계좌 요청 문자 보내기
+              </button>
+              <button
+                type="button"
+                onClick={() => saveReviewCompletion("SKIP")}
+                disabled={isSubmitting}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm font-bold text-slate-700 transition hover:bg-slate-100 active:scale-[0.99] disabled:opacity-50"
+              >
+                문자 없이 작성 완료
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsReviewMessageChoiceOpen(false)}
+                disabled={isSubmitting}
+                className="px-4 py-2 text-sm font-bold text-slate-400 transition hover:text-slate-600 disabled:opacity-50"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* History Log Feed Section */}
       <section className="mt-8">

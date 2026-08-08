@@ -1,5 +1,5 @@
 import { parseNaverReviewRequests } from "../src/lib/email-parser.ts";
-import { calculateReviewRefund, getReviewProgressStage, hasNewlyCompletedReview, validateReviewProgress } from "../src/lib/review-event-policy.ts";
+import { calculateReviewRefund, getReviewProgressStage, getReviewRefundAccountMessageDecision, hasNewlyCompletedReview, validateReviewProgress } from "../src/lib/review-event-policy.ts";
 
 function assertEqual(label, actual, expected) {
   if (actual !== expected) {
@@ -119,6 +119,33 @@ assertEqual(
     { visitorReviewCompleted: true, blogReviewCompleted: true },
   ),
   false,
+);
+
+const noCompletedReview = { visitorReviewCompleted: false, blogReviewCompleted: false };
+const visitorReviewCompleted = { visitorReviewCompleted: true, blogReviewCompleted: false };
+assertEqual(
+  "first completion requires a message choice",
+  getReviewRefundAccountMessageDecision(noCompletedReview, visitorReviewCompleted, undefined),
+  "ACTION_REQUIRED",
+);
+assertEqual(
+  "first completion can send account request",
+  getReviewRefundAccountMessageDecision(noCompletedReview, visitorReviewCompleted, "SEND"),
+  "SEND",
+);
+assertEqual(
+  "first completion can skip account request",
+  getReviewRefundAccountMessageDecision(noCompletedReview, visitorReviewCompleted, "SKIP"),
+  "SKIP",
+);
+assertEqual(
+  "later second completion never sends another account request",
+  getReviewRefundAccountMessageDecision(
+    visitorReviewCompleted,
+    { visitorReviewCompleted: true, blogReviewCompleted: true },
+    "SEND",
+  ),
+  "NONE",
 );
 
 console.log("Review event tracking tests passed.");

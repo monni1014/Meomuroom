@@ -40,3 +40,17 @@ export function hasNewlyCompletedReview(
   const nowCompleted = next.visitorReviewCompleted || next.blogReviewCompleted;
   return !previouslyCompleted && nowCompleted;
 }
+
+export type ReviewRefundAccountMessageAction = "SEND" | "SKIP" | undefined;
+export type ReviewRefundAccountMessageDecision = "NONE" | "ACTION_REQUIRED" | "SEND" | "SKIP";
+
+export function getReviewRefundAccountMessageDecision(
+  previous: Pick<ReviewProgress, "visitorReviewCompleted" | "blogReviewCompleted">,
+  next: Pick<ReviewProgress, "visitorReviewCompleted" | "blogReviewCompleted">,
+  action: ReviewRefundAccountMessageAction,
+): ReviewRefundAccountMessageDecision {
+  if (!hasNewlyCompletedReview(previous, next)) return "NONE";
+  if (action === "SEND") return "SEND";
+  if (action === "SKIP") return "SKIP";
+  return "ACTION_REQUIRED";
+}
