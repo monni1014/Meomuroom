@@ -1,5 +1,5 @@
 [Unit]
-Description=Memoroom SpaceCloud manual-block identity reconciliation
+Description=Memoroom SpaceCloud automatic session renewal
 After=network-online.target memoroom-app.service
 Wants=network-online.target
 
@@ -9,15 +9,14 @@ User=memoroom
 Group=memoroom
 WorkingDirectory=/srv/memoroom/app
 Environment=NODE_ENV=production
+Environment=TZ=Asia/Seoul
 Environment=HOME=/srv/memoroom
 Environment=XDG_CONFIG_HOME=/srv/memoroom/.config
 Environment=XDG_CACHE_HOME=/srv/memoroom/.cache
 Environment=PLAYWRIGHT_BROWSERS_PATH=/srv/memoroom/.cache/ms-playwright
 Environment=RPA_EXECUTION_ENABLED=true
-Environment=RPA_HEADLESS=false
-Environment=SPACECLOUD_RECONCILE_STATE_PATH=/srv/memoroom/shared/spacecloud-manual-reconcile-state.json
-ExecStart=/usr/bin/xvfb-run -a /usr/bin/node scripts/reconcile-spacecloud-manual-blocks.mjs --apply --ensure-missing --limit=50
-TimeoutStartSec=2h
+ExecStart=/usr/bin/node /srv/memoroom/app/rpa/spacecloud-login-auto.mjs
+TimeoutStartSec=10m
 TimeoutStopSec=45
 KillMode=control-group
 SendSIGKILL=true
@@ -26,7 +25,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/srv/memoroom/app/dev.db /srv/memoroom/app/dev.db-wal /srv/memoroom/app/dev.db-shm /srv/memoroom/app/rpa/.locks /srv/memoroom/app/rpa/.runtime /srv/memoroom/app/rpa/screenshots /srv/memoroom/shared
+ReadWritePaths=/srv/memoroom/app/rpa/.locks /srv/memoroom/app/rpa/.runtime /srv/memoroom/app/rpa/screenshots /srv/memoroom/shared
 
 [Install]
 WantedBy=multi-user.target

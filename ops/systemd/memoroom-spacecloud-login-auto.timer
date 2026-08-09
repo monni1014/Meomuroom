@@ -1,0 +1,12 @@
+[Unit]
+Description=Check and renew the Memoroom SpaceCloud session every 30 minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=30m
+Persistent=true
+AccuracySec=1m
+Unit=memoroom-spacecloud-login-auto.service
+
+[Install]
+WantedBy=timers.target
