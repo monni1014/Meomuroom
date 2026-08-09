@@ -33,6 +33,7 @@ export async function registerNodeInstrumentation() {
   const { runRpaUiHealthChecks } = await import("@/lib/rpa-ui-monitor");
   const { checkTailscaleDevicesAndAlert } = await import("@/lib/tailscale-device-monitor");
   const { checkRpaSessionExpiryWarnings } = await import("@/lib/rpa-session-expiry-monitor");
+  const { checkAndRepairSpaceCloudLogin } = await import("@/lib/spacecloud-auto-login-monitor");
   const { recoverPendingReviewSlotSalesModes } = await import("@/lib/naver-rpa-sync");
 
   let running = false;
@@ -46,6 +47,7 @@ export async function registerNodeInstrumentation() {
   let rpaUiHealthRunning = false;
   let tailscaleDeviceMonitorRunning = false;
   let rpaSessionExpiryRunning = false;
+  let spaceCloudAutoLoginRunning = false;
   let reviewSlotSalesRecoveryRunning = false;
   const pendingCompetitorScans: Array<{
     label: string;
@@ -306,6 +308,25 @@ export async function registerNodeInstrumentation() {
     }
   }
 
+  async function runSpaceCloudAutoLoginMonitor(label: string) {
+    if (spaceCloudAutoLoginRunning) {
+      console.log(`[Cron] Previous SpaceCloud automatic login check is still running. Skipping ${label}.`);
+      return;
+    }
+
+    spaceCloudAutoLoginRunning = true;
+    try {
+      const result = await checkAndRepairSpaceCloudLogin();
+      console.log(
+        `[Cron] SpaceCloud automatic login check ${result.skipped ? "skipped" : "done"} (${label}): ${"repaired" in result && result.repaired ? "repaired" : result.reason || "healthy"}`,
+      );
+    } catch (error) {
+      console.error(`[Cron] SpaceCloud automatic login check failed (${label}):`, error);
+    } finally {
+      spaceCloudAutoLoginRunning = false;
+    }
+  }
+
   async function resumeProxyPausedCronWork() {
     if (isRpaPausedForProxy()) return;
 
@@ -362,6 +383,10 @@ export async function registerNodeInstrumentation() {
   }, 35_000);
 
   setTimeout(() => {
+    void runSpaceCloudAutoLoginMonitor("startup");
+  }, 90_000);
+
+  setTimeout(() => {
     void runReviewSlotSalesRecovery("startup recovery");
   }, 45_000);
 
@@ -401,6 +426,10 @@ export async function registerNodeInstrumentation() {
     await runRpaSessionExpiryMonitor("21:00 daily warning check");
   }, {
     timezone: "Asia/Seoul",
+  });
+
+  schedule("*/30 * * * *", async () => {
+    await runSpaceCloudAutoLoginMonitor("30-minute session repair");
   });
 
   schedule("0 10,22 * * *", async () => {

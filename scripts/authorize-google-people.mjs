@@ -22,6 +22,15 @@ const port = Number(argument("port", "53682"));
 const redirectUri = `http://127.0.0.1:${port}/oauth2/callback`;
 const state = crypto.randomBytes(32).toString("hex");
 const credentials = JSON.parse(await fs.readFile(credentialsPath, "utf8"));
+const existingToken = await fs.readFile(tokenPath, "utf8")
+  .then(JSON.parse)
+  .catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  });
+const expectedEmail = String(
+  process.env.GOOGLE_PEOPLE_EXPECTED_EMAIL || existingToken?.email || "",
+).trim().toLowerCase();
 
 if (!credentials.client_id || !credentials.client_secret) {
   throw new Error("Google OAuth client_id/client_secret is missing.");
@@ -32,9 +41,10 @@ authorizationUrl.search = new URLSearchParams({
   client_id: credentials.client_id,
   redirect_uri: redirectUri,
   response_type: "code",
-  scope: "openid email https://www.googleapis.com/auth/contacts",
+  scope: "openid email https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/gmail.readonly",
   access_type: "offline",
   prompt: "consent select_account",
+  ...(expectedEmail ? { login_hint: expectedEmail } : {}),
   state,
 }).toString();
 
@@ -82,6 +92,9 @@ const server = http.createServer(async (request, response) => {
     if (!userInfoResponse.ok || !userInfo.email) {
       throw new Error(userInfo.error_description || userInfo.error || "Google account email could not be verified.");
     }
+    if (expectedEmail && String(userInfo.email).trim().toLowerCase() !== expectedEmail) {
+      throw new Error("The authorized Google account does not match the existing Memoroom contact account.");
+    }
 
     const storedToken = {
       access_token: token.access_token,
@@ -99,7 +112,7 @@ const server = http.createServer(async (request, response) => {
     await fs.chmod(tokenPath, 0o600);
 
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    response.end("<!doctype html><meta charset=utf-8><title>머무룸 연락처 연결 완료</title><style>body{font-family:sans-serif;padding:48px;line-height:1.7}</style><h1>연결 완료</h1><p>와이프 Google 계정 연락처 연결이 완료되었습니다. 이 창을 닫아도 됩니다.</p>");
+    response.end("<!doctype html><meta charset=utf-8><title>머무룸 Google 연결 완료</title><style>body{font-family:sans-serif;padding:48px;line-height:1.7}</style><h1>연결 완료</h1><p>와이프 Google 계정의 연락처 및 카카오 로그인 인증메일 연결이 완료되었습니다. 이 창을 닫아도 됩니다.</p>");
     console.log(JSON.stringify({ connected: true, email: userInfo.email }));
   } catch (error) {
     response.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
