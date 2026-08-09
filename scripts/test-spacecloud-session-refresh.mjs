@@ -112,8 +112,27 @@ for (const source of [externalSource, detailSource]) {
 }
 assert.match(externalSource, /Official retry succeeded after/);
 assert.match(externalSource, /await throwIfSpaceCloudMutationFailed/);
-for (const source of [loginSource, autoLoginSource, sessionSource]) {
+for (const source of [loginSource, sessionSource]) {
   assert.match(source, /secureAuthFileForService/);
 }
+assert.match(autoLoginSource, /checkpointSpaceCloudSession\(context,/);
+assert.match(autoLoginSource, /includePersistedState:\s*!controlledExpiredSessionTest/);
+assert.match(autoLoginSource, /element\.click\(\)/);
+assert.match(autoLoginSource, /SPACECLOUD_KAKAO_LOGIN_ID/);
+assert.match(autoLoginSource, /SPACECLOUD_KAKAO_LOGIN_PASSWORD/);
+assert.match(autoLoginSource, /await loginInput\.fill\(loginId\)/);
+assert.match(autoLoginSource, /await passwordInput\.fill\(password\)/);
+assert.match(autoLoginSource, /checkbox\.evaluate\(\(element\) => element\.click\(\)\)/);
+assert.match(autoLoginSource, /return !domain\.includes\("spacecloud\.kr"\)/);
+assert.match(autoLoginSource, /kind:\s*"authenticated"/);
+assert.match(autoLoginSource, /kind:\s*"email-verification"/);
+assert.match(autoLoginSource, /automatic-kakao-saved-login/);
+assert.match(autoLoginSource, /submittedKakaoLoginPages = new WeakSet/);
+assert.match(autoLoginSource, /accounts\\\.kakao\\\.com/);
+assert.match(autoLoginSource, /getByRole\("button", \{ name: \/\^로그인\$\/ \}\)/);
+assert.match(autoLoginSource, /authenticatedPartnerFromLiveState/);
+assert.match(autoLoginSource, /if \(kakaoLoginStillOpen\) return null/);
+assert.match(autoLoginSource, /diagnostic:\s*"kakao-login-rejected"/);
+assert.match(autoLoginSource, /redacted-email/);
 
 console.log("SpaceCloud session refresh tests passed.");

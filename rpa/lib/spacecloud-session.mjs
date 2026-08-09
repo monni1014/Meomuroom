@@ -279,9 +279,10 @@ function refreshBeforeMsFromEnv() {
 export async function ensureSpaceCloudAccessToken(context, {
   nowMs = Date.now(),
   refreshBeforeMs = refreshBeforeMsFromEnv(),
+  includePersistedState = true,
 } = {}) {
   const liveState = await context.storageState({ indexedDB: true });
-  const persistedState = existsSync(spaceCloudStorageStatePath)
+  const persistedState = includePersistedState && existsSync(spaceCloudStorageStatePath)
     ? parseJson(readFileSync(spaceCloudStorageStatePath, "utf8"))
     : null;
   // A newly started persistent context has not visited the partner origin yet,
