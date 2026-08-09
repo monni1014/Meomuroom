@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { classifyRpaFailure } from "@/lib/rpa-failure-classifier";
 import { reportRpaScriptFailure, resolveRpaScriptAlerts } from "@/lib/rpa-ui-alerts";
 import { getRpaProxyCircuitState, isRpaPausedForProxy } from "@/lib/rpa-proxy-circuit";
+import { isRpaMaintenanceActive } from "@/lib/rpa-maintenance-lock";
 
 const execFileAsync = promisify(execFile);
 
@@ -94,6 +95,10 @@ async function executeHealthScript(platform: RpaHealthPlatform) {
 }
 
 export async function runRpaUiHealthChecks() {
+  if (isRpaMaintenanceActive()) {
+    return { skipped: true, reason: "memory-optimization", results: [] };
+  }
+
   if (isRpaPausedForProxy()) {
     return {
       skipped: true,
@@ -117,4 +122,8 @@ export async function runRpaUiHealthChecks() {
   } finally {
     g.__memoroomRpaUiMonitorRunning = false;
   }
+}
+
+export function isRpaUiHealthMonitorRunning() {
+  return Boolean((globalThis as RpaUiMonitorGlobal).__memoroomRpaUiMonitorRunning);
 }

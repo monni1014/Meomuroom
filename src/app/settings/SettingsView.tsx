@@ -421,6 +421,11 @@ export default function SettingsView({
     tone: "info" | "success" | "error";
     text: string;
   } | null>(null);
+  const [isOptimizingMemory, setIsOptimizingMemory] = useState(false);
+  const [memoryOptimizationMessage, setMemoryOptimizationMessage] = useState<{
+    tone: "info" | "success" | "error";
+    text: string;
+  } | null>(null);
   const [savingRoom, setSavingRoom] = useState<string | null>(null);
   const [savingSituation, setSavingSituation] = useState<string | null>(null);
   const [isSavingProxyPayment, setIsSavingProxyPayment] = useState(false);
@@ -506,14 +511,14 @@ export default function SettingsView({
   }, []);
 
   useEffect(() => {
-    if (activeTab !== "server" || isRecoveringServer) return;
+    if (activeTab !== "server" || isRecoveringServer || isOptimizingMemory) return;
     const initialTimer = window.setTimeout(() => void loadServerStatus(), 0);
     const timer = window.setInterval(() => void loadServerStatus(), 30_000);
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
     };
-  }, [activeTab, isRecoveringServer, loadServerStatus]);
+  }, [activeTab, isOptimizingMemory, isRecoveringServer, loadServerStatus]);
 
   const runSafeServerRecovery = async () => {
     const confirmed = window.confirm(
@@ -586,6 +591,93 @@ export default function SettingsView({
       });
     } finally {
       setIsRecoveringServer(false);
+    }
+  };
+
+  const runSafeMemoryOptimization = async () => {
+    if (!serverStatus || serverStatus.memory.usedPercent < 60) return;
+    const confirmed = window.confirm(
+      "예약·취소 RPA가 완전히 쉬는 동안 네이버·스클 브라우저 메모리만 안전하게 정리합니다. 계속할까요?",
+    );
+    if (!confirmed) return;
+
+    setIsOptimizingMemory(true);
+    setMemoryOptimizationMessage({ tone: "info", text: "RAM 안전 정리 가능 여부를 확인하고 있습니다." });
+
+    try {
+      const response = await fetch("/api/settings/memory-optimization", {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Memoroom-Memory-Optimization": "safe-browser-restart-v1",
+        },
+        body: JSON.stringify({ confirmation: "SAFE_MEMORY_OPTIMIZATION" }),
+      });
+      const data = await response.json() as {
+        success?: boolean;
+        requestId?: string;
+        message?: string;
+        error?: string;
+      };
+      if (!response.ok || !data.success || !data.requestId) {
+        throw new Error(data.error || "RAM 안전 정리를 시작하지 못했습니다.");
+      }
+
+      setMemoryOptimizationMessage({ tone: "info", text: data.message || "RAM을 안전하게 정리하고 있습니다." });
+      const deadline = Date.now() + 210_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+        const statusResponse = await fetch(
+          `/api/settings/memory-optimization?requestId=${encodeURIComponent(data.requestId)}`,
+          {
+            cache: "no-store",
+            headers: { "X-Memoroom-Memory-Optimization": "safe-browser-restart-v1" },
+          },
+        );
+        if (!statusResponse.ok) continue;
+        const status = await statusResponse.json() as {
+          status?: "PENDING" | "RUNNING" | "COMPLETED" | "CANCELLED" | "FAILED";
+          message?: string;
+          beforeUsedBytes?: number;
+          afterUsedBytes?: number;
+          reclaimedBytes?: number;
+        };
+        if (status.status === "RUNNING" && status.message) {
+          setMemoryOptimizationMessage({ tone: "info", text: status.message });
+        }
+        if (status.status === "COMPLETED") {
+          const memoryResult = status.beforeUsedBytes !== undefined && status.afterUsedBytes !== undefined
+            ? ` RAM ${formatBytes(status.beforeUsedBytes)} → ${formatBytes(status.afterUsedBytes)}${status.reclaimedBytes ? ` · ${formatBytes(status.reclaimedBytes)} 정리` : ""}`
+            : "";
+          setMemoryOptimizationMessage({
+            tone: "success",
+            text: `${status.message || "RAM 안전 정리를 완료했습니다."}${memoryResult}`,
+          });
+          await loadServerStatus();
+          return;
+        }
+        if (status.status === "CANCELLED" || status.status === "FAILED") {
+          setMemoryOptimizationMessage({
+            tone: "error",
+            text: status.message || "RAM 안전 정리를 완료하지 못했습니다.",
+          });
+          await loadServerStatus();
+          return;
+        }
+      }
+
+      setMemoryOptimizationMessage({
+        tone: "error",
+        text: "정리 결과를 자동으로 확인하지 못했습니다. 잠시 후 ‘지금 점검’을 눌러주세요.",
+      });
+    } catch (error) {
+      setMemoryOptimizationMessage({
+        tone: "error",
+        text: error instanceof Error ? error.message : "RAM 안전 정리를 시작하지 못했습니다.",
+      });
+    } finally {
+      setIsOptimizingMemory(false);
     }
   };
 
@@ -1655,6 +1747,66 @@ export default function SettingsView({
                   className="hidden sm:block"
                 />
               )}
+
+              <section className="overflow-hidden rounded-xl border border-violet-200 bg-white shadow-sm">
+                <div className="bg-gradient-to-br from-violet-50 via-white to-indigo-50 p-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="rounded-full bg-violet-100 p-3 text-violet-700">
+                        <MemoryStick className="h-6 w-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="text-base font-black text-slate-950">RAM 안전 정리</h2>
+                        <p className="mt-1 text-2xl font-black tracking-tight text-slate-950">
+                          {serverStatus.memory.usedPercent}% 사용
+                        </p>
+                        <p className="mt-1 text-xs font-semibold text-slate-500">
+                          여유 {formatBytes(serverStatus.memory.availableBytes)} · 60% 이상일 때 사용 가능
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void runSafeMemoryOptimization()}
+                      disabled={serverStatus.memory.usedPercent < 60 || isOptimizingMemory || isRecoveringServer}
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
+                    >
+                      <RefreshCw className={cn("h-4 w-4", isOptimizingMemory && "animate-spin")} />
+                      {isOptimizingMemory
+                        ? "RAM 정리 중"
+                        : serverStatus.memory.usedPercent < 60
+                          ? "현재 정리 불필요"
+                          : "RAM 정리"}
+                    </button>
+                  </div>
+                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all duration-500",
+                        serverStatus.memory.usedPercent >= 85
+                          ? "bg-rose-500"
+                          : serverStatus.memory.usedPercent >= 60
+                            ? "bg-amber-500"
+                            : "bg-violet-500",
+                      )}
+                      style={{ width: `${Math.min(100, Math.max(0, serverStatus.memory.usedPercent))}%` }}
+                    />
+                  </div>
+                  <p className="mt-3 text-xs font-semibold leading-5 text-slate-500">
+                    예약 작업이 없을 때 오래 떠 있던 RPA 브라우저만 새로 열고, 앱·DB·로그인 세션을 다시 확인합니다.
+                  </p>
+                  {memoryOptimizationMessage && (
+                    <div className={cn(
+                      "mt-4 rounded-lg border px-3 py-2 text-sm font-bold",
+                      memoryOptimizationMessage.tone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-800",
+                      memoryOptimizationMessage.tone === "error" && "border-rose-200 bg-rose-50 text-rose-800",
+                      memoryOptimizationMessage.tone === "info" && "border-violet-200 bg-violet-50 text-violet-800",
+                    )}>
+                      {memoryOptimizationMessage.text}
+                    </div>
+                  )}
+                </div>
+              </section>
 
               <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center gap-2">

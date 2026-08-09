@@ -9,6 +9,7 @@ import {
   sessionExpiryWarningDay,
   type RpaSessionPlatform,
 } from "@/lib/rpa-session-expiry-policy";
+import { isRpaMaintenanceActive } from "@/lib/rpa-maintenance-lock";
 
 const execFileAsync = promisify(execFile);
 const INSPECT_SCRIPT = "scripts/inspect-rpa-session-expiry.mjs";
@@ -27,6 +28,10 @@ type InspectionPayload = {
 const PLATFORM_LABELS: Record<RpaSessionPlatform, string> = {
   naver: "네이버",
   spacecloud: "스클",
+};
+
+type SessionExpiryMonitorGlobal = typeof globalThis & {
+  __memoroomSessionExpiryMonitorRunning?: boolean;
 };
 
 function formatExpiryKst(expiresAtMs: number) {
@@ -65,46 +70,64 @@ async function resolveOtherExpiryWarnings(platform: RpaSessionPlatform, keepKey?
 }
 
 export async function checkRpaSessionExpiryWarnings(nowMs = Date.now()) {
-  const payload = await inspectSessions();
-  const results = [];
-
-  for (const platform of ["naver", "spacecloud"] as const) {
-    const session = payload.sessions?.find((item) => item.platform === platform);
-    const expiresAtMs = session?.expiresAt ? new Date(session.expiresAt).getTime() : Number.NaN;
-    if (!Number.isFinite(expiresAtMs)) {
-      results.push({ platform, status: "UNKNOWN" as const });
-      continue;
-    }
-
-    const remainingDays = remainingKstCalendarDays(expiresAtMs, nowMs);
-    const warningDay = sessionExpiryWarningDay(expiresAtMs, nowMs);
-    if (warningDay === null) {
-      if (remainingDays > 3) await resolveOtherExpiryWarnings(platform);
-      results.push({
-        platform,
-        status: remainingDays <= 0 ? "EXPIRED" as const : "HEALTHY" as const,
-        remainingDays,
-        expiresAt: session?.expiresAt,
-      });
-      continue;
-    }
-
-    const dedupeKey = sessionExpiryAlertKey(platform, expiresAtMs, warningDay);
-    await resolveOtherExpiryWarnings(platform, dedupeKey);
-    await createAdminAlert({
-      type: "RPA_LOGIN_EXPIRY_WARNING",
-      severity: "WARNING",
-      title: `${PLATFORM_LABELS[platform]} 로그인 만료 ${warningDay}일 전`,
-      message: `${PLATFORM_LABELS[platform]} 로그인 세션이 ${formatExpiryKst(expiresAtMs)}에 만료됩니다. 만료 전에 재로그인해 주세요.`,
-      dedupeKey,
-    });
-    results.push({
-      platform,
-      status: "WARNING" as const,
-      remainingDays: warningDay,
-      expiresAt: session?.expiresAt,
-    });
+  if (isRpaMaintenanceActive()) {
+    return { skipped: true, reason: "memory-optimization", results: [] };
   }
 
-  return { results };
+  const g = globalThis as SessionExpiryMonitorGlobal;
+  if (g.__memoroomSessionExpiryMonitorRunning) {
+    return { skipped: true, reason: "already-running", results: [] };
+  }
+
+  g.__memoroomSessionExpiryMonitorRunning = true;
+  try {
+    const payload = await inspectSessions();
+    const results = [];
+
+    for (const platform of ["naver", "spacecloud"] as const) {
+      const session = payload.sessions?.find((item) => item.platform === platform);
+      const expiresAtMs = session?.expiresAt ? new Date(session.expiresAt).getTime() : Number.NaN;
+      if (!Number.isFinite(expiresAtMs)) {
+        results.push({ platform, status: "UNKNOWN" as const });
+        continue;
+      }
+
+      const remainingDays = remainingKstCalendarDays(expiresAtMs, nowMs);
+      const warningDay = sessionExpiryWarningDay(expiresAtMs, nowMs);
+      if (warningDay === null) {
+        if (remainingDays > 3) await resolveOtherExpiryWarnings(platform);
+        results.push({
+          platform,
+          status: remainingDays <= 0 ? "EXPIRED" as const : "HEALTHY" as const,
+          remainingDays,
+          expiresAt: session?.expiresAt,
+        });
+        continue;
+      }
+
+      const dedupeKey = sessionExpiryAlertKey(platform, expiresAtMs, warningDay);
+      await resolveOtherExpiryWarnings(platform, dedupeKey);
+      await createAdminAlert({
+        type: "RPA_LOGIN_EXPIRY_WARNING",
+        severity: "WARNING",
+        title: `${PLATFORM_LABELS[platform]} 로그인 만료 ${warningDay}일 전`,
+        message: `${PLATFORM_LABELS[platform]} 로그인 세션이 ${formatExpiryKst(expiresAtMs)}에 만료됩니다. 만료 전에 재로그인해 주세요.`,
+        dedupeKey,
+      });
+      results.push({
+        platform,
+        status: "WARNING" as const,
+        remainingDays: warningDay,
+        expiresAt: session?.expiresAt,
+      });
+    }
+
+    return { skipped: false, results };
+  } finally {
+    g.__memoroomSessionExpiryMonitorRunning = false;
+  }
+}
+
+export function isRpaSessionExpiryMonitorRunning() {
+  return Boolean((globalThis as SessionExpiryMonitorGlobal).__memoroomSessionExpiryMonitorRunning);
 }

@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for Memoroom safe memory optimization requests
+
+[Path]
+PathExists=/srv/memoroom/shared/memory-optimization.request
+Unit=memoroom-memory-optimization.service
+
+[Install]
+WantedBy=multi-user.target

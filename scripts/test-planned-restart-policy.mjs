@@ -28,5 +28,10 @@ assert.deepEqual(plannedRestartBusyReasons({
   ...idle,
   sendingCustomerNotifications: 1,
 }), ["customer-sms-sending"]);
+assert.deepEqual(plannedRestartBusyReasons({
+  ...idle,
+  rpaUiHealthCheckRunning: true,
+  rpaSessionCheckRunning: true,
+}), ["rpa-ui-health-check-running", "rpa-session-check-running"]);
 
 console.log("Planned restart policy tests passed.");

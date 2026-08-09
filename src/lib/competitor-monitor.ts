@@ -19,6 +19,7 @@ import { competitorCancellationFeeRate } from "@/lib/competitor-cancellation";
 import { prisma } from "@/lib/prisma";
 import { sendPushNotification } from "@/lib/push-notifications";
 import { getRpaProxyCircuitState, isRpaPausedForProxy } from "@/lib/rpa-proxy-circuit";
+import { isRpaMaintenanceActive } from "@/lib/rpa-maintenance-lock";
 import {
   crossCheckSynergySpacecloudWithNaver,
   SPACECLOUD_ONLY_CLOSED_REASON,
@@ -1239,6 +1240,13 @@ async function runSynergySpacecloudRangeScan(
 }
 
 export function runCompetitorScan(options: RunOptions): Promise<CompetitorScanResult> {
+  if (isRpaMaintenanceActive()) {
+    return Promise.resolve({
+      skipped: true,
+      status: "MAINTENANCE_PAUSED",
+      reason: "안전 RAM 정리 중",
+    });
+  }
   if (isRpaPausedForProxy()) {
     const circuit = getRpaProxyCircuitState();
     return Promise.resolve({

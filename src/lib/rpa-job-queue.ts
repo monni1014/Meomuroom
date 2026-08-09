@@ -20,6 +20,7 @@ import {
   isCancellationPriorityJob,
   selectNextRpaJobIndex,
 } from "./rpa-job-priority";
+import { isRpaMaintenanceActive } from "./rpa-maintenance-lock";
 
 export type RpaEmailJob = {
   messageId: string;
@@ -51,6 +52,8 @@ type RpaQueueState = {
   naverStatusReconcilePending: boolean;
   lastNaverStatusReconcileAt: number;
   proxyPauseLogged: boolean;
+  maintenancePauseLogged: boolean;
+  maintenanceResumeTimers: Partial<Record<RpaEmailJob["source"], ReturnType<typeof setTimeout>>>;
   confirmationRunsWhileCancellationWaiting: Record<RpaEmailJob["source"], number>;
 };
 
@@ -242,6 +245,8 @@ function getState() {
     naverStatusReconcilePending: false,
     lastNaverStatusReconcileAt: 0,
     proxyPauseLogged: false,
+    maintenancePauseLogged: false,
+    maintenanceResumeTimers: {},
     confirmationRunsWhileCancellationWaiting: { naver: 0, spacecloud: 0 },
   };
   const state = g.__memoroomRpaQueue;
@@ -250,6 +255,8 @@ function getState() {
   state.slotRecheckPending ??= false;
   state.naverStatusReconcilePending ??= false;
   state.proxyPauseLogged ??= false;
+  state.maintenancePauseLogged ??= false;
+  state.maintenanceResumeTimers ??= {};
   state.confirmationRunsWhileCancellationWaiting ??= { naver: 0, spacecloud: 0 };
   return state;
 }
@@ -321,6 +328,20 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
   state.runningSources.add(source);
   try {
     while (true) {
+      if (isRpaMaintenanceActive()) {
+        if (!state.maintenancePauseLogged) {
+          console.warn("[RPAQueue] Safe memory optimization is running. Keep queued RPA jobs waiting.");
+          state.maintenancePauseLogged = true;
+        }
+        if (!state.maintenanceResumeTimers[source]) {
+          state.maintenanceResumeTimers[source] = setTimeout(() => {
+            delete state.maintenanceResumeTimers[source];
+            void drainRpaEmailQueue(source);
+          }, 2_000);
+        }
+        break;
+      }
+      state.maintenancePauseLogged = false;
       if (isRpaPausedForProxy()) {
         if (!state.proxyPauseLogged) {
           const circuit = getRpaProxyCircuitState();
@@ -451,7 +472,7 @@ async function drainRpaEmailQueue(source: RpaEmailJob["source"]) {
 
 function startSlotRecheck(state: RpaQueueState) {
   if (state.slotRecheckRunning) return false;
-  if (isRpaPausedForProxy()) {
+  if (isRpaPausedForProxy() || isRpaMaintenanceActive()) {
     state.slotRecheckPending = true;
     return true;
   }
@@ -485,7 +506,7 @@ export function enqueueRpaSlotRecheck() {
 
 function startNaverStatusReconcile(state: RpaQueueState) {
   if (state.naverStatusReconcileRunning) return false;
-  if (isRpaPausedForProxy()) {
+  if (isRpaPausedForProxy() || isRpaMaintenanceActive()) {
     state.naverStatusReconcilePending = true;
     return true;
   }
@@ -522,7 +543,7 @@ export function enqueueNaverStatusReconcile() {
 
 export function resumeRpaWorkAfterProxyRecovery() {
   const state = getState();
-  if (isRpaPausedForProxy()) return false;
+  if (isRpaPausedForProxy() || isRpaMaintenanceActive()) return false;
 
   state.proxyPauseLogged = false;
   const queuedSources = new Set(state.queue.map((job) => job.source));
@@ -562,6 +583,7 @@ export function getRpaQueueStatus() {
     naverStatusReconcileRunning: state.naverStatusReconcileRunning,
     naverStatusReconcilePending: state.naverStatusReconcilePending,
     proxyCircuit: getRpaProxyCircuitState(),
+    maintenancePaused: isRpaMaintenanceActive(),
     oldestCancellationWaitMs,
     cancellationMaxWaitMs: CANCELLATION_MAX_QUEUE_WAIT_MS,
     maxConfirmationRunsBeforeCancellation: MAX_CONFIRMATION_RUNS_BEFORE_CANCELLATION,

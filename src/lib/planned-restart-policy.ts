@@ -9,6 +9,8 @@ export type PlannedRestartActivity = {
   };
   competitorScanRunning: boolean;
   sendingCustomerNotifications: number;
+  rpaUiHealthCheckRunning?: boolean;
+  rpaSessionCheckRunning?: boolean;
 };
 
 export function plannedRestartBusyReasons(activity: PlannedRestartActivity) {
@@ -20,5 +22,7 @@ export function plannedRestartBusyReasons(activity: PlannedRestartActivity) {
   if (activity.queue.naverStatusReconcileRunning) reasons.push("naver-status-reconcile-running");
   if (activity.competitorScanRunning) reasons.push("competitor-scan-running");
   if (activity.sendingCustomerNotifications > 0) reasons.push("customer-sms-sending");
+  if (activity.rpaUiHealthCheckRunning) reasons.push("rpa-ui-health-check-running");
+  if (activity.rpaSessionCheckRunning) reasons.push("rpa-session-check-running");
   return reasons;
 }
