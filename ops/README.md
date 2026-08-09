@@ -49,6 +49,29 @@ systemctl status memoroom-manual-recovery.service
 journalctl -u memoroom-manual-recovery.service -n 50 --no-pager
 ```
 
+## Automatic memory cleanup
+
+`memoroom-memory-auto-monitor.timer` checks Linux memory once per minute. When
+used RAM remains at or above 75% for 10 continuous minutes, it waits until the
+reservation, message, and competitor RPA queues are idle and writes a request
+for the existing safe memory optimization service. The optimizer restarts the
+Naver and SpaceCloud browser hosts sequentially, then verifies the app, SQLite,
+and both login sessions. A six-hour cooldown prevents restart loops. Falling
+below 75% resets the continuous-high-memory timer; an RPA-busy result is retried
+on a later monitor pass without interrupting the live job.
+
+The Settings > Cloud computer manual cleanup button remains available as an
+operator fallback from 60% used RAM.
+
+Useful checks:
+
+```sh
+systemctl status memoroom-memory-auto-monitor.timer
+systemctl status memoroom-memory-auto-monitor.service
+cat /srv/memoroom/shared/memory-optimization-auto-state.json
+journalctl -u memoroom-memory-auto-monitor.service -n 50 --no-pager
+```
+
 ## Freeze recovery
 
 `memoroom-healthcheck.timer` calls the local `/api/health` endpoint every minute.

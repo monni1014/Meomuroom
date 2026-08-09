@@ -42,6 +42,7 @@
     "test:proxy-health-alert": "node --experimental-strip-types scripts/test-proxy-health-alert-policy.mjs",
     "test:rpa-proxy-circuit": "node --experimental-strip-types scripts/test-rpa-proxy-circuit-policy.mjs",
     "test:tailscale-device-monitor": "node --experimental-strip-types scripts/test-tailscale-device-monitor-policy.mjs",
+    "test:memory-auto-monitor": "node scripts/test-memory-auto-monitor.mjs",
     "rpa:configure-proxy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-rpa-proxy.ps1",
     "rpa:test-proxy": "node rpa/test-proxy.mjs",
     "rpa:proxy-status": "node rpa/proxy-seller-status.mjs",

@@ -1761,7 +1761,7 @@ export default function SettingsView({
                           {serverStatus.memory.usedPercent}% 사용
                         </p>
                         <p className="mt-1 text-xs font-semibold text-slate-500">
-                          여유 {formatBytes(serverStatus.memory.availableBytes)} · 60% 이상일 때 사용 가능
+                          여유 {formatBytes(serverStatus.memory.availableBytes)} · 수동 정리는 60%부터 가능
                         </p>
                       </div>
                     </div>
@@ -1794,6 +1794,9 @@ export default function SettingsView({
                   </div>
                   <p className="mt-3 text-xs font-semibold leading-5 text-slate-500">
                     예약 작업이 없을 때 오래 떠 있던 RPA 브라우저만 새로 열고, 앱·DB·로그인 세션을 다시 확인합니다.
+                  </p>
+                  <p className="mt-2 inline-flex rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700">
+                    자동 정리 켜짐 · RAM 75% 이상 10분 지속 · 6시간 재실행 제한
                   </p>
                   {memoryOptimizationMessage && (
                     <div className={cn(

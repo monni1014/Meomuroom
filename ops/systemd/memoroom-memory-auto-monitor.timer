@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Memoroom RAM every minute
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=memoroom-memory-auto-monitor.service
+
+[Install]
+WantedBy=timers.target
