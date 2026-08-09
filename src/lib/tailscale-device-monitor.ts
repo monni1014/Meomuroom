@@ -24,6 +24,7 @@ type DeviceTarget = {
   label: string;
   recipientPhone: string;
   enabled?: boolean;
+  offlineThresholdMinutes?: number;
   match?: DeviceMatch;
   autoDiscover?: DeviceMatch & { excludeDnsNames?: string[]; excludeHostNames?: string[] };
 };
@@ -137,7 +138,10 @@ async function readTailscaleStatus() {
 }
 
 function buildOfflineMessage(thresholdMinutes: number) {
-  return `[머무룸] Tailscale이 ${thresholdMinutes}분째 꺼져 있습니다. 앱을 열어 연결을 켜주세요.`;
+  const duration = thresholdMinutes % 60 === 0
+    ? `${thresholdMinutes / 60}시간`
+    : `${thresholdMinutes}분`;
+  return `[머무룸] Tailscale이 ${duration}째 꺼져 있습니다. 앱을 열어 연결을 켜주세요.`;
 }
 
 function buildReminderMessage() {
@@ -161,10 +165,11 @@ export async function checkTailscaleDevicesAndAlert(now = new Date()) {
     const previous = state[target.id];
     const peer = findTargetPeer(target, previous, peers);
     const explicitlyRegistered = Boolean(target.match);
+    const offlineThresholdMinutes = target.offlineThresholdMinutes ?? config.offlineThresholdMinutes;
     const decision = evaluateTailscaleDeviceObservation({
       deviceId: target.id,
       now,
-      offlineThresholdMinutes: config.offlineThresholdMinutes,
+      offlineThresholdMinutes,
       reminderDelayMinutes: config.reminderDelayMinutes ?? 60,
       previous,
       observation: {
@@ -187,13 +192,13 @@ export async function checkTailscaleDevicesAndAlert(now = new Date()) {
         type: "TAILSCALE_DEVICE_OFFLINE",
         severity: "CRITICAL",
         title: `Tailscale 연결 끊김 · ${target.label}`,
-        message: `${target.label}의 Tailscale 연결이 ${config.offlineThresholdMinutes}분 이상 끊어졌습니다. 앱을 열어 연결을 켜주세요.`,
+        message: `${target.label}의 Tailscale 연결이 ${offlineThresholdMinutes}분 이상 끊어졌습니다. 앱을 열어 연결을 켜주세요.`,
         dedupeKey: decision.state.alertDedupeKey,
       });
 
       const sms = await sendOperationalAlertSms({
         to: target.recipientPhone,
-        text: buildOfflineMessage(config.offlineThresholdMinutes),
+        text: buildOfflineMessage(offlineThresholdMinutes),
       });
       if (sms.success && !sms.dryRun) {
         state[target.id] = {

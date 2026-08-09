@@ -22,6 +22,24 @@ const shortOffline = evaluateTailscaleDeviceObservation({
 });
 assert.equal(shortOffline.shouldAlert, false);
 
+const iphoneAlmostThreeHoursOffline = evaluateTailscaleDeviceObservation({
+  deviceId: "wife-iphone",
+  now: new Date(start.getTime() + 179 * 60_000),
+  offlineThresholdMinutes: 180,
+  previous: firstOffline.state,
+  observation: { registered: true, online: false },
+});
+assert.equal(iphoneAlmostThreeHoursOffline.shouldAlert, false);
+
+const iphoneThreeHoursOffline = evaluateTailscaleDeviceObservation({
+  deviceId: "wife-iphone",
+  now: new Date(start.getTime() + 180 * 60_000),
+  offlineThresholdMinutes: 180,
+  previous: iphoneAlmostThreeHoursOffline.state,
+  observation: { registered: true, online: false },
+});
+assert.equal(iphoneThreeHoursOffline.shouldAlert, true);
+
 const longOffline = evaluateTailscaleDeviceObservation({
   deviceId: "wife-iphone",
   now: new Date(start.getTime() + 15 * 60_000),

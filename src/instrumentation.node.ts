@@ -459,7 +459,7 @@ export async function registerNodeInstrumentation() {
   console.log("[Cron] ISP proxy status monitor started (5 minute interval)");
   console.log("[Cron] Naver status reconcile started (10:00/22:00 daily)");
   console.log("[Cron] RPA UI health monitor started (02:20/08:20/14:20/20:20 read-only checks)");
-  console.log("[Cron] Tailscale device monitor started (5 minute interval, alert after 15 continuous offline minutes)");
+  console.log("[Cron] Tailscale device monitor started (5 minute interval, per-device offline grace period)");
   console.log("[Cron] Naver/SpaceCloud login expiry monitor started (21:00 daily, warnings at 3/2/1 days before expiry)");
   console.log("[Cron] Competitor monitor started (each run: Naver Synergy/Tryground, then Synergy SpaceCloud cross-check; 07:00 today+tomorrow, 12:00/15:00/18:00 today+7 days, 23:00 tomorrow through month-end or next-month day 15 in the final 7 days, monthly baseline at 07:00 on day 1)");
 }
