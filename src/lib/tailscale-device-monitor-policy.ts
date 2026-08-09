@@ -7,6 +7,7 @@ export type TailscaleDeviceMonitorState = {
   offlineSince: string | null;
   consecutiveOffline: number;
   alertDedupeKey: string | null;
+  alertHandledAt: string | null;
   smsSentAt: string | null;
   reminderSmsSentAt: string | null;
   lastSmsError: string | null;
@@ -58,6 +59,7 @@ export function evaluateTailscaleDeviceObservation(input: {
         offlineSince: null,
         consecutiveOffline: 0,
         alertDedupeKey: null,
+        alertHandledAt: null,
         smsSentAt: null,
         reminderSmsSentAt: null,
         lastSmsError: null,
@@ -81,6 +83,7 @@ export function evaluateTailscaleDeviceObservation(input: {
         offlineSince: null,
         consecutiveOffline: 0,
         alertDedupeKey: null,
+        alertHandledAt: null,
         smsSentAt: null,
         reminderSmsSentAt: null,
         lastSmsError: null,
@@ -114,12 +117,13 @@ export function evaluateTailscaleDeviceObservation(input: {
       offlineSince,
       consecutiveOffline: (previous.consecutiveOffline || 0) + 1,
       alertDedupeKey,
+      alertHandledAt: previous.alertHandledAt || previous.smsSentAt || null,
       smsSentAt: previous.smsSentAt || null,
       reminderSmsSentAt: previous.reminderSmsSentAt || null,
       lastSmsError: previous.lastSmsError || null,
       lastRecoveredAt: previous.lastRecoveredAt || null,
     },
-    shouldAlert: thresholdReached && !previous.smsSentAt,
+    shouldAlert: thresholdReached && !previous.alertHandledAt && !previous.smsSentAt,
     shouldRemind,
     recoveredAlertKey: null,
   };

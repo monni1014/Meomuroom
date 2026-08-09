@@ -24,6 +24,7 @@ type DeviceTarget = {
   label: string;
   recipientPhone: string;
   enabled?: boolean;
+  smsEnabled?: boolean;
   offlineThresholdMinutes?: number;
   match?: DeviceMatch;
   autoDiscover?: DeviceMatch & { excludeDnsNames?: string[]; excludeHostNames?: string[] };
@@ -196,26 +197,35 @@ export async function checkTailscaleDevicesAndAlert(now = new Date()) {
         dedupeKey: decision.state.alertDedupeKey,
       });
 
-      const sms = await sendOperationalAlertSms({
-        to: target.recipientPhone,
-        text: buildOfflineMessage(offlineThresholdMinutes),
-      });
-      if (sms.success && !sms.dryRun) {
+      if (target.smsEnabled === false) {
         state[target.id] = {
           ...state[target.id],
-          smsSentAt: now.toISOString(),
+          alertHandledAt: now.toISOString(),
           lastSmsError: null,
         };
-        smsSent = true;
       } else {
-        state[target.id] = {
-          ...state[target.id],
-          lastSmsError: sms.dryRun ? "Solapi real send is disabled for this recipient." : sms.error || "Unknown Solapi error",
-        };
+        const sms = await sendOperationalAlertSms({
+          to: target.recipientPhone,
+          text: buildOfflineMessage(offlineThresholdMinutes),
+        });
+        if (sms.success && !sms.dryRun) {
+          state[target.id] = {
+            ...state[target.id],
+            alertHandledAt: now.toISOString(),
+            smsSentAt: now.toISOString(),
+            lastSmsError: null,
+          };
+          smsSent = true;
+        } else {
+          state[target.id] = {
+            ...state[target.id],
+            lastSmsError: sms.dryRun ? "Solapi real send is disabled for this recipient." : sms.error || "Unknown Solapi error",
+          };
+        }
       }
     }
 
-    if (decision.shouldRemind) {
+    if (decision.shouldRemind && target.smsEnabled !== false) {
       const reminderSms = await sendOperationalAlertSms({
         to: target.recipientPhone,
         text: buildReminderMessage(),

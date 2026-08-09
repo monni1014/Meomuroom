@@ -50,6 +50,16 @@ const longOffline = evaluateTailscaleDeviceObservation({
 assert.equal(longOffline.shouldAlert, true);
 assert.match(longOffline.state.alertDedupeKey || "", /^tailscale-device-offline:wife-iphone:/);
 
+const handledWithoutSms = evaluateTailscaleDeviceObservation({
+  deviceId: "owner-galaxy",
+  now: new Date(start.getTime() + 16 * 60_000),
+  offlineThresholdMinutes: 15,
+  previous: { ...longOffline.state, alertHandledAt: new Date(start.getTime() + 15 * 60_000).toISOString() },
+  observation: { registered: true, online: false },
+});
+assert.equal(handledWithoutSms.shouldAlert, false);
+assert.equal(handledWithoutSms.shouldRemind, false);
+
 const firstSmsAt = new Date(start.getTime() + 15 * 60_000);
 const sentState = { ...longOffline.state, smsSentAt: firstSmsAt.toISOString() };
 const noDuplicate = evaluateTailscaleDeviceObservation({
