@@ -59,7 +59,6 @@ export async function prepareCompetitorEvidenceViewport(page, {
       item.element.dataset.memoroomEvidenceTarget = "true";
       item.element.style.setProperty("outline", "4px solid #ef4444", "important");
       item.element.style.setProperty("outline-offset", "2px", "important");
-      item.element.style.setProperty("background-color", "rgba(254, 226, 226, 0.72)", "important");
     }
 
     const overlay = document.createElement("div");
@@ -90,7 +89,6 @@ export async function prepareCompetitorEvidenceViewport(page, {
         : "빨간 테두리가 확인 대상 슬롯입니다.",
       payload.reasonCode,
     ].join("  |  ");
-    document.body.appendChild(overlay);
 
     return {
       ok: true,
@@ -151,7 +149,6 @@ export async function clearCompetitorEvidenceViewport(page) {
       delete element.dataset.memoroomEvidenceTarget;
       element.style.removeProperty("outline");
       element.style.removeProperty("outline-offset");
-      element.style.removeProperty("background-color");
     }
   }, EVIDENCE_OVERLAY_ID).catch(() => {});
 }
