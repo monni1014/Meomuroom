@@ -16,6 +16,7 @@ const PARTNER_RESERVATIONS = "https://partner.spacecloud.kr/reservation/";
 const LOGIN_TIMEOUT_MS = 4 * 60 * 1000;
 const controlledExpiredSessionTest = process.argv.includes("--test-expired-session");
 const submittedKakaoLoginPages = new WeakSet();
+const submittedKakaoSimplePages = new WeakSet();
 
 function buildExpiredSpaceCloudTestState(filePath) {
   const state = JSON.parse(readFileSync(filePath, "utf8"));
@@ -34,6 +35,10 @@ function buildExpiredSpaceCloudTestState(filePath) {
 
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function loginRequired(error) {
@@ -131,7 +136,7 @@ async function clickTarget(locator, timeoutMs = 10_000) {
 async function clickText(context, pattern, timeoutMs = 30_000) {
   const target = await waitForTextTarget(context, pattern, timeoutMs);
   await clickTarget(target.locator);
-  await target.page.waitForTimeout(700);
+  await new Promise((resolve) => setTimeout(resolve, 700));
   return target.page;
 }
 
@@ -153,6 +158,44 @@ function kakaoLoginCredentials() {
     );
   }
   return { loginId, password };
+}
+
+async function advanceKakaoSimpleLogin(page) {
+  if (!/^https:\/\/accounts\.kakao\.com\/login\/simple\//i.test(page.url())) return false;
+  if (submittedKakaoSimplePages.has(page)) return true;
+
+  let candidates;
+  if (controlledExpiredSessionTest) {
+    const newAccountPattern = /^\uC0C8\uB85C\uC6B4\s*\uACC4\uC815\uC73C\uB85C\s*\uB85C\uADF8\uC778$/;
+    candidates = [
+      page.getByRole("button", { name: newAccountPattern }).first(),
+      page.getByRole("link", { name: newAccountPattern }).first(),
+      page.getByText(newAccountPattern).first(),
+    ];
+  } else {
+    const { loginId } = kakaoLoginCredentials();
+    const savedAccountPattern = new RegExp(escapeRegExp(loginId), "i");
+    candidates = [
+      page.getByRole("button", { name: savedAccountPattern }).first(),
+      page.getByRole("link", { name: savedAccountPattern }).first(),
+      page.getByText(savedAccountPattern, { exact: false }).first(),
+    ];
+  }
+
+  const target = await (async () => {
+    for (const candidate of candidates) {
+      if (await visible(candidate)) return candidate;
+    }
+    return null;
+  })();
+  if (!target) {
+    throw new Error("Kakao saved-account selection did not appear.");
+  }
+
+  submittedKakaoSimplePages.add(page);
+  await clickTarget(target);
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  return true;
 }
 
 async function fillKakaoLoginForm(page) {
@@ -186,7 +229,7 @@ async function fillKakaoLoginForm(page) {
   }
   submittedKakaoLoginPages.add(page);
   await clickTarget(loginButton);
-  await page.waitForTimeout(2_000);
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
   if (/^https:\/\/accounts\.kakao\.com\/login\//i.test(page.url()) && await visible(passwordInput)) {
     if (controlledExpiredSessionTest) {
       const pageText = await page.locator("body").innerText().catch(() => "");
@@ -229,7 +272,8 @@ async function waitForKakaoEmailAuthentication(context, timeoutMs = 45_000) {
     }
 
     for (const page of openPages(context)) {
-      await fillKakaoLoginForm(page);
+      await advanceKakaoSimpleLogin(page);
+      if (!page.isClosed()) await fillKakaoLoginForm(page);
     }
 
     const authenticatedPage = await authenticatedPartnerFromLiveState(context);
