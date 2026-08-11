@@ -4,6 +4,10 @@ import { humanClickElement } from "./lib/human.mjs";
 import { acquireProcessLock } from "./lib/process-lock.mjs";
 import { readFile } from "node:fs/promises";
 import { saveScreenshot } from "./lib/screenshot.mjs";
+import {
+  clearCompetitorEvidenceViewport,
+  prepareCompetitorEvidenceViewport,
+} from "./lib/competitor-evidence.mjs";
 
 const RESULT_PREFIX = "__COMPETITOR_SCAN_RESULT__";
 const TRACKED_START_HOUR = 8;
@@ -80,14 +84,29 @@ function detectEvidenceReason(competitorId, targetKey, observations, previousSta
   return null;
 }
 
-async function captureEvidence(page, competitorId, targetKey, reason) {
+async function captureEvidence(page, competitor, targetKey, reason) {
   try {
+    const hasTargetRange = Boolean(targetKey)
+      && Number.isInteger(reason.startHour)
+      && Number.isInteger(reason.endHour)
+      && reason.endHour > reason.startHour;
+    let focus = null;
+    if (hasTargetRange) {
+      focus = await prepareCompetitorEvidenceViewport(page, {
+        competitorName: competitor.name,
+        dateKey: targetKey,
+        startHour: reason.startHour,
+        endHour: reason.endHour,
+        reasonCode: reason.reasonCode,
+      });
+    }
     const imagePath = await saveScreenshot(
       page,
-      `competitor-evidence-${competitorId}-${targetKey || "page"}-${reason.reasonCode.toLowerCase()}`,
+      `competitor-evidence-${competitor.id}-${targetKey || "page"}-${reason.reasonCode.toLowerCase()}`,
+      hasTargetRange ? { fullPage: false } : {},
     );
     return {
-      competitorId,
+      competitorId: competitor.id,
       dateKey: targetKey || null,
       startHour: reason.startHour ?? null,
       endHour: reason.endHour ?? null,
@@ -95,13 +114,16 @@ async function captureEvidence(page, competitorId, targetKey, reason) {
       reason: reason.reason,
       imagePath,
       capturedAt: new Date().toISOString(),
+      screenshotFocus: focus,
     };
   } catch (error) {
     console.error(
-      `[Competitor] Evidence screenshot failed for ${competitorId} ${targetKey || "page"}:`,
+      `[Competitor] Evidence screenshot failed for ${competitor.id} ${targetKey || "page"}:`,
       error instanceof Error ? error.message : error,
     );
     return null;
+  } finally {
+    await clearCompetitorEvidenceViewport(page);
   }
 }
 
@@ -394,7 +416,7 @@ async function scanCompetitor(context, competitor, targetDates, previousStates, 
         startHour: null,
         endHour: null,
       };
-      const captured = await captureEvidence(page, competitor.id, null, reason);
+      const captured = await captureEvidence(page, competitor, null, reason);
       if (captured) evidence.push(captured);
       errors.push({ competitorId: competitor.id, dateKey: null, message });
       return { observations, evidence, errors };
@@ -417,7 +439,7 @@ async function scanCompetitor(context, competitor, targetDates, previousStates, 
 
         const reason = detectEvidenceReason(competitor.id, targetKey, dateObservations, previousStates);
         if (reason) {
-          const captured = await captureEvidence(page, competitor.id, targetKey, reason);
+          const captured = await captureEvidence(page, competitor, targetKey, reason);
           if (captured) evidence.push(captured);
         }
       } catch (error) {
@@ -428,7 +450,7 @@ async function scanCompetitor(context, competitor, targetDates, previousStates, 
           startHour: null,
           endHour: null,
         };
-        const captured = await captureEvidence(page, competitor.id, targetKey, reason);
+        const captured = await captureEvidence(page, competitor, targetKey, reason);
         if (captured) evidence.push(captured);
         errors.push({ competitorId: competitor.id, dateKey: targetKey, message });
 

@@ -24,6 +24,7 @@
     "test:competitor-cancellations": "node --experimental-strip-types scripts/test-competitor-cancellations.mjs",
     "test:competitor-booking-discovery": "node --experimental-strip-types scripts/test-competitor-booking-discovery.mjs",
     "test:competitor-booking-push": "node --experimental-strip-types scripts/test-competitor-booking-push.mjs",
+    "test:competitor-evidence": "node scripts/test-competitor-evidence-screenshot.mjs",
     "test:synergy-spacecloud": "node --experimental-strip-types scripts/test-synergy-spacecloud-availability.mjs",
     "test:spacecloud-booking-push": "node --experimental-strip-types scripts/test-spacecloud-booking-push.mjs",
     "test:spacecloud-cancellation-push": "node --experimental-strip-types scripts/test-spacecloud-cancellation-push.mjs",
