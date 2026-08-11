@@ -57,26 +57,27 @@ export async function prepareCompetitorEvidenceViewport(page, {
 
     for (const item of exact) {
       item.element.dataset.memoroomEvidenceTarget = "true";
-      item.element.style.setProperty("outline", "4px solid #ef4444", "important");
-      item.element.style.setProperty("outline-offset", "2px", "important");
     }
 
+    const targetRects = exact.map((item) => item.element.getBoundingClientRect());
+    const targetLeft = Math.min(...targetRects.map((rect) => rect.left));
+    const targetTop = Math.min(...targetRects.map((rect) => rect.top));
+    const targetRight = Math.max(...targetRects.map((rect) => rect.right));
+    const targetBottom = Math.max(...targetRects.map((rect) => rect.bottom));
     const overlay = document.createElement("div");
     overlay.id = payload.overlayId;
     overlay.setAttribute("data-memoroom-evidence-overlay", "true");
     overlay.style.cssText = [
       "position:fixed",
-      "left:16px",
-      "top:16px",
+      `left:${Math.round(targetLeft)}px`,
+      `top:${Math.round(targetTop)}px`,
+      `width:${Math.round(targetRight - targetLeft)}px`,
+      `height:${Math.round(targetBottom - targetTop)}px`,
       "z-index:2147483647",
-      "max-width:calc(100vw - 32px)",
-      "padding:12px 16px",
-      "border:3px solid #ef4444",
-      "border-radius:10px",
-      "background:#ffffff",
-      "color:#111827",
-      "font:700 18px/1.45 sans-serif",
-      "box-shadow:0 8px 30px rgba(0,0,0,.25)",
+      "box-sizing:border-box",
+      "border:4px solid #ef4444",
+      "border-radius:5px",
+      "background:transparent",
       "pointer-events:none",
     ].join(";");
     const foundHours = exact.map((item) => item.hour).sort((a, b) => a - b);
@@ -89,6 +90,8 @@ export async function prepareCompetitorEvidenceViewport(page, {
         : "빨간 테두리가 확인 대상 슬롯입니다.",
       payload.reasonCode,
     ].join("  |  ");
+    overlay.textContent = "";
+    document.body.appendChild(overlay);
 
     return {
       ok: true,

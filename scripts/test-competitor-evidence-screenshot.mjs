@@ -46,13 +46,21 @@ try {
   assert.deepEqual(result.missingHours, []);
   assert.ok(result.visibility.every((item) => item.visible));
   assert.equal(await page.locator("[data-memoroom-evidence-target=true]").count(), 2);
-  assert.equal(await page.locator("[data-memoroom-evidence-overlay=true]").count(), 0);
-  for (const hour of [18, 19]) {
-    const outlineColor = await page.locator(`[data-memoroom-evidence-hour="${hour}"]`).evaluate(
-      (element) => getComputedStyle(element).outlineColor,
-    );
-    assert.equal(outlineColor, "rgb(239, 68, 68)");
-  }
+  assert.equal(await page.locator("[data-memoroom-evidence-overlay=true]").count(), 1);
+  const targetRangeStyle = await page.locator("[data-memoroom-evidence-overlay=true]").evaluate(
+    (element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return {
+        borderColor: style.borderColor,
+        width: rect.width,
+        height: rect.height,
+      };
+    },
+  );
+  assert.equal(targetRangeStyle.borderColor, "rgb(239, 68, 68)");
+  assert.ok(targetRangeStyle.width > 0);
+  assert.ok(targetRangeStyle.height > 0);
 
   const imagePath = join(workDir, "focused.png");
   await page.screenshot({ path: imagePath, fullPage: false });
