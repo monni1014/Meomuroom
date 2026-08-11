@@ -295,6 +295,7 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState<Date>(initialDate);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [cleaningSchedules, setCleaningSchedules] = useState<CleaningSchedule[]>([]);
+  const [holidayNamesByDate, setHolidayNamesByDate] = useState<Record<string, readonly string[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isScheduleTypeModalOpen, setIsScheduleTypeModalOpen] = useState(false);
@@ -668,6 +669,30 @@ export default function CalendarPage() {
   const calendarStart = addDays(firstDay, -firstDay.getDay());
   const calendarEnd = addDays(lastDay, 6 - lastDay.getDay());
   const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+  const calendarHolidayYearKey = `${calendarStart.getFullYear()},${calendarEnd.getFullYear()}`;
+
+  useEffect(() => {
+    let isDisposed = false;
+    const years = Array.from(new Set(calendarHolidayYearKey.split(",")));
+
+    void fetch(`/api/calendar/holidays?years=${years.join(",")}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("공휴일 정보를 불러오지 못했습니다.");
+        return response.json() as Promise<{ holidays?: Record<string, readonly string[]> }>;
+      })
+      .then((payload) => {
+        if (isDisposed) return;
+        setHolidayNamesByDate(payload.holidays ?? {});
+      })
+      .catch(() => {
+        if (isDisposed) return;
+        setHolidayNamesByDate({});
+      });
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [calendarHolidayYearKey]);
 
   const nextMonth = () => {
     setCalendarSlideDirection("next");
@@ -1386,6 +1411,8 @@ export default function CalendarPage() {
             const isToday = isSameDay(day, new Date());
             const isSelected = isSameDay(day, selectedDate);
             const isSameMonthOfActive = isSameMonth(day, currentDate);
+            const holidayNames = holidayNamesByDate[format(day, "yyyy-MM-dd")] ?? [];
+            const isHoliday = holidayNames.length > 0;
 
             // Filter reservations for this day
             const dayReservations = filteredReservations
@@ -1401,6 +1428,8 @@ export default function CalendarPage() {
               <button
                 key={day.toISOString()}
                 onClick={() => selectCalendarDay(day)}
+                title={isHoliday ? holidayNames.join(", ") : undefined}
+                data-holiday-name={isHoliday ? holidayNames.join(", ") : undefined}
                 className={cn(
                   "relative flex min-h-[86px] flex-col items-stretch rounded-lg p-0.5 transition-all active:scale-95 sm:min-h-[55px] sm:items-center sm:justify-between sm:rounded-xl sm:p-1.5",
                   isSelected
@@ -1414,7 +1443,15 @@ export default function CalendarPage() {
                 )}
               >
                 <div className="relative inline-flex w-fit self-center items-center justify-center">
-                  <span data-testid="calendar-day-number" className={cn("text-sm font-semibold", (day.getDay() === 0 || day.getDay() === 6) && !isSelected && "text-rose-500")}>
+                  <span
+                    data-testid="calendar-day-number"
+                    className={cn(
+                      "text-sm font-semibold",
+                      isHoliday
+                        ? "text-orange-600"
+                        : (day.getDay() === 0 || day.getDay() === 6) && !isSelected && "text-rose-500"
+                    )}
+                  >
                     {format(day, "d")}
                   </span>
                   {(hasUnpaid || hasUnpaidExtra) && (
