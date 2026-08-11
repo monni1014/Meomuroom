@@ -31,6 +31,7 @@ import {
   getMonthlyTableOperationalDateKey,
   isMonthlyTableCellWeekend,
 } from "@/lib/monthly-table-operational-time";
+import { buildMonthlyTablePaintChanges } from "@/lib/monthly-table-fake-block";
 
 interface UsageLog {
   id: string;
@@ -397,13 +398,26 @@ export default function MonthlyTableView() {
 
   const applyPaintToCell = (sectionId: string, day: Date, cellKey: string) => {
     if (paintSelection === null) return;
-    const key = manualCellKey(sectionId, day, cellKey);
-    const currentCell = manualCells[key] || emptyManualCell();
-    const nextCell = {
-      ...currentCell,
-      color: paintSelection === "clear" ? null : paintSelection,
-    };
-    updateManualCell(sectionId, day, cellKey, { color: nextCell.color });
+    const changes = buildMonthlyTablePaintChanges({
+      cells: manualCells,
+      sectionId,
+      dateKey: format(day, "yyyy-MM-dd"),
+      cellKey,
+      selection: paintSelection,
+    });
+    const changedEntries = Object.entries(changes);
+    if (changedEntries.length === 0) return;
+
+    setManualCells((previous) => ({ ...previous, ...changes }));
+    setDirtyKeys((previous) => {
+      let next = previous;
+      for (const [key, cell] of changedEntries) {
+        const savedCell = { ...emptyManualCell(), ...savedManualCells[key] };
+        next = reconcileDirtyKey(next, key, !manualCellDataEquals(savedCell, cell));
+      }
+      return next;
+    });
+    setEditMessage(null);
   };
 
   const undoChanges = () => {
