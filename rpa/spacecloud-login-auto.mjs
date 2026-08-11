@@ -164,23 +164,23 @@ async function advanceKakaoSimpleLogin(page) {
   if (!/^https:\/\/accounts\.kakao\.com\/login\/simple\//i.test(page.url())) return false;
   if (submittedKakaoSimplePages.has(page)) return true;
 
-  let candidates;
-  if (controlledExpiredSessionTest) {
-    const newAccountPattern = /^\uC0C8\uB85C\uC6B4\s*\uACC4\uC815\uC73C\uB85C\s*\uB85C\uADF8\uC778$/;
-    candidates = [
-      page.getByRole("button", { name: newAccountPattern }).first(),
-      page.getByRole("link", { name: newAccountPattern }).first(),
-      page.getByText(newAccountPattern).first(),
-    ];
-  } else {
+  const newAccountPattern = /^\uC0C8\uB85C\uC6B4\s*\uACC4\uC815\uC73C\uB85C\s*\uB85C\uADF8\uC778$/;
+  const newAccountCandidates = [
+    page.getByRole("button", { name: newAccountPattern }).first(),
+    page.getByRole("link", { name: newAccountPattern }).first(),
+    page.getByText(newAccountPattern).first(),
+  ];
+  const candidates = [];
+  if (!controlledExpiredSessionTest) {
     const { loginId } = kakaoLoginCredentials();
     const savedAccountPattern = new RegExp(escapeRegExp(loginId), "i");
-    candidates = [
+    candidates.push(
       page.getByRole("button", { name: savedAccountPattern }).first(),
       page.getByRole("link", { name: savedAccountPattern }).first(),
       page.getByText(savedAccountPattern, { exact: false }).first(),
-    ];
+    );
   }
+  candidates.push(...newAccountCandidates);
 
   const target = await (async () => {
     for (const candidate of candidates) {
@@ -189,7 +189,7 @@ async function advanceKakaoSimpleLogin(page) {
     return null;
   })();
   if (!target) {
-    throw new Error("Kakao saved-account selection did not appear.");
+    throw new Error("Kakao account-login selection did not appear.");
   }
 
   submittedKakaoSimplePages.add(page);

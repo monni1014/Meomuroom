@@ -128,6 +128,7 @@ assert.match(autoLoginSource, /kind:\s*"authenticated"/);
 assert.match(autoLoginSource, /kind:\s*"email-verification"/);
 assert.match(autoLoginSource, /automatic-kakao-saved-login/);
 assert.match(autoLoginSource, /submittedKakaoLoginPages = new WeakSet/);
+assert.match(autoLoginSource, /candidates\.push\(\.\.\.newAccountCandidates\)/);
 assert.match(autoLoginSource, /accounts\\\.kakao\\\.com/);
 assert.match(autoLoginSource, /getByRole\("button", \{ name: \/\^로그인\$\/ \}\)/);
 assert.match(autoLoginSource, /authenticatedPartnerFromLiveState/);
